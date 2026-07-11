@@ -1,0 +1,42 @@
+<main>
+  <h1>Documents</h1>
+
+  <p>
+    <a href="/ui/documents/unofficial-transcript/print" target="_blank" rel="noopener">
+      Print unofficial transcript
+    </a>
+  </p>
+
+  <form
+    id="document-request-form"
+    method="post"
+    action="/ui/document-requests"
+    x-target="document-request-list"
+    x-target.422="document-request-form"
+  >
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+    <label for="document-type">Official document</label>
+    <select id="document-type" name="document_type" required>
+      <option value="official_transcript">Official transcript</option>
+      <option value="enrollment_letter">Proof of enrollment</option>
+      <option value="signed_document">Other signed document</option>
+    </select>
+
+    <label for="purpose">Purpose</label>
+    <textarea id="purpose" name="purpose" maxlength="500"></textarea>
+
+    <label for="delivery-method">Delivery</label>
+    <select id="delivery-method" name="delivery_method" required>
+      <option value="download">Secure download</option>
+      <option value="pickup">Pickup</option>
+      <option value="email">Email</option>
+    </select>
+
+    <button type="submit">Submit request</button>
+  </form>
+
+  <section id="document-request-list" aria-live="polite">
+      {% include "fragments/document_request_list.html" %}
+  </section>
+</main>

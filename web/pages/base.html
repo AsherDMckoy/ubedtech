@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script defer src="/assets/alpine-ajax.js"></script>
+  <script defer src="/assets/alpine-csp.js"></script>
+  <title>{% block title %}University of Belize{% endblock %}</title>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <div id="notifications" x-sync role="status" aria-live="polite"></div>
+
+  <header>
+    <nav aria-label="Primary">
+      <a href="/dashboard">Dashboard</a>
+      <a href="/registration">Registration</a>
+      <a href="/schedule">Schedule</a>
+      <a href="/grades">Grades</a>
+      <a href="/documents">Documents</a>
+    </nav>
+  </header>
+
+  <main id="main">
+      {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

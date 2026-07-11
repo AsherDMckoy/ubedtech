@@ -1,0 +1,18 @@
+<main>
+  <h1>Grades</h1>
+
+  <form method="get" action="/ui/grades/table" x-target="grades-table">
+    <label for="term-id">Term</label>
+    <select id="term-id" name="term_id" @change="$el.form.requestSubmit()">
+      {% for term in terms %}
+      <option value="{{ term.id }}" {% if term.current %}selected{% endif %}>
+        {{ term.name }}
+      </option>
+      {% endfor %}
+    </select>
+  </form>
+
+  <section id="grades-table" aria-live="polite">
+      {% include "fragments/grades_table.html" %}
+  </section>
+</main>

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Unofficial Transcript</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <style>
+    @media print {
+      .no-print { display: none; }
+      @page { margin: 18mm; }
+    }
+    .watermark {
+      position: fixed;
+      inset: 40% 0 auto 0;
+      text-align: center;
+      font-size: 72px;
+      opacity: 0.08;
+      transform: rotate(-25deg);
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="watermark">UNOFFICIAL</div>
+
+  <button class="no-print" type="button" onclick="window.print()">Print</button>
+
+  <header>
+    <h1>University of Belize</h1>
+    <h2>Unofficial Transcript</h2>
+    <p>Generated {{ generated_at }}</p>
+  </header>
+
+  <dl>
+    <dt>Student</dt><dd>{{ student_name }}</dd>
+    <dt>Student number</dt><dd>{{ student_number }}</dd>
+    <dt>Program</dt><dd>{{ program_code }}</dd>
+  </dl>
+
+  <table>
+    <thead>
+      <tr>
+        <th scope="col">Term</th>
+        <th scope="col">Course</th>
+        <th scope="col">Credits</th>
+        <th scope="col">Grade</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in courses %}
+      <tr>
+        <td>{{ row.term_code }}</td>
+        <td>{{ row.course_code }} — {{ row.course_title }}</td>
+        <td>{{ row.credit_hours }}</td>
+        <td>{{ row.grade_code }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

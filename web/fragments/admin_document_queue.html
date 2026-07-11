@@ -1,0 +1,39 @@
+<section id="document-queue">
+  <h1>Pending document requests</h1>
+
+  {% for request in requests %}
+  <article>
+    <h2>{{ request.document_type_label }}</h2>
+    <p>Student: {{ request.student_number }}</p>
+    <p>Requested: {{ request.requested_at }}</p>
+    <p>{{ request.purpose }}</p>
+
+    <form
+      method="post"
+      action="/ui/admin/document-requests/{{ request.id }}/approve"
+      x-target="document-queue"
+    >
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>
+        Approval note
+        <textarea name="note"></textarea>
+      </label>
+      <button type="submit">Approve</button>
+    </form>
+
+    <form
+      method="post"
+      action="/ui/admin/document-requests/{{ request.id }}/reject"
+      x-target="document-queue"
+      x-target.422="document-queue"
+    >
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>
+        Rejection reason
+        <textarea name="note" required></textarea>
+      </label>
+      <button type="submit">Reject</button>
+    </form>
+  </article>
+  {% endfor %}
+</section>
