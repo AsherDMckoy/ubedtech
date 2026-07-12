@@ -140,7 +140,7 @@ suffixes (download copies).
     for rendering (acceptable read adapters, but institution scoping there
     must be covered by tests in Phase 6).
 
-## Behavior snapshot (verified with curl, 2026-07-11)
+## Behavior snapshot at baseline (verified with curl, 2026-07-11, pre-Phase 1)
 
 | Probe | Result |
 |---|---|
@@ -151,3 +151,37 @@ suffixes (download copies).
 | `cargo test` | 1/1 pass (seat-race concurrency test) |
 | `cargo fmt --check` | FAIL |
 | `cargo clippy -D warnings` | FAIL (19 errors) |
+
+---
+
+## Phase 1 outcome (2026-07-11, same session)
+
+Everything above describes the baseline. Phase 1 changed the following;
+per-slice details are in the git history and `ARCHITECTURE_DECISIONS.md`
+(ADR-1 through ADR-7):
+
+- All four quality gates are green and enforced by CI
+  (`.github/workflows/ci.yml`, PostgreSQL 16 service, plus a release build).
+- Typed `AppConfig` (env-validated, dev-only `.env`, `.env.example` with no
+  secrets); dead `DEV_BYPASS_AUTH` removed. Bind address, pool bounds,
+  timeouts, storage path, worker id all configurable.
+- `db::connect_and_migrate` owns the bounded pool (with acquire timeout) and
+  the startup migration run.
+- `AppError` internal-class responses proven generic by tests; details go to
+  the server log inside the request span.
+- Request-id correlation middleware with redaction by construction replaced
+  `Logger::default()`; `RUST_LOG` is honored.
+- `GET /health/live` (no dependencies) and `GET /health/ready` (cached flag,
+  background DB prober; no per-probe DB work) replaced `/health`.
+- Security headers: CSP unchanged (already Alpine-CSP-compatible), plus
+  `X-Frame-Options`, `Permissions-Policy`, and production-only HSTS; global
+  body-size limits (64 KiB JSON/form, 256 KiB payload).
+- Document worker takes a shutdown signal; main drains HTTP then stops the
+  worker within `APP_SHUTDOWN_TIMEOUT_SECS`.
+- Test count: 1 → 22.
+
+**Still true (Phase 2+ scope, unchanged):** no authentication of any kind,
+license gate not enforced on requests (401-not-402 behavior above), defects
+1, 3, 4, 5, 6 from the list open. The §1 defect statuses and the
+"missing entirely" list above remain the authoritative gap record except
+where this section says otherwise.
