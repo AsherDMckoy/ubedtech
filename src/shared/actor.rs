@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(dead_code)] // variants are constructed once Phase 2 session middleware loads roles
 pub enum Role {
     Student,
     Instructor,

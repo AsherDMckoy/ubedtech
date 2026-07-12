@@ -1,11 +1,12 @@
-use actix_web::{post, web, HttpResponse};
 use crate::shared::{actor::Actor, error::AppError};
+use actix_web::{HttpResponse, post, web};
 use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::licensing::{LicenseService, LicenseStatus};
 
 #[derive(Deserialize)]
+#[allow(dead_code)] // constructed by Form extraction once this route registers in Phase 7.2
 pub struct LicenseStatusForm {
     status: String,
     reason: String,
@@ -28,12 +29,7 @@ pub async fn change_license_fragment(
     };
 
     let snapshot = service
-        .set_status(
-            &actor,
-            institution_id.into_inner(),
-            status,
-            &form.reason,
-        )
+        .set_status(&actor, institution_id.into_inner(), status, &form.reason)
         .await?;
 
     Ok(HttpResponse::Ok()

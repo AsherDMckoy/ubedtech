@@ -1,6 +1,6 @@
 use crate::audit::AuditWriter;
-use chrono::Utc;
 use crate::shared::{actor::Actor, error::AppError};
+use chrono::Utc;
 use serde::Serialize;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -92,9 +92,7 @@ impl EnrollmentService {
 
         let now = Utc::now();
         if now < context.registration_opens_at || now >= context.registration_closes_at {
-            return Err(AppError::Conflict(
-                "registration window is closed".into(),
-            ));
+            return Err(AppError::Conflict("registration window is closed".into()));
         }
 
         // Ensure the lock row exists, then lock it. All registration changes for
@@ -143,9 +141,7 @@ impl EnrollmentService {
             .await?;
 
             if !has_override {
-                return Err(AppError::Conflict(
-                    "student has a registration hold".into(),
-                ));
+                return Err(AppError::Conflict("student has a registration hold".into()));
             }
         }
 
@@ -362,11 +358,7 @@ impl EnrollmentService {
         })
     }
 
-    pub async fn drop_self(
-        &self,
-        actor: &Actor,
-        enrollment_id: Uuid,
-    ) -> Result<(), AppError> {
+    pub async fn drop_self(&self, actor: &Actor, enrollment_id: Uuid) -> Result<(), AppError> {
         let student_id = actor.require_student_self()?;
         self.drop_for(actor, student_id, enrollment_id).await
     }

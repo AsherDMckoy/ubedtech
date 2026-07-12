@@ -1,5 +1,5 @@
-use actix_web::{post, web, HttpResponse};
 use crate::shared::{actor::Actor, error::AppError};
+use actix_web::{HttpResponse, post, web};
 use serde::Deserialize;
 use uuid::Uuid;
 

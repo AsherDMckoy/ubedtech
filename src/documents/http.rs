@@ -1,9 +1,9 @@
-use actix_web::{post, web, HttpResponse};
-use askama::Template;
 use crate::shared::{
     actor::{Actor, Role},
     error::AppError,
 };
+use actix_web::{HttpResponse, post, web};
+use askama::Template;
 use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -76,7 +76,9 @@ pub async fn reject_fragment(
     form: web::Form<DecisionForm>,
 ) -> Result<HttpResponse, AppError> {
     let note = form.note.as_deref().unwrap_or_default();
-    service.reject(&actor, request_id.into_inner(), note).await?;
+    service
+        .reject(&actor, request_id.into_inner(), note)
+        .await?;
 
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
@@ -85,14 +87,12 @@ pub async fn reject_fragment(
 
 #[derive(sqlx::FromRow)]
 struct StudentRequestRow {
-    id: Uuid,
     document_type: String,
     status: String,
     requested_at: chrono::DateTime<chrono::Utc>,
 }
 
 struct StudentRequestView {
-    id: Uuid,
     document_type_label: &'static str,
     status: String,
     requested_at: String,
@@ -124,15 +124,12 @@ struct StudentRequestListTemplate<'a> {
     requests: &'a [StudentRequestView],
 }
 
-async fn render_student_request_list(
-    actor: &Actor,
-    pool: &PgPool,
-) -> Result<String, AppError> {
+async fn render_student_request_list(actor: &Actor, pool: &PgPool) -> Result<String, AppError> {
     let student_id = actor.require_student_self()?;
 
     let rows = sqlx::query_as::<_, StudentRequestRow>(
         r#"
-        SELECT id, document_type, status, requested_at
+        SELECT document_type, status, requested_at
         FROM document_request
         WHERE institution_id = $1 AND student_id = $2
         ORDER BY requested_at DESC
@@ -147,14 +144,16 @@ async fn render_student_request_list(
     let requests: Vec<_> = rows
         .into_iter()
         .map(|row| StudentRequestView {
-            id: row.id,
             document_type_label: document_type_label(&row.document_type),
             status: row.status,
             requested_at: row.requested_at.to_rfc3339(),
         })
         .collect();
 
-    Ok(StudentRequestListTemplate { requests: &requests }.render()?)
+    Ok(StudentRequestListTemplate {
+        requests: &requests,
+    }
+    .render()?)
 }
 
 #[derive(sqlx::FromRow)]

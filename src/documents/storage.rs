@@ -1,5 +1,5 @@
-use std::path::PathBuf;
 use crate::shared::error::AppError;
+use std::path::PathBuf;
 
 #[derive(Clone)]
 pub struct FilesystemDocumentStore {

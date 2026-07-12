@@ -1,6 +1,9 @@
 use crate::audit::AuditWriter;
+use crate::shared::{
+    actor::{Actor, Role},
+    error::AppError,
+};
 use chrono::{DateTime, Utc};
-use crate::shared::{actor::{Actor, Role}, error::AppError};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -8,6 +11,7 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct GradeService {
     pool: PgPool,
+    #[allow(dead_code)] // read by save_draft/publish_section, routed in Phase 5.1
     audit: AuditWriter,
 }
 
@@ -21,6 +25,7 @@ pub struct StudentGradeRow {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)] // accepted by grade-entry routes added in Phase 5.1
 pub struct SaveGradeCommand {
     pub enrollment_id: Uuid,
     pub grade_code: String,
@@ -69,6 +74,7 @@ impl GradeService {
         Ok(rows)
     }
 
+    #[allow(dead_code)] // routed by the Phase 5.1 grade-entry HTTP adapter
     pub async fn save_draft(
         &self,
         actor: &Actor,
@@ -217,11 +223,8 @@ impl GradeService {
         Ok(new_version)
     }
 
-    pub async fn publish_section(
-        &self,
-        actor: &Actor,
-        section_id: Uuid,
-    ) -> Result<u64, AppError> {
+    #[allow(dead_code)] // routed by the Phase 5.1 grade-publication HTTP adapter
+    pub async fn publish_section(&self, actor: &Actor, section_id: Uuid) -> Result<u64, AppError> {
         if !actor.has_role(Role::RecordsOfficer) {
             return Err(AppError::Forbidden);
         }
@@ -265,6 +268,7 @@ impl GradeService {
 }
 
 #[derive(sqlx::FromRow)]
+#[allow(dead_code)] // constructed by save_draft, routed in Phase 5.1
 struct ExistingGrade {
     id: Uuid,
     grade_code: String,

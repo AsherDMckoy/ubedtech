@@ -1,5 +1,5 @@
-use actix_web::{dev::Payload, FromRequest, HttpMessage, HttpRequest};
-use std::future::{ready, Ready};
+use actix_web::{FromRequest, HttpMessage, HttpRequest, dev::Payload};
+use std::future::{Ready, ready};
 
 use crate::shared::actor::Actor;
 

@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)] // consumed by the Phase 7.1 self-hosted license import path
 pub struct LicenseClaims {
     pub institution_id: Uuid,
     pub deployment_id: Uuid,
@@ -15,11 +16,13 @@ pub struct LicenseClaims {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[allow(dead_code)] // consumed by the Phase 7.1 self-hosted license import path
 pub struct SignedLicenseFile {
     pub claims: LicenseClaims,
     pub signature_hex: String,
 }
 
+#[allow(dead_code)] // wired into the Phase 7.1 license import endpoint
 pub fn verify_signed_license<'a>(
     file: &'a SignedLicenseFile,
     public_key: &VerifyingKey,

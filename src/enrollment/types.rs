@@ -16,11 +16,6 @@ pub struct EnrollmentReceipt {
     pub registered_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct DropCommand {
-    pub enrollment_id: Uuid,
-}
-
 #[derive(Debug, sqlx::FromRow)]
 pub struct RegistrationContext {
     pub term_id: Uuid,
@@ -28,5 +23,6 @@ pub struct RegistrationContext {
     pub section_status: String,
     pub registration_opens_at: DateTime<Utc>,
     pub registration_closes_at: DateTime<Utc>,
+    #[allow(dead_code)] // read by the Phase 4.1 add-during-drop/add window policy
     pub drop_add_closes_at: DateTime<Utc>,
 }

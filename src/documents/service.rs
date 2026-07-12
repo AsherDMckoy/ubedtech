@@ -1,6 +1,9 @@
 use crate::audit::AuditWriter;
-use crate::shared::{actor::{Actor, Role}, error::AppError};
 use crate::records::TranscriptSnapshotService;
+use crate::shared::{
+    actor::{Actor, Role},
+    error::AppError,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -269,7 +272,11 @@ fn validate_request(command: &RequestDocumentCommand) -> Result<(), AppError> {
         _ => return Err(AppError::Validation("unknown delivery method".into())),
     }
 
-    if command.purpose.as_deref().is_some_and(|value| value.len() > 500) {
+    if command
+        .purpose
+        .as_deref()
+        .is_some_and(|value| value.len() > 500)
+    {
         return Err(AppError::Validation("purpose is too long".into()));
     }
 

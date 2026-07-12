@@ -1,11 +1,15 @@
 use crate::audit::AuditWriter;
-use crate::shared::{actor::{Actor, Role}, error::AppError};
+use crate::shared::{
+    actor::{Actor, Role},
+    error::AppError,
+};
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::licensing::{LicenseGate, LicenseSnapshot, LicenseStatus};
 
 #[derive(Clone)]
+#[allow(dead_code)] // fields are read by set_status; routes register in Phase 7.2
 pub struct LicenseService {
     pool: PgPool,
     gate: LicenseGate,
@@ -17,6 +21,7 @@ impl LicenseService {
         Self { pool, gate, audit }
     }
 
+    #[allow(dead_code)] // exposed via licensing/http.rs once routes register in Phase 7.2
     pub async fn set_status(
         &self,
         actor: &Actor,

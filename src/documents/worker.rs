@@ -2,8 +2,7 @@ use std::{path::PathBuf, time::Duration};
 
 use crate::shared::error::AppError;
 use printpdf::{
-    BuiltinFont, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions,
-    Point, Pt, TextItem,
+    BuiltinFont, Mm, Op, PdfDocument, PdfFontHandle, PdfPage, PdfSaveOptions, Point, Pt, TextItem,
 };
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
@@ -94,7 +93,10 @@ impl DocumentWorker {
 
         match result {
             Ok(artifact) => self.complete(job, artifact).await?,
-            Err(error) => self.fail(job.job_id, job.request_id, &error.to_string()).await?,
+            Err(error) => {
+                self.fail(job.job_id, job.request_id, &error.to_string())
+                    .await?
+            }
         }
 
         Ok(true)
@@ -106,12 +108,12 @@ impl DocumentWorker {
         snapshot_id: Option<Uuid>,
     ) -> Result<Artifact, AppError> {
         let snapshot: Option<serde_json::Value> = match snapshot_id {
-            Some(id) => sqlx::query_scalar(
-                "SELECT snapshot_json FROM transcript_snapshot WHERE id = $1",
-            )
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await?,
+            Some(id) => {
+                sqlx::query_scalar("SELECT snapshot_json FROM transcript_snapshot WHERE id = $1")
+                    .bind(id)
+                    .fetch_optional(&self.pool)
+                    .await?
+            }
             None => None,
         };
 
@@ -166,12 +168,7 @@ impl DocumentWorker {
         Ok(())
     }
 
-    async fn fail(
-        &self,
-        job_id: Uuid,
-        request_id: Uuid,
-        message: &str,
-    ) -> Result<(), AppError> {
+    async fn fail(&self, job_id: Uuid, request_id: Uuid, message: &str) -> Result<(), AppError> {
         let mut tx = self.pool.begin().await?;
 
         sqlx::query(
@@ -193,12 +190,11 @@ impl DocumentWorker {
         .execute(&mut *tx)
         .await?;
 
-        let terminal: bool = sqlx::query_scalar(
-            "SELECT status = 'failed' FROM document_job WHERE id = $1",
-        )
-        .bind(job_id)
-        .fetch_one(&mut *tx)
-        .await?;
+        let terminal: bool =
+            sqlx::query_scalar("SELECT status = 'failed' FROM document_job WHERE id = $1")
+                .bind(job_id)
+                .fetch_one(&mut *tx)
+                .await?;
 
         if terminal {
             sqlx::query(
@@ -227,10 +223,7 @@ struct Artifact {
     path: String,
 }
 
-fn render_pdf(
-    request_id: Uuid,
-    snapshot: Option<&serde_json::Value>,
-) -> Result<Vec<u8>, AppError> {
+fn render_pdf(request_id: Uuid, snapshot: Option<&serde_json::Value>) -> Result<Vec<u8>, AppError> {
     // This is a valid, deliberately plain demo renderer. It proves the worker,
     // artifact, hashing, and download path without coupling the documents
     // module to a browser or office-suite process. Replace this function—not
@@ -250,13 +243,19 @@ fn render_pdf(
         PdfLine::subtitle("Official Transcript — Demo Layout"),
         PdfLine::body(format!("Request ID: {request_id}")),
         PdfLine::body(format!("Student: {}", string_field("student_name"))),
-        PdfLine::body(format!("Student number: {}", string_field("student_number"))),
+        PdfLine::body(format!(
+            "Student number: {}",
+            string_field("student_number")
+        )),
         PdfLine::body(format!("Program: {}", string_field("program_code"))),
         PdfLine::body(""),
         PdfLine::heading("Academic record"),
     ];
 
-    if let Some(courses) = snapshot.get("courses").and_then(serde_json::Value::as_array) {
+    if let Some(courses) = snapshot
+        .get("courses")
+        .and_then(serde_json::Value::as_array)
+    {
         for course in courses {
             let term = json_text(course, "term_code");
             let code = json_text(course, "course_code");
@@ -347,19 +346,35 @@ struct PdfLine {
 
 impl PdfLine {
     fn title(text: impl Into<String>) -> Self {
-        Self { text: text.into(), font: BuiltinFont::HelveticaBold, size: 18.0 }
+        Self {
+            text: text.into(),
+            font: BuiltinFont::HelveticaBold,
+            size: 18.0,
+        }
     }
 
     fn subtitle(text: impl Into<String>) -> Self {
-        Self { text: text.into(), font: BuiltinFont::HelveticaBold, size: 13.0 }
+        Self {
+            text: text.into(),
+            font: BuiltinFont::HelveticaBold,
+            size: 13.0,
+        }
     }
 
     fn heading(text: impl Into<String>) -> Self {
-        Self { text: text.into(), font: BuiltinFont::HelveticaBold, size: 11.0 }
+        Self {
+            text: text.into(),
+            font: BuiltinFont::HelveticaBold,
+            size: 11.0,
+        }
     }
 
     fn body(text: impl Into<String>) -> Self {
-        Self { text: text.into(), font: BuiltinFont::Helvetica, size: 10.0 }
+        Self {
+            text: text.into(),
+            font: BuiltinFont::Helvetica,
+            size: 10.0,
+        }
     }
 }
 

@@ -27,6 +27,7 @@ pub enum LicenseStatus {
 
 #[derive(Clone)]
 pub struct LicenseGate {
+    #[allow(dead_code)] // read by the gate methods wired into middleware in Phase 2.5
     current: Arc<ArcSwap<LicenseSnapshot>>,
 }
 
@@ -37,6 +38,7 @@ impl LicenseGate {
         }
     }
 
+    #[allow(dead_code)] // called by the Phase 2.5 license middleware
     pub fn require_active(&self, institution_id: Uuid) -> Result<(), AppError> {
         let snapshot = self.current.load();
         let now = Utc::now();
@@ -53,10 +55,12 @@ impl LicenseGate {
         }
     }
 
+    #[allow(dead_code)] // called by LicenseService once its routes register in Phase 7.2
     pub fn replace(&self, snapshot: LicenseSnapshot) {
         self.current.store(Arc::new(snapshot));
     }
 
+    #[allow(dead_code)] // called by LicenseService once its routes register in Phase 7.2
     pub fn snapshot(&self) -> Arc<LicenseSnapshot> {
         self.current.load_full()
     }

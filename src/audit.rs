@@ -7,6 +7,7 @@ use uuid::Uuid;
 pub struct AuditWriter;
 
 impl AuditWriter {
+    #[allow(clippy::too_many_arguments)] // audit facts stay explicit at every call site
     pub async fn write<T: Serialize>(
         &self,
         tx: &mut Transaction<'_, Postgres>,
@@ -26,16 +27,16 @@ impl AuditWriter {
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             "#,
         )
-            .bind(Uuid::new_v4())
-            .bind(institution_id)
-            .bind(actor_user_id)
-            .bind(action)
-            .bind(resource_type)
-            .bind(resource_id)
-            .bind(sqlx::types::Json(detail))
-            .bind(Utc::now())
-            .execute(&mut **tx)
-            .await?;
+        .bind(Uuid::new_v4())
+        .bind(institution_id)
+        .bind(actor_user_id)
+        .bind(action)
+        .bind(resource_type)
+        .bind(resource_id)
+        .bind(sqlx::types::Json(detail))
+        .bind(Utc::now())
+        .execute(&mut **tx)
+        .await?;
 
         Ok(())
     }

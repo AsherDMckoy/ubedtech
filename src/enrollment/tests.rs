@@ -3,10 +3,8 @@ async fn only_one_student_gets_the_last_seat(pool: sqlx::PgPool) {
     // Arrange one section with capacity=1 and two eligible students.
     let fixture = seed_registration_fixture(&pool, 1).await;
 
-    let service = crate::enrollment::EnrollmentService::new(
-        pool.clone(),
-        crate::audit::AuditWriter,
-    );
+    let service =
+        crate::enrollment::EnrollmentService::new(pool.clone(), crate::audit::AuditWriter);
 
     let left = service.register_for(
         &fixture.registrar,
@@ -30,24 +28,20 @@ async fn only_one_student_gets_the_last_seat(pool: sqlx::PgPool) {
     let successes = usize::from(left.is_ok()) + usize::from(right.is_ok());
     assert_eq!(successes, 1);
 
-    let enrolled_count: i32 = sqlx::query_scalar(
-        "SELECT enrolled_count FROM section_capacity WHERE section_id = $1",
-    )
-    .bind(fixture.section_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let enrolled_count: i32 =
+        sqlx::query_scalar("SELECT enrolled_count FROM section_capacity WHERE section_id = $1")
+            .bind(fixture.section_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
 
     assert_eq!(enrolled_count, 1);
 }
 
-async fn seed_registration_fixture(
-    pool: &sqlx::PgPool,
-    capacity: i32,
-) -> Fixture {
-    use std::collections::HashSet;
-    use chrono::{Duration, Utc};
+async fn seed_registration_fixture(pool: &sqlx::PgPool, capacity: i32) -> Fixture {
     use crate::shared::actor::{Actor, Role};
+    use chrono::{Duration, Utc};
+    use std::collections::HashSet;
     use uuid::Uuid;
 
     let institution_id = Uuid::new_v4();
@@ -63,14 +57,12 @@ async fn seed_registration_fixture(
     let now = Utc::now();
     let mut tx = pool.begin().await.unwrap();
 
-    sqlx::query(
-        "INSERT INTO institution (id, code, name) VALUES ($1, $2, 'Test University')",
-    )
-    .bind(institution_id)
-    .bind(format!("T-{}", &institution_id.to_string()[..8]))
-    .execute(&mut *tx)
-    .await
-    .unwrap();
+    sqlx::query("INSERT INTO institution (id, code, name) VALUES ($1, $2, 'Test University')")
+        .bind(institution_id)
+        .bind(format!("T-{}", &institution_id.to_string()[..8]))
+        .execute(&mut *tx)
+        .await
+        .unwrap();
 
     for (id, username, email) in [
         (registrar_user_id, "registrar", "registrar@test.invalid"),

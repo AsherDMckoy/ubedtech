@@ -5,7 +5,7 @@ mod service;
 mod types;
 
 pub use service::EnrollmentService;
-pub use types::{DropCommand, EnrollmentReceipt, RegisterCommand};
+pub use types::RegisterCommand;
 
 #[cfg(test)]
 mod tests;

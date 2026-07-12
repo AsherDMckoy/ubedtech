@@ -13,13 +13,13 @@ mod records;
 mod shared;
 use std::path::PathBuf;
 
-use actix_web::{middleware, web, App, HttpServer};
 use crate::audit::AuditWriter;
 use crate::documents::{DocumentService, DocumentWorker};
 use crate::enrollment::EnrollmentService;
 use crate::licensing::{LicenseGate, LicenseService, LicenseSnapshot, LicenseStatus};
 use crate::records::{GradeService, ScheduleQuery, TranscriptSnapshotService};
 use crate::shared::error::AppError;
+use actix_web::{App, HttpServer, middleware, web};
 use sqlx::postgres::PgPoolOptions;
 
 #[actix_web::main]
@@ -31,8 +31,7 @@ async fn main() -> std::io::Result<()> {
         .json()
         .init();
 
-    let database_url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set");
+    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
     let pool = PgPoolOptions::new()
         // This is a bounded concurrency control, not a target to maximize.
@@ -58,16 +57,8 @@ async fn main() -> std::io::Result<()> {
     let grades = GradeService::new(pool.clone(), audit.clone());
     let schedule = ScheduleQuery::new(pool.clone());
     let transcript = TranscriptSnapshotService;
-    let documents = DocumentService::new(
-        pool.clone(),
-        audit.clone(),
-        transcript,
-    );
-    let licensing = LicenseService::new(
-        pool.clone(),
-        license_gate.clone(),
-        audit,
-    );
+    let documents = DocumentService::new(pool.clone(), audit.clone(), transcript);
+    let licensing = LicenseService::new(pool.clone(), license_gate.clone(), audit);
 
     let worker = DocumentWorker::new(
         pool.clone(),
@@ -101,9 +92,7 @@ async fn main() -> std::io::Result<()> {
     .await
 }
 
-async fn load_initial_license(
-    pool: &sqlx::PgPool,
-) -> Result<LicenseSnapshot, AppError> {
+async fn load_initial_license(pool: &sqlx::PgPool) -> Result<LicenseSnapshot, AppError> {
     #[derive(sqlx::FromRow)]
     struct InitialLicenseRow {
         institution_id: uuid::Uuid,
