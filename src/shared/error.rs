@@ -64,14 +64,86 @@ impl ResponseError for AppError {
             Self::Database(_) | Self::Template(_) | Self::Internal => "internal_error",
         };
 
-        // Do not expose raw database or internal errors to the client.
+        // Do not expose raw database or internal errors to the client. The
+        // detail goes to the server log instead, where the request-id span
+        // ties it back to the failing request.
         let message = match self {
             Self::Database(_) | Self::Template(_) | Self::Internal => {
+                tracing::error!(error = ?self, "internal error while handling request");
                 "An internal error occurred".to_owned()
             }
             other => other.to_string(),
         };
 
         HttpResponse::build(self.status_code()).json(ErrorBody { code, message })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use actix_web::body::MessageBody;
+
+    fn body_text(error: &AppError) -> String {
+        let body = error.error_response().into_body();
+        let bytes = body.try_into_bytes().expect("in-memory body");
+        String::from_utf8(bytes.to_vec()).expect("utf8 body")
+    }
+
+    #[test]
+    fn database_errors_never_reach_the_client() {
+        // A protocol-level error whose Display text carries internals a client
+        // must never see (table names, SQL fragments, connection details).
+        let leaky = sqlx::Error::Protocol(
+            "SELECT secret_column FROM user_session WHERE token = 'abc'".into(),
+        );
+        let error = AppError::from(leaky);
+
+        assert_eq!(error.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
+        let text = body_text(&error);
+        assert!(!text.contains("SELECT"), "leaked SQL: {text}");
+        assert!(!text.contains("user_session"), "leaked table name: {text}");
+        assert!(text.contains("An internal error occurred"));
+        assert!(text.contains("internal_error"));
+    }
+
+    #[test]
+    fn internal_error_body_is_generic() {
+        let text = body_text(&AppError::Internal);
+        assert!(text.contains("An internal error occurred"));
+    }
+
+    #[test]
+    fn status_codes_match_error_variants() {
+        assert_eq!(
+            AppError::Unauthenticated.status_code(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(AppError::Forbidden.status_code(), StatusCode::FORBIDDEN);
+        assert_eq!(AppError::NotFound.status_code(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            AppError::InstitutionLocked.status_code(),
+            StatusCode::PAYMENT_REQUIRED
+        );
+        assert_eq!(
+            AppError::Validation("x".into()).status_code(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            AppError::Conflict("x".into()).status_code(),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            AppError::Internal.status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    #[test]
+    fn client_facing_variants_keep_their_messages() {
+        // Validation/Conflict messages are written by us for users; they must
+        // survive so the UI can show a useful reason.
+        let text = body_text(&AppError::Conflict("section is full".into()));
+        assert!(text.contains("section is full"));
     }
 }

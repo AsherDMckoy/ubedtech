@@ -20,7 +20,6 @@ use crate::licensing::{LicenseGate, LicenseService, LicenseSnapshot, LicenseStat
 use crate::records::{GradeService, ScheduleQuery, TranscriptSnapshotService};
 use crate::shared::error::AppError;
 use actix_web::{App, HttpServer, middleware, web};
-use std::time::Duration;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -40,20 +39,9 @@ async fn main() -> std::io::Result<()> {
         std::process::exit(1);
     });
 
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        // This is a bounded concurrency control, not a target to maximize.
-        // Tune from database measurements.
-        .max_connections(config.db_max_connections)
-        .min_connections(config.db_min_connections)
-        .acquire_timeout(Duration::from_secs(config.db_acquire_timeout_secs))
-        .connect(&config.database_url)
+    let pool = db::connect_and_migrate(&config)
         .await
-        .expect("database connection failed");
-
-    sqlx::migrate!("./migrations")
-        .run(&pool)
-        .await
-        .expect("database migration failed");
+        .expect("database connection or migration failed");
 
     let audit = AuditWriter;
     let initial_license = load_initial_license(&pool)
