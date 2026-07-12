@@ -11,19 +11,21 @@ mod identity_access;
 mod licensing;
 mod records;
 mod shared;
-use std::path::PathBuf;
 
 use crate::audit::AuditWriter;
+use crate::config::AppConfig;
 use crate::documents::{DocumentService, DocumentWorker};
 use crate::enrollment::EnrollmentService;
 use crate::licensing::{LicenseGate, LicenseService, LicenseSnapshot, LicenseStatus};
 use crate::records::{GradeService, ScheduleQuery, TranscriptSnapshotService};
 use crate::shared::error::AppError;
 use actix_web::{App, HttpServer, middleware, web};
-use sqlx::postgres::PgPoolOptions;
+use std::time::Duration;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    // Development convenience only: values from .env never override real
+    // environment variables, so production configuration always wins.
     dotenvy::dotenv().ok();
 
     tracing_subscriber::fmt()
@@ -31,14 +33,20 @@ async fn main() -> std::io::Result<()> {
         .json()
         .init();
 
-    let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let config = AppConfig::from_env().unwrap_or_else(|error| {
+        // Startup abort is the correct response to bad configuration; the
+        // message never contains configured values (see ConfigError).
+        eprintln!("configuration error: {error}");
+        std::process::exit(1);
+    });
 
-    let pool = PgPoolOptions::new()
+    let pool = sqlx::postgres::PgPoolOptions::new()
         // This is a bounded concurrency control, not a target to maximize.
         // Tune from database measurements.
-        .max_connections(64)
-        .min_connections(8)
-        .connect(&database_url)
+        .max_connections(config.db_max_connections)
+        .min_connections(config.db_min_connections)
+        .acquire_timeout(Duration::from_secs(config.db_acquire_timeout_secs))
+        .connect(&config.database_url)
         .await
         .expect("database connection failed");
 
@@ -62,8 +70,8 @@ async fn main() -> std::io::Result<()> {
 
     let worker = DocumentWorker::new(
         pool.clone(),
-        "document-worker-1".to_owned(),
-        PathBuf::from("./var/documents"),
+        config.worker_id.clone(),
+        config.document_storage_path.clone(),
     );
     actix_web::rt::spawn(worker.run());
 
@@ -87,7 +95,8 @@ async fn main() -> std::io::Result<()> {
             .configure(crate::app::protected_routes)
     })
     .workers(std::thread::available_parallelism().map_or(1, usize::from))
-    .bind(("0.0.0.0", 8080))?
+    .shutdown_timeout(config.shutdown_timeout_secs)
+    .bind(config.bind_addr)?
     .run()
     .await
 }
