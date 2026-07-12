@@ -27,17 +27,33 @@ impl DocumentWorker {
         }
     }
 
-    pub async fn run(self) {
+    /// Runs until `shutdown` flips to true. An in-flight job finishes before
+    /// the loop exits, so graceful shutdown never abandons a claimed job
+    /// mid-render (the crash-recovery reaper in Phase 6.1 covers hard kills).
+    pub async fn run(self, mut shutdown: tokio::sync::watch::Receiver<bool>) {
         loop {
-            match self.run_once().await {
-                Ok(true) => {}
-                Ok(false) => sleep(Duration::from_millis(200)).await,
+            if *shutdown.borrow() {
+                break;
+            }
+
+            let idle_wait = match self.run_once().await {
+                Ok(true) => None,
+                Ok(false) => Some(Duration::from_millis(200)),
                 Err(error) => {
                     tracing::error!(?error, "document worker iteration failed");
-                    sleep(Duration::from_secs(1)).await;
+                    Some(Duration::from_secs(1))
+                }
+            };
+
+            if let Some(wait) = idle_wait {
+                tokio::select! {
+                    _ = sleep(wait) => {}
+                    _ = shutdown.changed() => {}
                 }
             }
         }
+
+        tracing::info!("document worker stopped");
     }
 
     async fn run_once(&self) -> Result<bool, AppError> {

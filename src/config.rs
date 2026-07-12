@@ -12,7 +12,6 @@ pub enum Environment {
 }
 
 impl Environment {
-    #[allow(dead_code)] // read by the security-header slice later in Phase 1
     pub fn is_production(self) -> bool {
         self == Environment::Production
     }
@@ -20,7 +19,6 @@ impl Environment {
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
-    #[allow(dead_code)] // read by the security-header slice later in Phase 1
     pub environment: Environment,
     /// Never log this value; it may embed credentials.
     pub database_url: String,
@@ -32,7 +30,6 @@ pub struct AppConfig {
     pub worker_id: String,
     pub shutdown_timeout_secs: u64,
     /// How often the background readiness prober re-checks the database.
-    #[allow(dead_code)] // read by the health-endpoint slice later in Phase 1
     pub readiness_interval_secs: u64,
 }
 

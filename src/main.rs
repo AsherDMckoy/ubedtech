@@ -58,9 +58,20 @@ async fn main() -> std::io::Result<()> {
         config.worker_id.clone(),
         config.document_storage_path.clone(),
     );
-    actix_web::rt::spawn(worker.run());
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let worker_handle = actix_web::rt::spawn(worker.run(shutdown_rx));
 
-    HttpServer::new(move || {
+    // Startup already proved the database works (migrations, license load),
+    // so the flag starts true; the prober keeps it honest from here on.
+    let readiness = app::Readiness::new(true);
+    app::spawn_readiness_prober(
+        pool.clone(),
+        readiness.clone(),
+        config.readiness_interval_secs,
+    );
+
+    let environment = config.environment;
+    let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(pool.clone()))
             .app_data(web::Data::new(enrollment.clone()))
@@ -69,12 +80,13 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(documents.clone()))
             .app_data(web::Data::new(licensing.clone()))
             .app_data(web::Data::new(license_gate.clone()))
+            .app_data(web::Data::new(readiness.clone()))
+            // Bounded request bodies; raise per-route when a real need appears.
+            .app_data(web::JsonConfig::default().limit(64 * 1024))
+            .app_data(web::FormConfig::default().limit(64 * 1024))
+            .app_data(web::PayloadConfig::new(256 * 1024))
             .wrap(middleware::NormalizePath::trim())
-            .wrap(middleware::DefaultHeaders::new()
-                .add(("X-Content-Type-Options", "nosniff"))
-                .add(("Referrer-Policy", "strict-origin-when-cross-origin"))
-                .add(("Content-Security-Policy",
-                      "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")))
+            .wrap(app::security_headers(environment))
             // Correlation + completion logging with redaction by construction;
             // replaces Logger::default(), which would log full query strings.
             .wrap(middleware::from_fn(
@@ -86,8 +98,24 @@ async fn main() -> std::io::Result<()> {
     .workers(std::thread::available_parallelism().map_or(1, usize::from))
     .shutdown_timeout(config.shutdown_timeout_secs)
     .bind(config.bind_addr)?
-    .run()
+    .run();
+
+    // Actix stops accepting and drains handlers on SIGINT/SIGTERM; after
+    // that, tell the worker to finish its current job and wait for it.
+    let result = server.await;
+
+    let _ = shutdown_tx.send(true);
+    if tokio::time::timeout(
+        std::time::Duration::from_secs(config.shutdown_timeout_secs),
+        worker_handle,
+    )
     .await
+    .is_err()
+    {
+        tracing::warn!("document worker did not stop within the shutdown timeout");
+    }
+
+    result
 }
 
 async fn load_initial_license(pool: &sqlx::PgPool) -> Result<LicenseSnapshot, AppError> {
