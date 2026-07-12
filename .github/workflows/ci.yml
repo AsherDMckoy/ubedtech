@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+  # Test database for #[sqlx::test]; each test creates its own throwaway
+  # database from this connection, so one service instance is enough.
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ubedtech_test
+
+jobs:
+  quality-gates:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ubedtech_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      # The four quality gates from CLAUDE.md section 6, in order. A red gate
+      # fails the build; there is no allow-failure anywhere.
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+      - name: cargo clippy (warnings are errors)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: cargo test
+        run: cargo test --all-targets --all-features
+
+      - name: cargo build (release profile compiles)
+        run: cargo build --release
