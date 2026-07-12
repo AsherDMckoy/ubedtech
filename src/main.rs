@@ -27,10 +27,7 @@ async fn main() -> std::io::Result<()> {
     // environment variables, so production configuration always wins.
     dotenvy::dotenv().ok();
 
-    tracing_subscriber::fmt()
-        .with_env_filter("info,actix_web=info,sqlx=warn")
-        .json()
-        .init();
+    crate::shared::observability::init_tracing();
 
     let config = AppConfig::from_env().unwrap_or_else(|error| {
         // Startup abort is the correct response to bad configuration; the
@@ -78,7 +75,11 @@ async fn main() -> std::io::Result<()> {
                 .add(("Referrer-Policy", "strict-origin-when-cross-origin"))
                 .add(("Content-Security-Policy",
                       "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")))
-            .wrap(middleware::Logger::default())
+            // Correlation + completion logging with redaction by construction;
+            // replaces Logger::default(), which would log full query strings.
+            .wrap(middleware::from_fn(
+                crate::shared::observability::request_id_middleware,
+            ))
             .configure(crate::app::recovery_routes)
             .configure(crate::app::protected_routes)
     })
