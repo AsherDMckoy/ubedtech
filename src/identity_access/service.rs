@@ -582,7 +582,7 @@ impl AuthService {
     }
 }
 
-fn validate_new_password(new_password: &str) -> Result<(), AppError> {
+pub(crate) fn validate_new_password(new_password: &str) -> Result<(), AppError> {
     if new_password.chars().count() < MIN_PASSWORD_CHARS {
         return Err(AppError::Validation(format!(
             "password must be at least {MIN_PASSWORD_CHARS} characters"

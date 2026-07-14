@@ -1,6 +1,6 @@
 # Operations
 
-Status: Phase 1. Single binary, single PostgreSQL database.
+Status: Phase 2. Single binary, single PostgreSQL database.
 
 ## Configuration
 
@@ -30,6 +30,37 @@ overrides real environment variables. See `.env.example` for the full list.
 4. Load the institution license snapshot; **refuse to start** if no
    `institution_license` row exists (fail closed).
 5. Spawn document worker and readiness prober; serve HTTP.
+
+## First platform administrator (bootstrap)
+
+The `platform_licensing_admin` role cannot be granted through the HTTP API
+(institution admins manage only institution roles). The first — and only —
+platform admin is created by an operator on the host, before or after the
+server is running:
+
+```sh
+# Recommended: pipe the password (twice: password, then confirmation) from
+# a secret store so it never lands in argv, the environment, or shell
+# history. `backend` is the compiled binary; DATABASE_URL must be set.
+systemd-ask-password "platform admin password:" | { read -r pw; printf '%s\n%s\n' "$pw" "$pw"; } \
+  | backend bootstrap-platform-admin ops.admin ops@example.edu
+```
+
+Usage: `backend bootstrap-platform-admin <username> <email>
+[institution-code]` — the institution code is only needed if more than one
+institution exists. Rules enforced by the command:
+
+- Refuses (exit 1) if **any** platform licensing admin already exists;
+  there is no code path that mints a second one. Recovering from a lost
+  platform-admin credential is a manual, audited database operation.
+- The password comes from stdin only (first line password, second line
+  confirmation) and must meet the same 12-character minimum as every
+  other path. Running it on a terminal warns that input will echo.
+- Works on an unlicensed or locked deployment (it runs before the license
+  check), because unlocking a locked deployment is exactly what the
+  account is for.
+- Account, credential, role, and audit record
+  (`identity.platform_admin_bootstrapped`) are written in one transaction.
 
 ## Health endpoints
 

@@ -44,6 +44,14 @@ async fn main() -> std::io::Result<()> {
         .await
         .expect("database connection or migration failed");
 
+    // Operator subcommands run before any server machinery — in particular
+    // before the license check, because bootstrapping the platform admin
+    // must work on a deployment that is locked or not yet licensed.
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("bootstrap-platform-admin") {
+        std::process::exit(run_bootstrap_platform_admin(&pool, &config, &args[2..]).await);
+    }
+
     let audit = AuditWriter;
     let initial_license = load_initial_license(&pool)
         .await
@@ -157,6 +165,81 @@ async fn main() -> std::io::Result<()> {
     }
 
     result
+}
+
+/// `backend bootstrap-platform-admin <username> <email> [institution-code]`
+///
+/// Creates the first platform licensing admin (see identity_access::
+/// bootstrap). The password comes from stdin — first line the password,
+/// second line the confirmation — never from argv or the environment,
+/// where it would leak into shell history and process listings.
+async fn run_bootstrap_platform_admin(
+    pool: &sqlx::PgPool,
+    config: &AppConfig,
+    args: &[String],
+) -> i32 {
+    let (username, email, institution_code) = match args {
+        [username, email] => (username, email, None),
+        [username, email, code] => (username, email, Some(code.as_str())),
+        _ => {
+            eprintln!(
+                "usage: backend bootstrap-platform-admin <username> <email> [institution-code]\n\
+                 The password is read from stdin: first line the password, \
+                 second line the confirmation."
+            );
+            return 2;
+        }
+    };
+
+    use std::io::{BufRead, IsTerminal};
+    let stdin = std::io::stdin();
+    if stdin.is_terminal() {
+        // No unechoed prompt without a new dependency; steer operators to
+        // the pipe form documented in docs/OPERATIONS.md instead.
+        eprintln!(
+            "warning: typing the password here will echo it; \
+             prefer piping it in (see docs/OPERATIONS.md)"
+        );
+        eprintln!("password (then confirmation on the next line):");
+    }
+    let mut lines = stdin.lock().lines();
+    let (Some(Ok(password)), Some(Ok(confirmation))) = (lines.next(), lines.next()) else {
+        eprintln!("bootstrap failed: could not read the password and confirmation from stdin");
+        return 2;
+    };
+    if password != confirmation {
+        eprintln!("bootstrap failed: password and confirmation do not match");
+        return 2;
+    }
+
+    let passwords = match PasswordService::from_config(config) {
+        Ok(passwords) => passwords,
+        Err(error) => {
+            eprintln!("bootstrap failed: invalid Argon2 parameters: {error}");
+            return 1;
+        }
+    };
+
+    match crate::identity_access::bootstrap::bootstrap_platform_admin(
+        pool,
+        &passwords,
+        username,
+        email,
+        &password,
+        institution_code,
+    )
+    .await
+    {
+        Ok(user_id) => {
+            // AppError Display never carries secrets, and neither does this.
+            println!("platform licensing admin created: user {user_id}");
+            0
+        }
+        Err(error) => {
+            eprintln!("bootstrap failed: {error}");
+            1
+        }
+    }
 }
 
 async fn load_initial_license(pool: &sqlx::PgPool) -> Result<LicenseSnapshot, AppError> {

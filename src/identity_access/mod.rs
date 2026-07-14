@@ -1,3 +1,4 @@
+pub(crate) mod bootstrap;
 pub(crate) mod csrf;
 pub(crate) mod extractor; // Actix FromRequest implementation
 pub(crate) mod http;
