@@ -31,6 +31,13 @@ pub struct AppConfig {
     pub shutdown_timeout_secs: u64,
     /// How often the background readiness prober re-checks the database.
     pub readiness_interval_secs: u64,
+    /// Argon2id parameters. Defaults follow the OWASP Password Storage Cheat
+    /// Sheet's first recommended configuration: 19 MiB memory, 2 iterations,
+    /// 1 lane. Raise memory/iterations as hardware allows; existing hashes
+    /// keep their original parameters until the password is next changed.
+    pub argon2_memory_kib: u32,
+    pub argon2_time_cost: u32,
+    pub argon2_parallelism: u32,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -110,6 +117,13 @@ impl AppConfig {
 
         let worker_id = get("APP_WORKER_ID").unwrap_or_else(|| "document-worker-1".to_owned());
 
+        let argon2_memory_kib =
+            parse_or_default(&get, "APP_ARGON2_MEMORY_KIB", "19456", parse_positive_u32)?;
+        let argon2_time_cost =
+            parse_or_default(&get, "APP_ARGON2_TIME_COST", "2", parse_positive_u32)?;
+        let argon2_parallelism =
+            parse_or_default(&get, "APP_ARGON2_PARALLELISM", "1", parse_positive_u32)?;
+
         Ok(Self {
             environment,
             database_url,
@@ -121,6 +135,9 @@ impl AppConfig {
             worker_id,
             shutdown_timeout_secs,
             readiness_interval_secs,
+            argon2_memory_kib,
+            argon2_time_cost,
+            argon2_parallelism,
         })
     }
 }
@@ -181,6 +198,25 @@ mod tests {
             PathBuf::from("./var/documents")
         );
         assert_eq!(config.worker_id, "document-worker-1");
+        assert_eq!(config.argon2_memory_kib, 19456);
+        assert_eq!(config.argon2_time_cost, 2);
+        assert_eq!(config.argon2_parallelism, 1);
+    }
+
+    #[test]
+    fn zero_argon2_cost_is_rejected() {
+        let err = AppConfig::from_source(source(&[
+            ("DATABASE_URL", "postgresql://h/db"),
+            ("APP_ARGON2_TIME_COST", "0"),
+        ]))
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Invalid {
+                key: "APP_ARGON2_TIME_COST",
+                ..
+            }
+        ));
     }
 
     #[test]
