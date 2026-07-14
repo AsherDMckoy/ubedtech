@@ -38,6 +38,15 @@ pub struct AppConfig {
     pub argon2_memory_kib: u32,
     pub argon2_time_cost: u32,
     pub argon2_parallelism: u32,
+    /// Idle session deadline, refreshed on activity (seconds).
+    #[allow(dead_code)]
+    // read when main.rs constructs SessionService (slice 2.3, this session)
+    pub session_idle_secs: u64,
+    /// Absolute session deadline fixed at login (seconds); an active session
+    /// still ends when it is reached.
+    #[allow(dead_code)]
+    // read when main.rs constructs SessionService (slice 2.3, this session)
+    pub session_absolute_secs: u64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -124,6 +133,25 @@ impl AppConfig {
         let argon2_parallelism =
             parse_or_default(&get, "APP_ARGON2_PARALLELISM", "1", parse_positive_u32)?;
 
+        let session_idle_secs =
+            parse_or_default(&get, "APP_SESSION_IDLE_SECS", "1800", parse_positive_u64)?;
+        let session_absolute_secs = parse_or_default(
+            &get,
+            "APP_SESSION_ABSOLUTE_SECS",
+            "43200",
+            parse_positive_u64,
+        )?;
+
+        if session_idle_secs > session_absolute_secs {
+            return Err(ConfigError::Invalid {
+                key: "APP_SESSION_IDLE_SECS",
+                reason: format!(
+                    "must not exceed APP_SESSION_ABSOLUTE_SECS \
+                     ({session_idle_secs} > {session_absolute_secs})"
+                ),
+            });
+        }
+
         Ok(Self {
             environment,
             database_url,
@@ -138,6 +166,8 @@ impl AppConfig {
             argon2_memory_kib,
             argon2_time_cost,
             argon2_parallelism,
+            session_idle_secs,
+            session_absolute_secs,
         })
     }
 }
@@ -201,6 +231,25 @@ mod tests {
         assert_eq!(config.argon2_memory_kib, 19456);
         assert_eq!(config.argon2_time_cost, 2);
         assert_eq!(config.argon2_parallelism, 1);
+        assert_eq!(config.session_idle_secs, 1800);
+        assert_eq!(config.session_absolute_secs, 43200);
+    }
+
+    #[test]
+    fn idle_session_deadline_may_not_exceed_absolute() {
+        let err = AppConfig::from_source(source(&[
+            ("DATABASE_URL", "postgresql://h/db"),
+            ("APP_SESSION_IDLE_SECS", "600"),
+            ("APP_SESSION_ABSOLUTE_SECS", "300"),
+        ]))
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ConfigError::Invalid {
+                key: "APP_SESSION_IDLE_SECS",
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[allow(dead_code)] // variants are constructed once Phase 2 session middleware loads roles
 pub enum Role {
     Student,
     Instructor,
@@ -11,6 +10,35 @@ pub enum Role {
     DocumentOfficer,
     InstitutionAdmin,
     PlatformLicensingAdmin,
+}
+
+impl Role {
+    /// Database code (`role.code`) for this role, seeded by migration 0007.
+    #[allow(dead_code)] // used by role assignment (slice 2.7) this session
+    pub fn code(self) -> &'static str {
+        match self {
+            Role::Student => "student",
+            Role::Instructor => "instructor",
+            Role::Registrar => "registrar",
+            Role::RecordsOfficer => "records_officer",
+            Role::DocumentOfficer => "document_officer",
+            Role::InstitutionAdmin => "institution_admin",
+            Role::PlatformLicensingAdmin => "platform_licensing_admin",
+        }
+    }
+
+    pub fn from_code(code: &str) -> Option<Self> {
+        Some(match code {
+            "student" => Role::Student,
+            "instructor" => Role::Instructor,
+            "registrar" => Role::Registrar,
+            "records_officer" => Role::RecordsOfficer,
+            "document_officer" => Role::DocumentOfficer,
+            "institution_admin" => Role::InstitutionAdmin,
+            "platform_licensing_admin" => Role::PlatformLicensingAdmin,
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
