@@ -3,9 +3,15 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::audit::AuditWriter;
 use crate::identity_access::password::PasswordService;
 use crate::identity_access::sessions::{NewSession, SessionService};
+use crate::shared::actor::{Actor, Role};
 use crate::shared::error::AppError;
+
+/// Minimum accepted password length (characters). Documented in SECURITY.md;
+/// applies to self-service changes, admin resets, and bootstrap alike.
+pub const MIN_PASSWORD_CHARS: usize = 12;
 
 #[derive(Debug)] // NewSession's Debug redacts the raw token
 pub struct LoginOutcome {
@@ -18,6 +24,7 @@ pub struct AuthService {
     pool: PgPool,
     passwords: PasswordService,
     sessions: SessionService,
+    audit: AuditWriter,
     /// Verified against when the username or credential does not exist, so a
     /// login probe cannot distinguish "no such user" from "wrong password"
     /// by response time.
@@ -33,6 +40,7 @@ impl AuthService {
         pool: PgPool,
         passwords: PasswordService,
         sessions: SessionService,
+        audit: AuditWriter,
         max_failures: u32,
         window_secs: u64,
     ) -> Result<Self, AppError> {
@@ -43,6 +51,7 @@ impl AuthService {
             pool,
             passwords,
             sessions,
+            audit,
             dummy_hash,
             max_failures: i64::from(max_failures),
             window_secs: window_secs as f64,
@@ -131,6 +140,229 @@ impl AuthService {
         })
     }
 
+    /// Self-service password change.
+    ///
+    /// Requires the current password even though the caller is
+    /// authenticated (a stolen session must not be enough to take over the
+    /// account). On success every session dies (`session_version` bump +
+    /// row revocation, one transaction with the audit record) and a fresh
+    /// session is issued to this client — rotation, not survival.
+    pub async fn change_own_password(
+        &self,
+        actor: &Actor,
+        current_password: &str,
+        new_password: &str,
+    ) -> Result<NewSession, AppError> {
+        validate_new_password(new_password)?;
+
+        let stored: Option<String> =
+            sqlx::query_scalar("SELECT password_hash FROM password_credential WHERE user_id = $1")
+                .bind(actor.user_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        // An authenticated user without a credential row cannot prove the
+        // current password; same answer as a wrong one.
+        let stored = stored.ok_or_else(incorrect_current_password)?;
+
+        let passwords = self.passwords.clone();
+        let candidate = current_password.to_owned();
+        let verified = tokio::task::spawn_blocking(move || passwords.verify(&stored, &candidate))
+            .await
+            .map_err(|_| AppError::Internal)?;
+        match verified {
+            Ok(true) => {}
+            Ok(false) => return Err(incorrect_current_password()),
+            Err(error) => {
+                tracing::error!(error = %error, "stored password credential is unusable");
+                return Err(incorrect_current_password());
+            }
+        }
+
+        let passwords = self.passwords.clone();
+        let fresh = new_password.to_owned();
+        let new_hash = tokio::task::spawn_blocking(move || passwords.hash(&fresh))
+            .await
+            .map_err(|_| AppError::Internal)?
+            .map_err(|_| AppError::Internal)?;
+
+        let new_version = self
+            .replace_credential_and_revoke(
+                actor.user_id,
+                actor.institution_id,
+                actor.user_id,
+                &new_hash,
+                "identity.password_changed",
+            )
+            .await?;
+
+        self.sessions
+            .create(actor.user_id, actor.institution_id, new_version)
+            .await
+    }
+
+    /// Institution-admin password reset. The target's sessions all die; the
+    /// target logs in again with the new password. No session is created —
+    /// the admin is not the target.
+    pub async fn reset_password(
+        &self,
+        actor: &Actor,
+        target_user_id: Uuid,
+        new_password: &str,
+    ) -> Result<(), AppError> {
+        if !actor.has_role(Role::InstitutionAdmin) {
+            return Err(AppError::Forbidden);
+        }
+        validate_new_password(new_password)?;
+
+        // Institution scoping: an admin can only touch accounts of their own
+        // institution; anything else looks like a missing user.
+        let target: Option<Uuid> =
+            sqlx::query_scalar("SELECT id FROM user_account WHERE id = $1 AND institution_id = $2")
+                .bind(target_user_id)
+                .bind(actor.institution_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        target.ok_or(AppError::NotFound)?;
+
+        let passwords = self.passwords.clone();
+        let fresh = new_password.to_owned();
+        let new_hash = tokio::task::spawn_blocking(move || passwords.hash(&fresh))
+            .await
+            .map_err(|_| AppError::Internal)?
+            .map_err(|_| AppError::Internal)?;
+
+        self.replace_credential_and_revoke(
+            target_user_id,
+            actor.institution_id,
+            actor.user_id,
+            &new_hash,
+            "identity.password_reset",
+        )
+        .await?;
+        Ok(())
+    }
+
+    /// Suspend an account: status flip, every session revoked, audited — one
+    /// transaction. Fails closed on scope (other institutions look like a
+    /// missing user) and refuses self-suspension so the last admin cannot
+    /// brick the deployment by accident.
+    pub async fn suspend_user(
+        &self,
+        actor: &Actor,
+        target_user_id: Uuid,
+        reason: &str,
+    ) -> Result<(), AppError> {
+        if !actor.has_role(Role::InstitutionAdmin) {
+            return Err(AppError::Forbidden);
+        }
+        if reason.trim().is_empty() {
+            return Err(AppError::Validation("reason is required".into()));
+        }
+        if target_user_id == actor.user_id {
+            return Err(AppError::Validation(
+                "you cannot suspend your own account".into(),
+            ));
+        }
+
+        let mut tx = self.pool.begin().await?;
+
+        let updated: Option<Uuid> = sqlx::query_scalar(
+            r#"
+            UPDATE user_account
+               SET status = 'suspended', session_version = session_version + 1
+             WHERE id = $1 AND institution_id = $2
+            RETURNING id
+            "#,
+        )
+        .bind(target_user_id)
+        .bind(actor.institution_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        updated.ok_or(AppError::NotFound)?;
+
+        sqlx::query(
+            "UPDATE user_session SET revoked_at = now() \
+             WHERE user_id = $1 AND revoked_at IS NULL",
+        )
+        .bind(target_user_id)
+        .execute(&mut *tx)
+        .await?;
+
+        self.audit
+            .write(
+                &mut tx,
+                actor.institution_id,
+                actor.user_id,
+                "identity.user_suspended",
+                "user_account",
+                target_user_id,
+                &serde_json::json!({ "reason": reason }),
+            )
+            .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Shared tail of both password paths: swap the credential, bump the
+    /// account's session_version, revoke session rows, audit — one
+    /// transaction. Returns the new session_version.
+    async fn replace_credential_and_revoke(
+        &self,
+        target_user_id: Uuid,
+        institution_id: Uuid,
+        acting_user_id: Uuid,
+        new_hash: &str,
+        audit_action: &str,
+    ) -> Result<i64, AppError> {
+        let mut tx = self.pool.begin().await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO password_credential (user_id, password_hash, changed_at)
+            VALUES ($1, $2, now())
+            ON CONFLICT (user_id) DO UPDATE
+               SET password_hash = EXCLUDED.password_hash, changed_at = now()
+            "#,
+        )
+        .bind(target_user_id)
+        .bind(new_hash)
+        .execute(&mut *tx)
+        .await?;
+
+        let new_version: i64 = sqlx::query_scalar(
+            "UPDATE user_account SET session_version = session_version + 1 \
+             WHERE id = $1 RETURNING session_version",
+        )
+        .bind(target_user_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        sqlx::query(
+            "UPDATE user_session SET revoked_at = now() \
+             WHERE user_id = $1 AND revoked_at IS NULL",
+        )
+        .bind(target_user_id)
+        .execute(&mut *tx)
+        .await?;
+
+        self.audit
+            .write(
+                &mut tx,
+                institution_id,
+                acting_user_id,
+                audit_action,
+                "user_account",
+                target_user_id,
+                // Never the password or its hash — the fact is enough.
+                &serde_json::json!({ "sessions_revoked": true }),
+            )
+            .await?;
+
+        tx.commit().await?;
+        Ok(new_version)
+    }
+
     /// True while the account+IP pair has exhausted its failure budget for
     /// the current window. Expired windows count as clean.
     async fn throttled(
@@ -210,6 +442,19 @@ impl AuthService {
         .await?;
         Ok(())
     }
+}
+
+fn validate_new_password(new_password: &str) -> Result<(), AppError> {
+    if new_password.chars().count() < MIN_PASSWORD_CHARS {
+        return Err(AppError::Validation(format!(
+            "password must be at least {MIN_PASSWORD_CHARS} characters"
+        )));
+    }
+    Ok(())
+}
+
+fn incorrect_current_password() -> AppError {
+    AppError::Validation("current password is incorrect".into())
 }
 
 #[derive(sqlx::FromRow)]

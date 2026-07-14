@@ -49,6 +49,7 @@ macro_rules! test_app {
                         $pool.clone(),
                         PasswordService::new(8, 1, 1).unwrap(),
                         SessionService::new($pool.clone(), 1800, 43200),
+                        AuditWriter,
                         10,
                         900,
                     )

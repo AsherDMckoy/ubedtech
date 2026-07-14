@@ -26,6 +26,7 @@ fn auth_svc(pool: &PgPool) -> AuthService {
         pool.clone(),
         PasswordService::new(8, 1, 1).unwrap(),
         sessions_svc(pool),
+        crate::audit::AuditWriter,
         TEST_MAX_FAILURES,
         900,
     )
@@ -157,6 +158,19 @@ async fn seed_credentialed_user(
         .unwrap();
 
     user_id
+}
+
+async fn assign_role(pool: &PgPool, institution_id: Uuid, user_id: Uuid, role_code: &str) {
+    sqlx::query(
+        "INSERT INTO user_role (institution_id, user_id, role_id) \
+         SELECT $1, $2, id FROM role WHERE code = $3",
+    )
+    .bind(institution_id)
+    .bind(user_id)
+    .bind(role_code)
+    .execute(pool)
+    .await
+    .unwrap();
 }
 
 fn login_request(username: &str, password: &str) -> actix_test::TestRequest {
@@ -643,4 +657,425 @@ async fn csrf_form_field_is_accepted_and_the_body_survives_for_the_handler(pool:
     )
     .await;
     assert_eq!(bad.status(), StatusCode::FORBIDDEN);
+}
+
+// ---- Rotation and revocation triggers (slice 2.6) ----
+
+#[sqlx::test(migrations = "./migrations")]
+async fn password_change_rotates_this_session_and_revokes_all_others(pool: PgPool) {
+    let institution_id = seed_institution(&pool).await;
+    let user_id = seed_credentialed_user(
+        &pool,
+        institution_id,
+        "chg.user",
+        "old-password-12",
+        "active",
+    )
+    .await;
+    let app = test_app!(&pool, institution_id);
+
+    // Two live sessions: this browser and, say, a phone.
+    let (cookie_here, csrf_here) = login_session!(&app, "chg.user", "old-password-12");
+    let (cookie_phone, _) = login_session!(&app, "chg.user", "old-password-12");
+
+    let change = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri("/api/v1/me/password")
+            .cookie(cookie_here.clone())
+            .insert_header((
+                crate::identity_access::csrf::CSRF_HEADER,
+                csrf_here.as_str(),
+            ))
+            .set_json(serde_json::json!({
+                "current_password": "old-password-12",
+                "new_password": "brand-new-password-1",
+            }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(change.status(), StatusCode::OK);
+
+    // Rotation: a NEW cookie for this client, with a new CSRF token.
+    let fresh_cookie = session_cookie_from(&change);
+    assert_ne!(fresh_cookie.value(), cookie_here.value());
+    let body: serde_json::Value = actix_test::read_body_json(change).await;
+    assert!(!body["csrf_token"].as_str().unwrap().is_empty());
+
+    // Revocation: BOTH old sessions are dead; the fresh one works.
+    for (name, dead) in [("here", &cookie_here), ("phone", &cookie_phone)] {
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/probe/whoami")
+                .cookie(dead.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "old {name} session"
+        );
+    }
+    let alive = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/probe/whoami")
+            .cookie(fresh_cookie)
+            .to_request(),
+    )
+    .await;
+    assert_eq!(alive.status(), StatusCode::OK);
+
+    // The old password is dead; the new one works.
+    let old_pw = actix_test::call_service(
+        &app,
+        login_request("chg.user", "old-password-12").to_request(),
+    )
+    .await;
+    assert_eq!(old_pw.status(), StatusCode::UNAUTHORIZED);
+    let _ = login_session!(&app, "chg.user", "brand-new-password-1");
+
+    // Audited in the same transaction as the change, actor = the user.
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_event WHERE institution_id = $1 \
+         AND action = 'identity.password_changed' AND actor_user_id = $2",
+    )
+    .bind(institution_id)
+    .bind(user_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn password_change_rejects_wrong_current_and_short_new(pool: PgPool) {
+    let institution_id = seed_institution(&pool).await;
+    seed_credentialed_user(
+        &pool,
+        institution_id,
+        "keep.user",
+        "keeper-password-1",
+        "active",
+    )
+    .await;
+    let app = test_app!(&pool, institution_id);
+
+    let (cookie, csrf) = login_session!(&app, "keep.user", "keeper-password-1");
+
+    // Wrong current password: rejected, nothing rotates.
+    let wrong_current = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri("/api/v1/me/password")
+            .cookie(cookie.clone())
+            .insert_header((crate::identity_access::csrf::CSRF_HEADER, csrf.as_str()))
+            .set_json(serde_json::json!({
+                "current_password": "not-my-password",
+                "new_password": "brand-new-password-1",
+            }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(wrong_current.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Too-short replacement: rejected even with the right current password.
+    let short_new = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri("/api/v1/me/password")
+            .cookie(cookie.clone())
+            .insert_header((crate::identity_access::csrf::CSRF_HEADER, csrf.as_str()))
+            .set_json(serde_json::json!({
+                "current_password": "keeper-password-1",
+                "new_password": "short",
+            }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(short_new.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Neither attempt killed the session or the password.
+    let still_alive = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/probe/whoami")
+            .cookie(cookie)
+            .to_request(),
+    )
+    .await;
+    assert_eq!(still_alive.status(), StatusCode::OK);
+    let _ = login_session!(&app, "keep.user", "keeper-password-1");
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_password_reset_revokes_target_sessions(pool: PgPool) {
+    let institution_id = seed_institution(&pool).await;
+    let admin_id = seed_credentialed_user(
+        &pool,
+        institution_id,
+        "the.admin",
+        "admin-password-1",
+        "active",
+    )
+    .await;
+    assign_role(&pool, institution_id, admin_id, "institution_admin").await;
+    let target_id = seed_credentialed_user(
+        &pool,
+        institution_id,
+        "plain.user",
+        "user-password-1",
+        "active",
+    )
+    .await;
+    let app = test_app!(&pool, institution_id);
+
+    let (admin_cookie, admin_csrf) = login_session!(&app, "the.admin", "admin-password-1");
+    let (target_cookie, target_csrf) = login_session!(&app, "plain.user", "user-password-1");
+
+    // A non-admin cannot reset anyone's password — not even their own via
+    // this route.
+    let forbidden = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri(&format!("/api/v1/users/{admin_id}/password"))
+            .cookie(target_cookie.clone())
+            .insert_header((
+                crate::identity_access::csrf::CSRF_HEADER,
+                target_csrf.as_str(),
+            ))
+            .set_json(serde_json::json!({ "new_password": "hijacked-password-1" }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+
+    // The admin resets the target's password.
+    let reset = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri(&format!("/api/v1/users/{target_id}/password"))
+            .cookie(admin_cookie.clone())
+            .insert_header((
+                crate::identity_access::csrf::CSRF_HEADER,
+                admin_csrf.as_str(),
+            ))
+            .set_json(serde_json::json!({ "new_password": "issued-password-99" }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(reset.status(), StatusCode::NO_CONTENT);
+
+    // The target's session is gone; the old password is dead; the new works.
+    let dead = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/probe/whoami")
+            .cookie(target_cookie)
+            .to_request(),
+    )
+    .await;
+    assert_eq!(dead.status(), StatusCode::UNAUTHORIZED);
+    let old_pw = actix_test::call_service(
+        &app,
+        login_request("plain.user", "user-password-1").to_request(),
+    )
+    .await;
+    assert_eq!(old_pw.status(), StatusCode::UNAUTHORIZED);
+    let _ = login_session!(&app, "plain.user", "issued-password-99");
+
+    // The admin's own session was untouched, and the reset was audited with
+    // the ADMIN as the actor.
+    let admin_alive = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/probe/whoami")
+            .cookie(admin_cookie)
+            .to_request(),
+    )
+    .await;
+    assert_eq!(admin_alive.status(), StatusCode::OK);
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_event WHERE institution_id = $1 \
+         AND action = 'identity.password_reset' AND actor_user_id = $2",
+    )
+    .bind(institution_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn suspension_revokes_sessions_and_blocks_relogin(pool: PgPool) {
+    let institution_id = seed_institution(&pool).await;
+    let admin_id = seed_credentialed_user(
+        &pool,
+        institution_id,
+        "sus.admin",
+        "admin-password-1",
+        "active",
+    )
+    .await;
+    assign_role(&pool, institution_id, admin_id, "institution_admin").await;
+    let target_id = seed_credentialed_user(
+        &pool,
+        institution_id,
+        "doomed.user",
+        "user-password-1",
+        "active",
+    )
+    .await;
+    let app = test_app!(&pool, institution_id);
+
+    let (admin_cookie, admin_csrf) = login_session!(&app, "sus.admin", "admin-password-1");
+    let (target_cookie, _) = login_session!(&app, "doomed.user", "user-password-1");
+
+    // A blank reason is not a reason.
+    let no_reason = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri(&format!("/api/v1/users/{target_id}/suspend"))
+            .cookie(admin_cookie.clone())
+            .insert_header((
+                crate::identity_access::csrf::CSRF_HEADER,
+                admin_csrf.as_str(),
+            ))
+            .set_json(serde_json::json!({ "reason": "   " }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(no_reason.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Self-suspension is refused: the last admin cannot brick the deployment.
+    let self_suspend = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri(&format!("/api/v1/users/{admin_id}/suspend"))
+            .cookie(admin_cookie.clone())
+            .insert_header((
+                crate::identity_access::csrf::CSRF_HEADER,
+                admin_csrf.as_str(),
+            ))
+            .set_json(serde_json::json!({ "reason": "testing" }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(self_suspend.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // The real suspension.
+    let suspend = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri(&format!("/api/v1/users/{target_id}/suspend"))
+            .cookie(admin_cookie.clone())
+            .insert_header((
+                crate::identity_access::csrf::CSRF_HEADER,
+                admin_csrf.as_str(),
+            ))
+            .set_json(serde_json::json!({ "reason": "academic integrity case 44" }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(suspend.status(), StatusCode::NO_CONTENT);
+
+    // Session revoked, and the CORRECT password no longer signs in — with the
+    // same generic 401 an attacker would see for a wrong one.
+    let dead = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/probe/whoami")
+            .cookie(target_cookie)
+            .to_request(),
+    )
+    .await;
+    assert_eq!(dead.status(), StatusCode::UNAUTHORIZED);
+    let relogin = actix_test::call_service(
+        &app,
+        login_request("doomed.user", "user-password-1").to_request(),
+    )
+    .await;
+    assert_eq!(relogin.status(), StatusCode::UNAUTHORIZED);
+
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_event WHERE institution_id = $1 \
+         AND action = 'identity.user_suspended' AND actor_user_id = $2",
+    )
+    .bind(institution_id)
+    .bind(admin_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_powers_stop_at_the_institution_boundary(pool: PgPool) {
+    let institution_a = seed_institution(&pool).await;
+    let institution_b = seed_institution(&pool).await;
+    let admin_id = seed_credentialed_user(
+        &pool,
+        institution_a,
+        "a.admin",
+        "admin-password-1",
+        "active",
+    )
+    .await;
+    assign_role(&pool, institution_a, admin_id, "institution_admin").await;
+    let outsider_id =
+        seed_credentialed_user(&pool, institution_b, "b.user", "user-password-1", "active").await;
+    let app = test_app!(&pool, institution_a);
+
+    let (admin_cookie, admin_csrf) = login_session!(&app, "a.admin", "admin-password-1");
+
+    // Cross-institution reset and suspension both answer 404 — the other
+    // institution's accounts do not exist as far as this admin can tell.
+    let reset = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri(&format!("/api/v1/users/{outsider_id}/password"))
+            .cookie(admin_cookie.clone())
+            .insert_header((
+                crate::identity_access::csrf::CSRF_HEADER,
+                admin_csrf.as_str(),
+            ))
+            .set_json(serde_json::json!({ "new_password": "stolen-password-1" }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(reset.status(), StatusCode::NOT_FOUND);
+
+    let suspend = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri(&format!("/api/v1/users/{outsider_id}/suspend"))
+            .cookie(admin_cookie)
+            .insert_header((
+                crate::identity_access::csrf::CSRF_HEADER,
+                admin_csrf.as_str(),
+            ))
+            .set_json(serde_json::json!({ "reason": "reaching across the fence" }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(suspend.status(), StatusCode::NOT_FOUND);
+
+    // The outsider is untouched: still active, sessions intact, no audit
+    // trail was written against institution B.
+    let status: String = sqlx::query_scalar("SELECT status::text FROM user_account WHERE id = $1")
+        .bind(outsider_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "active");
+    let b_audit: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_event WHERE institution_id = $1")
+            .bind(institution_b)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(b_audit, 0);
 }

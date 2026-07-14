@@ -1,4 +1,5 @@
-//! Session lifecycle HTTP adapters: login and logout.
+//! Session lifecycle HTTP adapters: login, logout, password change/reset,
+//! and suspension.
 //!
 //! Login is deliberately reachable without a session and outside the license
 //! gate (a platform licensing admin must be able to sign in to unlock a
@@ -9,11 +10,13 @@
 use actix_web::cookie::{Cookie, SameSite, time};
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, post, web};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::identity_access::middleware::SESSION_COOKIE;
 use crate::identity_access::service::AuthService;
-use crate::identity_access::sessions::{CurrentSession, SessionService};
+use crate::identity_access::sessions::{CurrentSession, NewSession, SessionService};
 use crate::licensing::LicenseGate;
+use crate::shared::actor::Actor;
 use crate::shared::error::AppError;
 
 /// Cookie attributes decided at startup: `Secure` in production, and
@@ -77,7 +80,13 @@ pub async fn login(
         "login succeeded"
     );
 
-    let cookie = Cookie::build(SESSION_COOKIE, outcome.session.token.expose().to_owned())
+    Ok(session_response(&policy, outcome.session))
+}
+
+/// Builds the "here is your fresh session" response shared by login and
+/// self-service password change: hardened cookie + one-time CSRF token.
+fn session_response(policy: &SessionCookiePolicy, session: NewSession) -> HttpResponse {
+    let cookie = Cookie::build(SESSION_COOKIE, session.token.expose().to_owned())
         .http_only(true)
         .secure(policy.secure)
         .same_site(SameSite::Lax)
@@ -85,9 +94,9 @@ pub async fn login(
         .max_age(time::Duration::seconds(policy.max_age_secs))
         .finish();
 
-    Ok(HttpResponse::Ok().cookie(cookie).json(LoginResponse {
-        csrf_token: outcome.session.csrf_token,
-    }))
+    HttpResponse::Ok().cookie(cookie).json(LoginResponse {
+        csrf_token: session.csrf_token,
+    })
 }
 
 #[post("/api/v1/session/logout")]
@@ -104,6 +113,87 @@ pub async fn logout(
     Ok(HttpResponse::NoContent().cookie(removal).finish())
 }
 
+#[derive(Deserialize)]
+pub struct ChangePasswordRequest {
+    current_password: String,
+    new_password: String,
+}
+
+/// Self-service password change. Every session dies server-side; this
+/// client alone gets a replacement cookie and CSRF token, so the browser
+/// stays signed in through the rotation.
+#[post("/api/v1/me/password")]
+pub async fn change_own_password(
+    actor: Actor,
+    auth: web::Data<AuthService>,
+    policy: web::Data<SessionCookiePolicy>,
+    body: web::Json<ChangePasswordRequest>,
+) -> Result<HttpResponse, AppError> {
+    let session = auth
+        .change_own_password(&actor, &body.current_password, &body.new_password)
+        .await?;
+
+    tracing::info!(user_id = %actor.user_id, "password changed; sessions rotated");
+
+    Ok(session_response(&policy, session))
+}
+
+#[derive(Deserialize)]
+pub struct ResetPasswordRequest {
+    new_password: String,
+}
+
+/// Institution-admin reset of someone else's password. The target's
+/// sessions are revoked; they sign in again with the new password.
+#[post("/api/v1/users/{user_id}/password")]
+pub async fn reset_password(
+    actor: Actor,
+    auth: web::Data<AuthService>,
+    target: web::Path<Uuid>,
+    body: web::Json<ResetPasswordRequest>,
+) -> Result<HttpResponse, AppError> {
+    let target_user_id = target.into_inner();
+    auth.reset_password(&actor, target_user_id, &body.new_password)
+        .await?;
+
+    tracing::info!(
+        admin_user_id = %actor.user_id,
+        target_user_id = %target_user_id,
+        "password reset; target sessions revoked"
+    );
+
+    Ok(HttpResponse::NoContent().finish())
+}
+
+#[derive(Deserialize)]
+pub struct SuspendRequest {
+    reason: String,
+}
+
+#[post("/api/v1/users/{user_id}/suspend")]
+pub async fn suspend_user(
+    actor: Actor,
+    auth: web::Data<AuthService>,
+    target: web::Path<Uuid>,
+    body: web::Json<SuspendRequest>,
+) -> Result<HttpResponse, AppError> {
+    let target_user_id = target.into_inner();
+    auth.suspend_user(&actor, target_user_id, &body.reason)
+        .await?;
+
+    tracing::info!(
+        admin_user_id = %actor.user_id,
+        target_user_id = %target_user_id,
+        "account suspended; sessions revoked"
+    );
+
+    Ok(HttpResponse::NoContent().finish())
+}
+
 pub fn routes(cfg: &mut web::ServiceConfig) {
-    cfg.service(login).service(logout);
+    cfg.service(login)
+        .service(logout)
+        .service(change_own_password)
+        .service(reset_password)
+        .service(suspend_user);
 }

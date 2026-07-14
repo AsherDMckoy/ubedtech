@@ -61,6 +61,7 @@ async fn main() -> std::io::Result<()> {
         pool.clone(),
         passwords,
         sessions.clone(),
+        audit.clone(),
         config.login_max_failures,
         config.login_throttle_window_secs,
     )
