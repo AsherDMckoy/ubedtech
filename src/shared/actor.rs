@@ -14,7 +14,6 @@ pub enum Role {
 
 impl Role {
     /// Database code (`role.code`) for this role, seeded by migration 0007.
-    #[allow(dead_code)] // used by role assignment (slice 2.7) this session
     pub fn code(self) -> &'static str {
         match self {
             Role::Student => "student",

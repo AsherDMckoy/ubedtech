@@ -8,7 +8,7 @@
 //! the credentials in the body, and the session cookie is `SameSite=Lax`.
 
 use actix_web::cookie::{Cookie, SameSite, time};
-use actix_web::{HttpMessage, HttpRequest, HttpResponse, post, web};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, post, web};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -16,7 +16,7 @@ use crate::identity_access::middleware::SESSION_COOKIE;
 use crate::identity_access::service::AuthService;
 use crate::identity_access::sessions::{CurrentSession, NewSession, SessionService};
 use crate::licensing::LicenseGate;
-use crate::shared::actor::Actor;
+use crate::shared::actor::{Actor, Role};
 use crate::shared::error::AppError;
 
 /// Cookie attributes decided at startup: `Secure` in production, and
@@ -190,10 +190,64 @@ pub async fn suspend_user(
     Ok(HttpResponse::NoContent().finish())
 }
 
+#[derive(Deserialize)]
+pub struct GrantRoleRequest {
+    role: String,
+}
+
+#[post("/api/v1/users/{user_id}/roles")]
+pub async fn grant_role(
+    actor: Actor,
+    auth: web::Data<AuthService>,
+    target: web::Path<Uuid>,
+    body: web::Json<GrantRoleRequest>,
+) -> Result<HttpResponse, AppError> {
+    let role = parse_role(&body.role)?;
+    let target_user_id = target.into_inner();
+    auth.assign_role(&actor, target_user_id, role).await?;
+
+    tracing::info!(
+        admin_user_id = %actor.user_id,
+        target_user_id = %target_user_id,
+        role = role.code(),
+        "role granted; target sessions revoked"
+    );
+
+    Ok(HttpResponse::NoContent().finish())
+}
+
+#[delete("/api/v1/users/{user_id}/roles/{role_code}")]
+pub async fn revoke_role(
+    actor: Actor,
+    auth: web::Data<AuthService>,
+    path: web::Path<(Uuid, String)>,
+) -> Result<HttpResponse, AppError> {
+    let (target_user_id, role_code) = path.into_inner();
+    let role = parse_role(&role_code)?;
+    auth.revoke_role(&actor, target_user_id, role).await?;
+
+    tracing::info!(
+        admin_user_id = %actor.user_id,
+        target_user_id = %target_user_id,
+        role = role.code(),
+        "role revoked; target sessions revoked"
+    );
+
+    Ok(HttpResponse::NoContent().finish())
+}
+
+fn parse_role(code: &str) -> Result<Role, AppError> {
+    // The set of valid codes is public knowledge (it is in the docs), so
+    // echoing an unknown one back is safe and saves a support round-trip.
+    Role::from_code(code).ok_or_else(|| AppError::Validation(format!("unknown role: {code}")))
+}
+
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(login)
         .service(logout)
         .service(change_own_password)
         .service(reset_password)
-        .service(suspend_user);
+        .service(suspend_user)
+        .service(grant_role)
+        .service(revoke_role);
 }

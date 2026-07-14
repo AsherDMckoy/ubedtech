@@ -1079,3 +1079,285 @@ async fn admin_powers_stop_at_the_institution_boundary(pool: PgPool) {
             .unwrap();
     assert_eq!(b_audit, 0);
 }
+
+// ---- Role assignment (slice 2.7) ----
+
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_grants_and_revokes_roles_with_session_revocation(pool: PgPool) {
+    let institution_id = seed_institution(&pool).await;
+    let admin_id = seed_credentialed_user(
+        &pool,
+        institution_id,
+        "role.admin",
+        "admin-password-1",
+        "active",
+    )
+    .await;
+    assign_role(&pool, institution_id, admin_id, "institution_admin").await;
+    let target_id = seed_credentialed_user(
+        &pool,
+        institution_id,
+        "future.registrar",
+        "user-password-1",
+        "active",
+    )
+    .await;
+    let app = test_app!(&pool, institution_id);
+
+    let (admin_cookie, admin_csrf) = login_session!(&app, "role.admin", "admin-password-1");
+    let (target_cookie, _) = login_session!(&app, "future.registrar", "user-password-1");
+
+    // Grant: 204, and the privilege change revokes the target's sessions.
+    let grant = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri(&format!("/api/v1/users/{target_id}/roles"))
+            .cookie(admin_cookie.clone())
+            .insert_header((
+                crate::identity_access::csrf::CSRF_HEADER,
+                admin_csrf.as_str(),
+            ))
+            .set_json(serde_json::json!({ "role": "registrar" }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(grant.status(), StatusCode::NO_CONTENT);
+
+    let dead = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/probe/whoami")
+            .cookie(target_cookie)
+            .to_request(),
+    )
+    .await;
+    assert_eq!(dead.status(), StatusCode::UNAUTHORIZED);
+
+    // A fresh session carries the new role.
+    let (target_cookie, _) = login_session!(&app, "future.registrar", "user-password-1");
+    let identity = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/probe/whoami")
+            .cookie(target_cookie.clone())
+            .to_request(),
+    )
+    .await;
+    let body: serde_json::Value = actix_test::read_body_json(identity).await;
+    assert_eq!(body["roles"], serde_json::json!(["registrar"]));
+
+    // Granting the same role again is idempotent: no second audit record,
+    // and — crucially for retried requests — no session revocation.
+    let regrant = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri(&format!("/api/v1/users/{target_id}/roles"))
+            .cookie(admin_cookie.clone())
+            .insert_header((
+                crate::identity_access::csrf::CSRF_HEADER,
+                admin_csrf.as_str(),
+            ))
+            .set_json(serde_json::json!({ "role": "registrar" }))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(regrant.status(), StatusCode::NO_CONTENT);
+    let survived = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/probe/whoami")
+            .cookie(target_cookie.clone())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(
+        survived.status(),
+        StatusCode::OK,
+        "idempotent regrant must not revoke sessions"
+    );
+    let granted_audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_event \
+         WHERE action = 'identity.role_granted' AND resource_id = $1",
+    )
+    .bind(target_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(granted_audits, 1);
+
+    // Revoke: 204, sessions die again, and the next session has no roles.
+    let revoke = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::delete()
+            .uri(&format!("/api/v1/users/{target_id}/roles/registrar"))
+            .cookie(admin_cookie.clone())
+            .insert_header((
+                crate::identity_access::csrf::CSRF_HEADER,
+                admin_csrf.as_str(),
+            ))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(revoke.status(), StatusCode::NO_CONTENT);
+
+    let dead_again = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/probe/whoami")
+            .cookie(target_cookie)
+            .to_request(),
+    )
+    .await;
+    assert_eq!(dead_again.status(), StatusCode::UNAUTHORIZED);
+
+    let (target_cookie, _) = login_session!(&app, "future.registrar", "user-password-1");
+    let identity = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/probe/whoami")
+            .cookie(target_cookie)
+            .to_request(),
+    )
+    .await;
+    let body: serde_json::Value = actix_test::read_body_json(identity).await;
+    assert_eq!(body["roles"], serde_json::json!([]));
+
+    let revoked_audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_event \
+         WHERE action = 'identity.role_revoked' AND resource_id = $1",
+    )
+    .bind(target_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(revoked_audits, 1);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn role_management_guardrails(pool: PgPool) {
+    let institution_a = seed_institution(&pool).await;
+    let institution_b = seed_institution(&pool).await;
+    let admin_id = seed_credentialed_user(
+        &pool,
+        institution_a,
+        "guard.admin",
+        "admin-password-1",
+        "active",
+    )
+    .await;
+    assign_role(&pool, institution_a, admin_id, "institution_admin").await;
+    let target_id = seed_credentialed_user(
+        &pool,
+        institution_a,
+        "guard.user",
+        "user-password-1",
+        "active",
+    )
+    .await;
+    let outsider_id = seed_credentialed_user(
+        &pool,
+        institution_b,
+        "guard.outsider",
+        "user-password-1",
+        "active",
+    )
+    .await;
+    let app = test_app!(&pool, institution_a);
+
+    let (admin_cookie, admin_csrf) = login_session!(&app, "guard.admin", "admin-password-1");
+    let (user_cookie, user_csrf) = login_session!(&app, "guard.user", "user-password-1");
+
+    let grant =
+        |cookie: &actix_web::cookie::Cookie<'static>, csrf: &str, user: Uuid, role: &str| {
+            actix_test::TestRequest::post()
+                .uri(&format!("/api/v1/users/{user}/roles"))
+                .cookie(cookie.clone())
+                .insert_header((crate::identity_access::csrf::CSRF_HEADER, csrf.to_owned()))
+                .set_json(serde_json::json!({ "role": role }))
+                .to_request()
+        };
+
+    // A non-admin cannot grant — not even to themselves.
+    let forbidden = actix_test::call_service(
+        &app,
+        grant(&user_cookie, &user_csrf, target_id, "registrar"),
+    )
+    .await;
+    assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
+
+    // The platform licensing role is not grantable through this API at all.
+    let platform = actix_test::call_service(
+        &app,
+        grant(
+            &admin_cookie,
+            &admin_csrf,
+            target_id,
+            "platform_licensing_admin",
+        ),
+    )
+    .await;
+    assert_eq!(platform.status(), StatusCode::FORBIDDEN);
+
+    // ...nor revocable: an institution admin cannot strip the platform
+    // operator's access.
+    let strip_platform = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::delete()
+            .uri(&format!(
+                "/api/v1/users/{target_id}/roles/platform_licensing_admin"
+            ))
+            .cookie(admin_cookie.clone())
+            .insert_header((
+                crate::identity_access::csrf::CSRF_HEADER,
+                admin_csrf.as_str(),
+            ))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(strip_platform.status(), StatusCode::FORBIDDEN);
+
+    // Admins cannot edit their own privileges.
+    let self_grant = actix_test::call_service(
+        &app,
+        grant(&admin_cookie, &admin_csrf, admin_id, "registrar"),
+    )
+    .await;
+    assert_eq!(self_grant.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Unknown role codes are a validation error, not a 500.
+    let unknown = actix_test::call_service(
+        &app,
+        grant(&admin_cookie, &admin_csrf, target_id, "super_admin"),
+    )
+    .await;
+    assert_eq!(unknown.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    // Another institution's account looks like a missing user.
+    let cross = actix_test::call_service(
+        &app,
+        grant(&admin_cookie, &admin_csrf, outsider_id, "registrar"),
+    )
+    .await;
+    assert_eq!(cross.status(), StatusCode::NOT_FOUND);
+
+    // None of the failures granted anything or wrote an audit record.
+    let role_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM user_role WHERE user_id IN ($1, $2, $3) \
+         AND role_id <> (SELECT id FROM role WHERE code = 'institution_admin')",
+    )
+    .bind(admin_id)
+    .bind(target_id)
+    .bind(outsider_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(role_rows, 0);
+    let audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_event \
+         WHERE action IN ('identity.role_granted', 'identity.role_revoked')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audits, 0);
+}

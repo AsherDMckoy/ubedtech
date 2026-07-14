@@ -1,10 +1,13 @@
-//! Authentication use cases (framework-free; HTTP adapters live in http.rs).
+//! Identity use cases: authentication, credential and account
+//! administration, role assignment (framework-free; HTTP adapters live in
+//! http.rs, authorization decisions in policy.rs).
 
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::audit::AuditWriter;
 use crate::identity_access::password::PasswordService;
+use crate::identity_access::policy;
 use crate::identity_access::sessions::{NewSession, SessionService};
 use crate::shared::actor::{Actor, Role};
 use crate::shared::error::AppError;
@@ -209,9 +212,7 @@ impl AuthService {
         target_user_id: Uuid,
         new_password: &str,
     ) -> Result<(), AppError> {
-        if !actor.has_role(Role::InstitutionAdmin) {
-            return Err(AppError::Forbidden);
-        }
+        policy::require_can_manage_accounts(actor)?;
         validate_new_password(new_password)?;
 
         // Institution scoping: an admin can only touch accounts of their own
@@ -252,9 +253,7 @@ impl AuthService {
         target_user_id: Uuid,
         reason: &str,
     ) -> Result<(), AppError> {
-        if !actor.has_role(Role::InstitutionAdmin) {
-            return Err(AppError::Forbidden);
-        }
+        policy::require_can_manage_accounts(actor)?;
         if reason.trim().is_empty() {
             return Err(AppError::Validation("reason is required".into()));
         }
@@ -297,6 +296,145 @@ impl AuthService {
                 "user_account",
                 target_user_id,
                 &serde_json::json!({ "reason": reason }),
+            )
+            .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Grant a role. Idempotent: granting an already-held role succeeds
+    /// without side effects. A real grant is a privilege change, so the
+    /// target's sessions are revoked (they sign in again and get the new
+    /// privileges on a fresh session) and the grant is audited — one
+    /// transaction.
+    pub async fn assign_role(
+        &self,
+        actor: &Actor,
+        target_user_id: Uuid,
+        role: Role,
+    ) -> Result<(), AppError> {
+        let mut tx = self.check_role_change(actor, target_user_id, role).await?;
+
+        let inserted = sqlx::query(
+            r#"
+            INSERT INTO user_role (institution_id, user_id, role_id)
+            SELECT $1, $2, id FROM role WHERE code = $3
+            ON CONFLICT DO NOTHING
+            "#,
+        )
+        .bind(actor.institution_id)
+        .bind(target_user_id)
+        .bind(role.code())
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+
+        if inserted == 0 {
+            // Already held: a retried request must not revoke sessions again.
+            return Ok(());
+        }
+
+        self.finish_role_change(tx, actor, target_user_id, role, "identity.role_granted")
+            .await
+    }
+
+    /// Revoke a role. Idempotent like [`Self::assign_role`]; a real
+    /// revocation revokes the target's sessions and is audited in the same
+    /// transaction.
+    pub async fn revoke_role(
+        &self,
+        actor: &Actor,
+        target_user_id: Uuid,
+        role: Role,
+    ) -> Result<(), AppError> {
+        let mut tx = self.check_role_change(actor, target_user_id, role).await?;
+
+        let deleted = sqlx::query(
+            "DELETE FROM user_role \
+             WHERE institution_id = $1 AND user_id = $2 \
+               AND role_id = (SELECT id FROM role WHERE code = $3)",
+        )
+        .bind(actor.institution_id)
+        .bind(target_user_id)
+        .bind(role.code())
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+
+        if deleted == 0 {
+            return Ok(());
+        }
+
+        self.finish_role_change(tx, actor, target_user_id, role, "identity.role_revoked")
+            .await
+    }
+
+    /// Shared head of both role changes: authorization, the
+    /// no-self-service rule, and the institution-scoped target lookup
+    /// (inside the transaction the change will use).
+    async fn check_role_change(
+        &self,
+        actor: &Actor,
+        target_user_id: Uuid,
+        role: Role,
+    ) -> Result<sqlx::Transaction<'static, sqlx::Postgres>, AppError> {
+        policy::require_can_manage_roles(actor)?;
+        if !policy::assignable_by_institution_admin(role) {
+            return Err(AppError::Forbidden);
+        }
+        // Admins do not edit their own privileges: no self-escalation, and
+        // no revoking your own admin role by accident.
+        if target_user_id == actor.user_id {
+            return Err(AppError::Validation(
+                "you cannot change your own roles".into(),
+            ));
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let target: Option<Uuid> =
+            sqlx::query_scalar("SELECT id FROM user_account WHERE id = $1 AND institution_id = $2")
+                .bind(target_user_id)
+                .bind(actor.institution_id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        target.ok_or(AppError::NotFound)?;
+        Ok(tx)
+    }
+
+    /// Shared tail of both role changes: privilege changed, so revoke the
+    /// target's sessions (session_version bump + row revocation) and audit,
+    /// then commit.
+    async fn finish_role_change(
+        &self,
+        mut tx: sqlx::Transaction<'static, sqlx::Postgres>,
+        actor: &Actor,
+        target_user_id: Uuid,
+        role: Role,
+        audit_action: &str,
+    ) -> Result<(), AppError> {
+        sqlx::query("UPDATE user_account SET session_version = session_version + 1 WHERE id = $1")
+            .bind(target_user_id)
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query(
+            "UPDATE user_session SET revoked_at = now() \
+             WHERE user_id = $1 AND revoked_at IS NULL",
+        )
+        .bind(target_user_id)
+        .execute(&mut *tx)
+        .await?;
+
+        self.audit
+            .write(
+                &mut tx,
+                actor.institution_id,
+                actor.user_id,
+                audit_action,
+                "user_account",
+                target_user_id,
+                &serde_json::json!({ "role": role.code() }),
             )
             .await?;
 
