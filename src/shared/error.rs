@@ -16,6 +16,9 @@ pub enum AppError {
     #[error("institution license is inactive")]
     InstitutionLocked,
 
+    #[error("too many attempts, try again later")]
+    RateLimited,
+
     #[error("validation failed: {0}")]
     Validation(String),
 
@@ -45,6 +48,7 @@ impl ResponseError for AppError {
             Self::Forbidden => StatusCode::FORBIDDEN,
             Self::NotFound => StatusCode::NOT_FOUND,
             Self::InstitutionLocked => StatusCode::PAYMENT_REQUIRED,
+            Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::Validation(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Conflict(_) => StatusCode::CONFLICT,
             Self::Database(_) | Self::Template(_) | Self::Internal => {
@@ -59,6 +63,7 @@ impl ResponseError for AppError {
             Self::Forbidden => "forbidden",
             Self::NotFound => "not_found",
             Self::InstitutionLocked => "institution_locked",
+            Self::RateLimited => "rate_limited",
             Self::Validation(_) => "validation_error",
             Self::Conflict(_) => "conflict",
             Self::Database(_) | Self::Template(_) | Self::Internal => "internal_error",
@@ -124,6 +129,10 @@ mod tests {
         assert_eq!(
             AppError::InstitutionLocked.status_code(),
             StatusCode::PAYMENT_REQUIRED
+        );
+        assert_eq!(
+            AppError::RateLimited.status_code(),
+            StatusCode::TOO_MANY_REQUESTS
         );
         assert_eq!(
             AppError::Validation("x".into()).status_code(),

@@ -16,6 +16,10 @@ use crate::audit::AuditWriter;
 use crate::config::AppConfig;
 use crate::documents::{DocumentService, DocumentWorker};
 use crate::enrollment::EnrollmentService;
+use crate::identity_access::http::SessionCookiePolicy;
+use crate::identity_access::password::PasswordService;
+use crate::identity_access::service::AuthService;
+use crate::identity_access::sessions::SessionService;
 use crate::licensing::{LicenseGate, LicenseService, LicenseSnapshot, LicenseStatus};
 use crate::records::{GradeService, ScheduleQuery, TranscriptSnapshotService};
 use crate::shared::error::AppError;
@@ -45,6 +49,26 @@ async fn main() -> std::io::Result<()> {
         .await
         .expect("valid institution license required before startup");
     let license_gate = LicenseGate::new(initial_license);
+
+    let passwords =
+        PasswordService::from_config(&config).expect("valid Argon2 parameters required");
+    let sessions = SessionService::new(
+        pool.clone(),
+        config.session_idle_secs,
+        config.session_absolute_secs,
+    );
+    let auth = AuthService::new(
+        pool.clone(),
+        passwords,
+        sessions.clone(),
+        config.login_max_failures,
+        config.login_throttle_window_secs,
+    )
+    .expect("auth service initialization failed");
+    let cookie_policy = SessionCookiePolicy {
+        secure: config.environment.is_production(),
+        max_age_secs: config.session_absolute_secs as i64,
+    };
 
     let enrollment = EnrollmentService::new(pool.clone(), audit.clone());
     let grades = GradeService::new(pool.clone(), audit.clone());
@@ -81,10 +105,17 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(licensing.clone()))
             .app_data(web::Data::new(license_gate.clone()))
             .app_data(web::Data::new(readiness.clone()))
+            .app_data(web::Data::new(sessions.clone()))
+            .app_data(web::Data::new(auth.clone()))
+            .app_data(web::Data::new(cookie_policy))
             // Bounded request bodies; raise per-route when a real need appears.
             .app_data(web::JsonConfig::default().limit(64 * 1024))
             .app_data(web::FormConfig::default().limit(64 * 1024))
             .app_data(web::PayloadConfig::new(256 * 1024))
+            // Registered first = runs innermost, after the middleware below.
+            .wrap(middleware::from_fn(
+                crate::identity_access::middleware::session_middleware,
+            ))
             .wrap(middleware::NormalizePath::trim())
             .wrap(app::security_headers(environment))
             // Correlation + completion logging with redaction by construction;

@@ -32,7 +32,6 @@ const LAST_SEEN_REFRESH_SECS: i64 = 60;
 pub struct RawToken(String);
 
 impl RawToken {
-    #[allow(dead_code)] // read by the login cookie writer (slice 2.3) this session
     pub fn expose(&self) -> &str {
         &self.0
     }
@@ -44,7 +43,7 @@ impl fmt::Debug for RawToken {
     }
 }
 
-#[allow(dead_code)] // fields read by the login handler (slice 2.3) this session
+#[derive(Debug)] // RawToken's Debug is redacted; csrf_token is client-visible anyway
 pub struct NewSession {
     pub session_id: Uuid,
     pub token: RawToken,
@@ -53,11 +52,19 @@ pub struct NewSession {
     pub csrf_token: String,
 }
 
-#[allow(dead_code)] // fields read by the session middleware (slice 2.3) this session
 pub struct ResolvedSession {
     pub session_id: Uuid,
     pub actor: Actor,
     /// SHA-256 of the session's CSRF token, for the CSRF middleware.
+    pub csrf_token_hash: Vec<u8>,
+}
+
+/// What the session middleware leaves in request extensions alongside the
+/// `Actor`: enough to log the session out and to check CSRF tokens.
+#[derive(Clone)]
+pub struct CurrentSession {
+    pub session_id: Uuid,
+    #[allow(dead_code)] // read by the CSRF middleware (slice 2.4) this session
     pub csrf_token_hash: Vec<u8>,
 }
 
@@ -69,7 +76,6 @@ pub struct SessionService {
 }
 
 impl SessionService {
-    #[allow(dead_code)] // constructed in main.rs (slice 2.3) this session
     pub fn new(pool: PgPool, idle_secs: u64, absolute_secs: u64) -> Self {
         Self {
             pool,
@@ -80,7 +86,6 @@ impl SessionService {
 
     /// Create a session for an already-authenticated user. `session_version`
     /// must be the value read from `user_account` during authentication.
-    #[allow(dead_code)] // called by login (slice 2.3) this session
     pub async fn create(
         &self,
         user_id: Uuid,
@@ -124,7 +129,6 @@ impl SessionService {
     /// Resolve a raw cookie token to an Actor. `Ok(None)` is every "no valid
     /// session" case — the caller cannot distinguish unknown, expired,
     /// revoked, stale-version, or suspended, and neither can the client.
-    #[allow(dead_code)] // called by the session middleware (slice 2.3) this session
     pub async fn resolve(&self, raw_token: &str) -> Result<Option<ResolvedSession>, AppError> {
         let row = sqlx::query_as::<_, SessionRow>(
             r#"
@@ -212,7 +216,6 @@ impl SessionService {
     }
 
     /// Revoke one session (logout). Idempotent.
-    #[allow(dead_code)] // called by logout (slice 2.3) this session
     pub async fn revoke(&self, session_id: Uuid) -> Result<(), AppError> {
         sqlx::query(
             "UPDATE user_session SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL",

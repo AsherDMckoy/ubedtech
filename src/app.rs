@@ -7,21 +7,26 @@ use sqlx::PgPool;
 
 use crate::config::Environment;
 
-// Phase 2 wraps these routes with session, CSRF, payload-limit, and license
-// middleware (LicenseGate::require_active). Until then they are reachable but
-// every handler 401s because nothing populates the Actor extension.
+// Handlers here declare an `Actor` parameter, which the session middleware
+// populates from the session cookie; without a valid session they 401. The
+// license middleware (slice 2.5) additionally locks these behind an active
+// license.
 pub fn protected_routes(cfg: &mut web::ServiceConfig) {
     cfg.configure(crate::enrollment::http::routes)
         .configure(crate::records::http::routes)
         .configure(crate::documents::http::routes);
 }
 
+// Reachable while the institution license is locked: probes, license
+// recovery, and the session routes — a platform licensing admin has to be
+// able to sign in to unlock a locked deployment.
 pub fn recovery_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/health/live", web::get().to(health_live));
     cfg.route("/health/ready", web::get().to(health_ready));
     cfg.route("/license/status", web::get().to(license_status));
     cfg.route("/license/import", web::post().to(import_license));
     cfg.route("/institution-locked", web::get().to(locked_page));
+    cfg.configure(crate::identity_access::http::routes);
 }
 
 /// Liveness: the process is running and the event loop answers. No

@@ -32,7 +32,6 @@ pub struct PasswordService {
 }
 
 impl PasswordService {
-    #[allow(dead_code)] // constructed by login (slice 2.3) and bootstrap (slice 2.8) this session
     pub fn new(memory_kib: u32, time_cost: u32, parallelism: u32) -> Result<Self, PasswordError> {
         let params = Params::new(memory_kib, time_cost, parallelism, None)
             .map_err(|_| PasswordError::InvalidParams)?;
@@ -41,7 +40,6 @@ impl PasswordService {
         })
     }
 
-    #[allow(dead_code)] // constructed by login (slice 2.3) and bootstrap (slice 2.8) this session
     pub fn from_config(config: &crate::config::AppConfig) -> Result<Self, PasswordError> {
         Self::new(
             config.argon2_memory_kib,
@@ -54,7 +52,6 @@ impl PasswordService {
     ///
     /// Memory- and CPU-hard on purpose: HTTP call sites must run this via
     /// `web::block`, never directly on an Actix worker thread (CLAUDE.md §4).
-    #[allow(dead_code)] // called by login (slice 2.3) and bootstrap (slice 2.8) this session
     pub fn hash(&self, password: &str) -> Result<String, PasswordError> {
         // OS entropy for the salt; RECOMMENDED_LENGTH is 16 bytes.
         let mut salt_bytes = [0u8; argon2::RECOMMENDED_SALT_LEN];
@@ -76,7 +73,6 @@ impl PasswordService {
     /// must treat that as a server-side fault to log, while still answering
     /// the client with the same generic authentication failure. Same
     /// `web::block` requirement as `hash`.
-    #[allow(dead_code)] // called by login (slice 2.3) this session
     pub fn verify(&self, stored_phc: &str, candidate: &str) -> Result<bool, PasswordError> {
         let parsed = PasswordHash::new(stored_phc).map_err(|_| PasswordError::UnsupportedHash)?;
 

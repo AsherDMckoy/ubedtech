@@ -27,7 +27,6 @@ pub enum LicenseStatus {
 
 #[derive(Clone)]
 pub struct LicenseGate {
-    #[allow(dead_code)] // read by the gate methods wired into middleware in Phase 2.5
     current: Arc<ArcSwap<LicenseSnapshot>>,
 }
 
@@ -60,7 +59,6 @@ impl LicenseGate {
         self.current.store(Arc::new(snapshot));
     }
 
-    #[allow(dead_code)] // called by LicenseService once its routes register in Phase 7.2
     pub fn snapshot(&self) -> Arc<LicenseSnapshot> {
         self.current.load_full()
     }

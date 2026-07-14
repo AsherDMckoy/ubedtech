@@ -39,14 +39,15 @@ pub struct AppConfig {
     pub argon2_time_cost: u32,
     pub argon2_parallelism: u32,
     /// Idle session deadline, refreshed on activity (seconds).
-    #[allow(dead_code)]
-    // read when main.rs constructs SessionService (slice 2.3, this session)
     pub session_idle_secs: u64,
     /// Absolute session deadline fixed at login (seconds); an active session
     /// still ends when it is reached.
-    #[allow(dead_code)]
-    // read when main.rs constructs SessionService (slice 2.3, this session)
     pub session_absolute_secs: u64,
+    /// Failed logins allowed per account+IP inside one throttle window.
+    pub login_max_failures: u32,
+    /// Length of the fixed throttle window (seconds). The counter resets
+    /// when the window expires — throttling can never become permanent.
+    pub login_throttle_window_secs: u64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -142,6 +143,15 @@ impl AppConfig {
             parse_positive_u64,
         )?;
 
+        let login_max_failures =
+            parse_or_default(&get, "APP_LOGIN_MAX_FAILURES", "10", parse_positive_u32)?;
+        let login_throttle_window_secs = parse_or_default(
+            &get,
+            "APP_LOGIN_THROTTLE_WINDOW_SECS",
+            "900",
+            parse_positive_u64,
+        )?;
+
         if session_idle_secs > session_absolute_secs {
             return Err(ConfigError::Invalid {
                 key: "APP_SESSION_IDLE_SECS",
@@ -168,6 +178,8 @@ impl AppConfig {
             argon2_parallelism,
             session_idle_secs,
             session_absolute_secs,
+            login_max_failures,
+            login_throttle_window_secs,
         })
     }
 }
@@ -233,6 +245,8 @@ mod tests {
         assert_eq!(config.argon2_parallelism, 1);
         assert_eq!(config.session_idle_secs, 1800);
         assert_eq!(config.session_absolute_secs, 43200);
+        assert_eq!(config.login_max_failures, 10);
+        assert_eq!(config.login_throttle_window_secs, 900);
     }
 
     #[test]
