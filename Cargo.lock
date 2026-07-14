@@ -422,6 +422,7 @@ checksum = "8259ebd5ee48a37fd8931116405456fd67efbb5435b4789e45bdbccf5d7dea7e"
 name = "backend"
 version = "0.1.0"
 dependencies = [
+ "actix-http",
  "actix-web",
  "arc-swap",
  "argon2",

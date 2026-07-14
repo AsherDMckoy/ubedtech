@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+# actix-http is already in actix-web's tree; the direct dependency exists only
+# for h1::Payload, which the CSRF middleware uses to re-inject buffered bodies.
+actix-http = "3"
 actix-web = "4"
 askama = "0.16"
 arc-swap = "1"

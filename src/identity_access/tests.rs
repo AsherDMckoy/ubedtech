@@ -58,6 +58,22 @@ async fn whoami(actor: Actor) -> HttpResponse {
     }))
 }
 
+#[derive(serde::Deserialize)]
+struct FormProbeBody {
+    // Present so the CSRF middleware's re-injected body still deserializes;
+    // validation happened in the middleware.
+    #[serde(rename = "csrf_token")]
+    _csrf_token: String,
+    note: String,
+}
+
+/// Test-only form endpoint proving the CSRF middleware buffers, checks, and
+/// re-injects urlencoded bodies without breaking handler extraction.
+#[actix_web::post("/probe/form")]
+async fn form_probe(_actor: Actor, form: web::Form<FormProbeBody>) -> HttpResponse {
+    HttpResponse::Ok().body(format!("noted:{}", form.note))
+}
+
 macro_rules! test_app {
     ($pool:expr, $institution:expr) => {
         actix_test::init_service(
@@ -69,14 +85,32 @@ macro_rules! test_app {
                     secure: false,
                     max_age_secs: 43200,
                 }))
+                // Same order as main.rs: csrf innermost (needs the session
+                // already resolved), then session resolution.
+                .wrap(actix_web::middleware::from_fn(
+                    crate::identity_access::csrf::csrf_middleware,
+                ))
                 .wrap(actix_web::middleware::from_fn(
                     crate::identity_access::middleware::session_middleware,
                 ))
                 .configure(crate::identity_access::http::routes)
-                .service(whoami),
+                .service(whoami)
+                .service(form_probe),
         )
         .await
     };
+}
+
+/// Login over HTTP, returning the session cookie and the CSRF token.
+macro_rules! login_session {
+    ($app:expr, $user:expr, $pw:expr) => {{
+        let response = actix_test::call_service($app, login_request($user, $pw).to_request()).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let cookie = session_cookie_from(&response);
+        let body: serde_json::Value = actix_test::read_body_json(response).await;
+        let csrf = body["csrf_token"].as_str().unwrap().to_owned();
+        (cookie, csrf)
+    }};
 }
 
 async fn seed_institution(pool: &PgPool) -> Uuid {
@@ -295,11 +329,7 @@ async fn full_session_lifecycle_login_use_logout(pool: PgPool) {
     seed_credentialed_user(&pool, institution_id, "cycle.user", "pw-cycle-1", "active").await;
     let app = test_app!(&pool, institution_id);
 
-    let login =
-        actix_test::call_service(&app, login_request("cycle.user", "pw-cycle-1").to_request())
-            .await;
-    assert_eq!(login.status(), StatusCode::OK);
-    let cookie = session_cookie_from(&login);
+    let (cookie, csrf) = login_session!(&app, "cycle.user", "pw-cycle-1");
 
     let authed = actix_test::call_service(
         &app,
@@ -316,6 +346,7 @@ async fn full_session_lifecycle_login_use_logout(pool: PgPool) {
         actix_test::TestRequest::post()
             .uri("/api/v1/session/logout")
             .cookie(cookie.clone())
+            .insert_header((crate::identity_access::csrf::CSRF_HEADER, csrf.as_str()))
             .to_request(),
     )
     .await;
@@ -499,4 +530,117 @@ async fn successful_login_resets_the_failure_budget(pool: PgPool) {
     .await
     .unwrap();
     assert_eq!(remaining, None);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn csrf_missing_wrong_and_cross_session_tokens_are_403(pool: PgPool) {
+    let institution_id = seed_institution(&pool).await;
+    seed_credentialed_user(&pool, institution_id, "alpha.user", "pw-alpha", "active").await;
+    seed_credentialed_user(&pool, institution_id, "bravo.user", "pw-bravo", "active").await;
+    let app = test_app!(&pool, institution_id);
+
+    let (cookie_a, csrf_a) = login_session!(&app, "alpha.user", "pw-alpha");
+    let (_cookie_b, csrf_b) = login_session!(&app, "bravo.user", "pw-bravo");
+
+    // Missing token.
+    let missing = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri("/api/v1/session/logout")
+            .cookie(cookie_a.clone())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(missing.status(), StatusCode::FORBIDDEN);
+
+    // Wrong token.
+    let wrong = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri("/api/v1/session/logout")
+            .cookie(cookie_a.clone())
+            .insert_header((crate::identity_access::csrf::CSRF_HEADER, "deadbeef"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(wrong.status(), StatusCode::FORBIDDEN);
+
+    // A perfectly valid token — minted for a DIFFERENT session.
+    let cross = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri("/api/v1/session/logout")
+            .cookie(cookie_a.clone())
+            .insert_header((crate::identity_access::csrf::CSRF_HEADER, csrf_b.as_str()))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(cross.status(), StatusCode::FORBIDDEN);
+
+    // None of those rejections killed the session...
+    let alive = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/probe/whoami")
+            .cookie(cookie_a.clone())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(alive.status(), StatusCode::OK);
+
+    // ...and the right token succeeds.
+    let success = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri("/api/v1/session/logout")
+            .cookie(cookie_a)
+            .insert_header((crate::identity_access::csrf::CSRF_HEADER, csrf_a.as_str()))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(success.status(), StatusCode::NO_CONTENT);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn csrf_form_field_is_accepted_and_the_body_survives_for_the_handler(pool: PgPool) {
+    let institution_id = seed_institution(&pool).await;
+    seed_credentialed_user(&pool, institution_id, "form.user", "pw-form", "active").await;
+    let app = test_app!(&pool, institution_id);
+
+    let (cookie, csrf) = login_session!(&app, "form.user", "pw-form");
+
+    let ok = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri("/probe/form")
+            .cookie(cookie.clone())
+            .insert_header((
+                actix_web::http::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            ))
+            .set_payload(format!("note=hello&csrf_token={csrf}"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(ok.status(), StatusCode::OK);
+    let body = actix_test::read_body(ok).await;
+    assert_eq!(
+        body, "noted:hello",
+        "handler still received the buffered form body"
+    );
+
+    let bad = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri("/probe/form")
+            .cookie(cookie)
+            .insert_header((
+                actix_web::http::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            ))
+            .set_payload("note=hello&csrf_token=forged")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(bad.status(), StatusCode::FORBIDDEN);
 }

@@ -64,7 +64,6 @@ pub struct ResolvedSession {
 #[derive(Clone)]
 pub struct CurrentSession {
     pub session_id: Uuid,
-    #[allow(dead_code)] // read by the CSRF middleware (slice 2.4) this session
     pub csrf_token_hash: Vec<u8>,
 }
 
