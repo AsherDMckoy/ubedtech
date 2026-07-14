@@ -120,6 +120,11 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::from_fn(
                 crate::identity_access::middleware::session_middleware,
             ))
+            // License gate sits outside the session: a locked deployment
+            // answers 402 before any database work happens.
+            .wrap(middleware::from_fn(
+                crate::licensing::middleware::license_middleware,
+            ))
             .wrap(middleware::NormalizePath::trim())
             .wrap(app::security_headers(environment))
             // Correlation + completion logging with redaction by construction;

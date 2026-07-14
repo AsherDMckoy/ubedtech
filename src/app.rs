@@ -17,9 +17,10 @@ pub fn protected_routes(cfg: &mut web::ServiceConfig) {
         .configure(crate::documents::http::routes);
 }
 
-// Reachable while the institution license is locked: probes, license
-// recovery, and the session routes — a platform licensing admin has to be
-// able to sign in to unlock a locked deployment.
+// Reachable while the institution license is locked (see
+// licensing::middleware::is_license_exempt): probes, license recovery, the
+// session routes, and the platform license-management fragment — a platform
+// licensing admin has to be able to sign in and unlock a locked deployment.
 pub fn recovery_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/health/live", web::get().to(health_live));
     cfg.route("/health/ready", web::get().to(health_ready));
@@ -27,6 +28,7 @@ pub fn recovery_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/license/import", web::post().to(import_license));
     cfg.route("/institution-locked", web::get().to(locked_page));
     cfg.configure(crate::identity_access::http::routes);
+    cfg.configure(crate::licensing::http::routes);
 }
 
 /// Liveness: the process is running and the event loop answers. No
@@ -47,14 +49,38 @@ async fn health_ready(readiness: web::Data<Readiness>) -> HttpResponse {
     }
 }
 
-async fn license_status() -> &'static str {
-    "status"
+/// Current license state, readable while locked so an operator can see WHY
+/// requests are answering 402. Validity window and version only — no
+/// feature set, no internal identifiers.
+async fn license_status(gate: web::Data<crate::licensing::LicenseGate>) -> HttpResponse {
+    let snapshot = gate.snapshot();
+    HttpResponse::Ok().json(serde_json::json!({
+        "status": snapshot.status,
+        "valid_from": snapshot.valid_from,
+        "valid_until": snapshot.valid_until,
+        "version": snapshot.version,
+    }))
 }
-async fn import_license() -> &'static str {
-    "import"
+
+/// Signed-license import is the self-hosted recovery path, scheduled for
+/// Phase 7.1. Until then this answers an honest 501 — never a fake success.
+async fn import_license() -> HttpResponse {
+    HttpResponse::NotImplemented().json(serde_json::json!({
+        "code": "not_implemented",
+        "message": "signed license import is not available in this build",
+    }))
 }
-async fn locked_page() -> &'static str {
-    "Institution access is inactive."
+
+async fn locked_page() -> HttpResponse {
+    HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(
+            "<!doctype html><html lang=\"en\"><head><title>Institution locked</title></head>\
+             <body><h1>Institution access is inactive.</h1>\
+             <p>This institution's license is not currently active. Staff can check \
+             <a href=\"/license/status\">the license status</a> or contact the platform \
+             operator.</p></body></html>",
+        )
 }
 
 /// Shared readiness flag: written by the prober task, read by every

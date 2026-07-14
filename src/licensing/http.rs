@@ -6,11 +6,12 @@ use uuid::Uuid;
 use crate::licensing::{LicenseService, LicenseStatus};
 
 #[derive(Deserialize)]
-#[allow(dead_code)] // constructed by Form extraction once this route registers in Phase 7.2
 pub struct LicenseStatusForm {
     status: String,
     reason: String,
-    csrf_token: String,
+    // Consumed by the CSRF middleware; kept so the form deserializes.
+    #[serde(rename = "csrf_token")]
+    _csrf_token: String,
 }
 
 #[post("/ui/platform/institutions/{institution_id}/license")]
@@ -20,7 +21,6 @@ pub async fn change_license_fragment(
     institution_id: web::Path<Uuid>,
     form: web::Form<LicenseStatusForm>,
 ) -> Result<HttpResponse, AppError> {
-    let _ = &form.csrf_token;
     let status = match form.status.as_str() {
         "active" => LicenseStatus::Active,
         "suspended" => LicenseStatus::Suspended,
@@ -38,4 +38,8 @@ pub async fn change_license_fragment(
             r#"<section id="license-panel"><p role="status">License status updated to {:?}. Version {}.</p></section>"#,
             snapshot.status, snapshot.version
         )))
+}
+
+pub fn routes(cfg: &mut web::ServiceConfig) {
+    cfg.service(change_license_fragment);
 }

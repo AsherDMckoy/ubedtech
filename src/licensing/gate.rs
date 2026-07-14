@@ -37,13 +37,15 @@ impl LicenseGate {
         }
     }
 
-    #[allow(dead_code)] // called by the Phase 2.5 license middleware
-    pub fn require_active(&self, institution_id: Uuid) -> Result<(), AppError> {
+    /// Active right now? Status must be `active` and the wall clock inside
+    /// the validity window. Single-tenant: the snapshot IS the deployment's
+    /// license, so no institution argument is needed before a session
+    /// exists. (A per-institution variant returns with multi-tenancy.)
+    pub fn require_deployment_active(&self) -> Result<(), AppError> {
         let snapshot = self.current.load();
         let now = Utc::now();
 
-        let active = snapshot.institution_id == institution_id
-            && snapshot.status == LicenseStatus::Active
+        let active = snapshot.status == LicenseStatus::Active
             && now >= snapshot.valid_from
             && now < snapshot.valid_until;
 
@@ -54,7 +56,6 @@ impl LicenseGate {
         }
     }
 
-    #[allow(dead_code)] // called by LicenseService once its routes register in Phase 7.2
     pub fn replace(&self, snapshot: LicenseSnapshot) {
         self.current.store(Arc::new(snapshot));
     }
