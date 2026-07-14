@@ -19,7 +19,21 @@ build against a PostgreSQL 16 service.
 database per test from `DATABASE_URL`, runs all migrations from empty, and
 tears it down. Local runs need PostgreSQL and the `DATABASE_URL` from `.env`.
 
-## Current suite (22 tests)
+**Local parallelism:** with 40+ database tests, unbounded test threads can
+exhaust local PostgreSQL connections (`PoolTimedOut` in sqlx's testing
+harness — an infrastructure flake, not a code failure). Run
+`cargo test --all-targets --all-features -- --test-threads=4` locally;
+CI's service container copes with the default.
+
+## Current suite (67 tests as of Phase 2)
+
+Phase 2 added 45 tests across `identity_access` (password unit tests,
+session-store sqlx tests, HTTP lifecycle/CSRF/throttle/rotation/role tests,
+policy unit tests, bootstrap tests) and `licensing` (exemption unit tests,
+402 lock/unlock end-to-end). The full role × operation mapping is in
+`docs/PERMISSIONS.md` — every matrix row cites its proving tests.
+
+Baseline suite from Phases 0–1:
 
 - `enrollment::tests::only_one_student_gets_the_last_seat` — races two
   registrations for one remaining seat over real PostgreSQL and asserts
@@ -44,4 +58,8 @@ tears it down. Local runs need PostgreSQL and the `DATABASE_URL` from `.env`.
 - Integration tests that need the schema use `#[sqlx::test]`; never point
   tests at a shared long-lived database.
 - Every phase adds its acceptance tests per `IMPLEMENTATION_PLAN.md`; the
-  role × operation matrix tests land with `docs/PERMISSIONS.md` in Phase 8.
+  role × operation matrix started with Phase 2 (`docs/PERMISSIONS.md` —
+  rows only exist when test-backed) and is completed in Phase 8.
+- HTTP tests build the app with the same middleware registration order as
+  `main.rs` (see the `test_app!` macros); if `main.rs` ordering changes,
+  change the macros with it.

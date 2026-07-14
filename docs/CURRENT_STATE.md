@@ -185,3 +185,55 @@ license gate not enforced on requests (401-not-402 behavior above), defects
 1, 3, 4, 5, 6 from the list open. The §1 defect statuses and the
 "missing entirely" list above remain the authoritative gap record except
 where this section says otherwise.
+
+---
+
+## Phase 2 outcome (2026-07-14)
+
+**CLAUDE.md §1 item 1 is CLOSED.** The Actor/session/CSRF/license
+middleware is wired in `main.rs` and proven over HTTP: a request without a
+valid session answers 401
+(`identity_access::tests::request_without_a_session_is_401`) and any
+request to a locked institution answers 402
+(`licensing::tests::locked_institution_answers_402_and_recovery_stays_
+reachable`). `argon2`, `subtle`, and `rand` all have calling code now.
+
+Delivered (details in `docs/SECURITY.md`, matrix in `docs/PERMISSIONS.md`,
+per-slice commits in git history):
+
+- Argon2id credential storage, configurable documented parameters;
+  12-character minimum on every password path.
+- Opaque 256-bit session tokens, SHA-256 hash stored (migration 0007 adds
+  `token_hash`/`idle_expires_at` to the empty `user_session` table and
+  seeds the 7 role codes); idle + absolute expiry; hardened cookie.
+- Session middleware populates `Actor`/`CurrentSession` in request
+  extensions; extractors 401 when absent; middleware itself never
+  allowlists paths.
+- Login (`POST /api/v1/session/login`) with uniform failure responses,
+  dummy-hash timing equalization, per account+IP fixed-window throttling
+  (migration 0008), rotation of any presented session; logout revokes.
+- CSRF middleware: session-bound token, header or form field, constant-time
+  compare, urlencoded bodies buffered and re-injected; login is the sole
+  exemption.
+- License middleware outside the session layer: locked ⇒ 402 before
+  routing, tested exemption list keeps the recovery surface (health,
+  license status/import, locked page, login/logout, `/ui/platform/`)
+  reachable; recovery-route stubs replaced with real handlers
+  (import remains an honest 501 until Phase 7.1).
+- Rotation/revocation triggers: self password change (current password
+  required), admin reset, suspension, role grant/revoke — target sessions
+  revoked and audited in the same transaction, every trigger HTTP-tested.
+- `identity_access/policy.rs` (pure, unit-tested across all 7 roles) +
+  role-assignment API; `platform_licensing_admin` unreachable via HTTP.
+- `backend bootstrap-platform-admin` one-shot CLI (stdin-only password,
+  works while locked/unlicensed, audited) — documented in OPERATIONS.md.
+- No dev auth bypass exists (grep + release build verified);
+  `cargo build --release` succeeds.
+- Test count: 22 → 67 (`cargo test -- --test-threads=4`; unbounded
+  parallelism can exhaust local Postgres connections — infra, not code).
+
+**Open defects from the §1 list: 3 (job reaper), 4 (capacity row), 5
+(add-vs-drop deadline), 6 (dead override branch)** — owed by Phases 3/4/6
+per `docs/IMPLEMENTATION_PLAN.md`. New debt recorded there and in
+`docs/PERMISSIONS.md`: per-role deny tests for enrollment/grades/documents,
+reverse-proxy IP policy for throttling.

@@ -1,45 +1,146 @@
 # Security
 
-Status: Phase 1 (foundation). Authentication, sessions, CSRF, and license
-enforcement do not exist yet — they are Phase 2 and the system is not
-deployable until then. This file records what is already enforced and the
-baseline every later phase must keep.
+Status: Phase 2 (identity & access) implemented. Authentication, sessions,
+CSRF, and license enforcement are live and test-backed. This file records
+what is enforced, how, and what is deliberately deferred.
 
-## Enforced today (with the test that proves it)
+## Sessions
 
-| Control | Where | Proof |
-|---|---|---|
-| Raw SQL/internal errors never reach clients | `shared/error.rs` maps Database/Template/Internal to a generic body and logs detail server-side | `shared::error::tests::database_errors_never_reach_the_client` |
-| Security headers on every response | `app::security_headers` | `app::tests::security_headers_are_present_and_csp_is_alpine_csp_compatible` |
-| CSP compatible with Alpine CSP build (no `unsafe-eval`/`unsafe-inline`) | same | same test asserts their absence |
-| HSTS in production only | same | `app::tests::hsts_is_production_only` |
-| No query strings / headers / cookies / bodies in logs | `shared/observability.rs` logs method, path, status, duration only — redaction by construction | code review; the middleware has no access path that logs them |
-| Correlation ids resist log injection | inbound `x-request-id` must be 8–64 chars of `[A-Za-z0-9_-]` or it is replaced | `shared::observability::tests::hostile_inbound_request_id_is_replaced` |
-| Config errors never echo values | `config::ConfigError` Display | `config::tests::config_error_display_never_echoes_values` |
-| Bounded request bodies | 64 KiB JSON/form, 256 KiB payload defaults in `main.rs` | raise per-route deliberately, never globally |
-| No secrets in the repo | `.env` gitignored; `.env.example` contains none; token/secret hashes only in future schema | `.gitignore`; review |
-| Fail closed without a license row | startup refuses to serve protected traffic if `institution_license` is empty | `main::load_initial_license` |
+- **Opaque server-side tokens.** 256-bit random tokens (OsRng), issued once
+  in the `Set-Cookie` header; the database stores only the SHA-256 hash
+  (`user_session.token_hash`, unique). A database dump cannot be replayed
+  as cookies. Proof: `sessions::raw_token_is_never_stored`.
+- **Cookie attributes:** `HttpOnly`, `SameSite=Lax`, `Path=/`, `Max-Age` =
+  absolute deadline; `Secure` when `APP_ENV=production`. Proof:
+  `valid_session_reaches_the_handler_with_the_correct_actor`.
+- **Two deadlines**, both explicit: idle (`APP_SESSION_IDLE_SECS`, default
+  1800, slides on activity at most once per 60s) and absolute
+  (`APP_SESSION_ABSOLUTE_SECS`, default 43200, never slides). Config
+  refuses idle > absolute. Proofs: `sessions::idle_expired…`,
+  `absolutely_expired…`, `activity_slides_the_idle_deadline`.
+- **Resolution fails closed** on: unknown token, revocation, either
+  deadline, stale `session_version`, non-active account status, unknown
+  role codes in the database (500, never a partial actor).
+- **Rotation:** logging in over an existing session revokes it and issues a
+  fresh token (`logging_in_again_rotates_the_presented_session`); changing
+  your own password revokes every session and re-issues one to that client
+  (`password_change_rotates_this_session_and_revokes_all_others`).
+- **Revocation triggers:** logout; suspension; admin password reset; any
+  role grant/revoke (privilege change ⇒ target's sessions die, same
+  transaction as the change and its audit row). `session_version` on
+  `user_account` is the kill-everything lever: bumping it invalidates all
+  live sessions at resolve time.
 
-## Known-insecure until Phase 2 (do not deploy)
+## Passwords
 
-- No login exists; every protected route 401s for everyone.
-- `LicenseGate::require_active` is not called on any request path — a
-  suspended institution is not actually locked (401 instead of 402).
-- CSRF tokens appear in forms but nothing validates them.
-- `argon2`/`subtle` are unused dependencies until the password slice.
-- The `user_session` schema stores a bare uuid as the session identifier;
-  Phase 2.2 replaces it with a stored hash of an opaque high-entropy token.
+- **Argon2id only.** PHC-format hashes with parameters embedded; verify
+  rejects any non-argon2id hash (logged as a server fault, client sees the
+  generic 401). Parameters from config, documented in `.env.example`:
+  `APP_ARGON2_MEMORY_KIB` (default 19456), `APP_ARGON2_TIME_COST` (2),
+  `APP_ARGON2_PARALLELISM` (1) — OWASP baseline. Hashing/verification runs
+  on the blocking pool, never an Actix worker thread.
+- **Minimum length** `MIN_PASSWORD_CHARS = 12` (characters, not bytes),
+  enforced on self-service change, admin reset, and bootstrap alike. No
+  composition rules (length beats complexity theater).
+- **Self-service change requires the current password** — a stolen session
+  alone cannot take over the account.
+- **Login answers are uniform.** Unknown username, wrong password,
+  suspended account, unusable stored hash: byte-identical 401 bodies, and
+  Argon2 verification always runs (dummy hash when no credential exists) so
+  timing does not distinguish them. Proof:
+  `login_failures_all_get_the_same_generic_401`.
 
-## Standing rules (CLAUDE.md §2 restated where Phase 1 touches them)
+## Login throttling
 
-- `.env` is a development convenience only and never overrides real
-  environment variables; production secrets come from the deployment's
-  secret store.
-- There is no development auth bypass in the code. If one is ever added it
-  must be behind a cfg that cannot compile into a release binary. The dead
-  `DEV_BYPASS_AUTH` env var was removed in Phase 1.
-- Every new query takes `institution_id` in the WHERE clause and relies on
-  institution-scoped unique constraints; every new sensitive mutation writes
-  its audit row inside the same transaction.
-- PII redaction in logs is by construction: log call sites may not pass
-  user-supplied strings other than the validated correlation id.
+Per (institution, username, client IP) fixed window: `APP_LOGIN_MAX_FAILURES`
+(default 10) failures inside `APP_LOGIN_THROTTLE_WINDOW_SECS` (default 900)
+⇒ 429 until the window lapses. The window is fixed, not ever-growing, and
+scoped per IP, so an attacker cannot permanently lock a victim out globally;
+success clears the budget. Proofs: `throttle_locks_an_account_ip_pair_then_
+expires`, `successful_login_resets_the_failure_budget`.
+
+**Deployment note:** the client IP is the socket peer address (cannot be
+spoofed), never a forwarded header. Behind a reverse proxy every client
+collapses to the proxy's address — before deploying one, revisit
+`identity_access/http.rs::login` and adopt a trusted-proxy header policy
+deliberately.
+
+## CSRF
+
+Real middleware, not advice: every non-safe method with a resolved session
+must present the session-bound token — `X-CSRF-Token` header or `csrf_token`
+form field — matched in constant time against the hash stored on the session
+row. Tokens are per-session; a valid token from another session is rejected.
+The **only** exemption is login, which carries no ambient authority to forge
+(authentication comes entirely from the body credentials; the cookie is
+`SameSite=Lax`). Proofs: `csrf_missing_wrong_and_cross_session_tokens_are_
+403`, `csrf_form_field_is_accepted_and_the_body_survives_for_the_handler`.
+
+## License gate
+
+Middleware outside the session layer: when the deployment's license is not
+active, every request answers **402** before any database work — except the
+tested exemption list (health probes, license status/import, locked page,
+session login/logout, `/ui/platform/` recovery UI), so a platform licensing
+admin can sign in and unlock a locked deployment. Proofs: `licensing::
+middleware` unit tests both directions, `locked_institution_answers_402_and_
+recovery_stays_reachable`, `platform_admin_flips_the_license_end_to_end`.
+
+## Authorization
+
+- Decisions live in services and policy modules (`identity_access/policy.rs`,
+  `enrollment/policy.rs`), never in templates or handlers.
+  `docs/PERMISSIONS.md` is the test-backed role × operation matrix.
+- Institution scoping: admin operations resolve the target inside the
+  actor's institution; other institutions' accounts answer 404
+  (`admin_powers_stop_at_the_institution_boundary`).
+- `platform_licensing_admin` cannot be granted or revoked through any HTTP
+  API. The first (only) one is minted by the operator-run
+  `bootstrap-platform-admin` subcommand, which refuses once one exists,
+  reads the password from stdin only, and audits itself (docs/OPERATIONS.md).
+- Admins cannot suspend themselves or edit their own roles.
+
+## Audit
+
+Sensitive identity mutations write their audit row in the SAME transaction
+as the change: password change/reset, suspension, role grant/revoke,
+license status change, platform-admin bootstrap. Audit detail never
+contains passwords, hashes, or token material.
+
+## Logging and secrets
+
+- Auth events log ids only — never the typed username (it may be a
+  mistyped password), never token material, never `DATABASE_URL`.
+- Request logs carry method/path/status/duration and a validated
+  correlation id; no query strings, headers, cookies, bodies, or PII.
+- There is **no development auth bypass** in the codebase (verified by
+  grep and by `cargo build --release` this session); the only path that
+  populates an `Actor` is the session middleware. If a dev convenience is
+  ever added it must be `cfg`-excluded from release builds.
+- `.env` is dev-only and untracked; `.env.example` contains no secrets.
+
+## Enforced since Phase 1 (still true, still tested)
+
+| Control | Proof |
+|---|---|
+| Raw SQL/internal errors never reach clients | `shared::error::tests::database_errors_never_reach_the_client` |
+| Security headers + Alpine-CSP-compatible CSP (no `unsafe-eval`/`unsafe-inline`) | `app::tests::security_headers_are_present_and_csp_is_alpine_csp_compatible` |
+| HSTS in production only | `app::tests::hsts_is_production_only` |
+| Correlation ids resist log injection | `shared::observability::tests::hostile_inbound_request_id_is_replaced` |
+| Config errors never echo values | `config::tests::config_error_display_never_echoes_values` |
+| Bounded request bodies (64 KiB JSON/form, 256 KiB payload) | set in `main.rs`; abuse tests are Phase 8.2 |
+| Fail closed without a license row | `main::load_initial_license` refuses startup |
+
+## Deliberately deferred
+
+- **Reverse-proxy IP policy** (see throttling note) — decide when a proxy
+  enters the deployment picture.
+- **Password reset by email / self-service recovery** — requires the email
+  boundary (a real replaceable trait per CLAUDE.md §0); until then reset is
+  admin-mediated.
+- **Signed license import** (`/license/import` answers an honest 501) —
+  Phase 7.1, needs the frozen file format first.
+- **Per-role deny tests for enrollment/grades/documents operations** —
+  listed as matrix debt in `docs/PERMISSIONS.md`, owed by Phases 4–6/8.
+- **MFA, session listing/self-service revocation UI** — not in scope for
+  any current phase; revisit after Phase 8.
