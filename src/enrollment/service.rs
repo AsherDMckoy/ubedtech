@@ -284,8 +284,25 @@ impl EnrollmentService {
         .fetch_optional(&mut *tx)
         .await?;
 
-        if reserved.is_none()
-            && !has_override(
+        if reserved.is_none() {
+            // Migration 0010's trigger guarantees a capacity row for every
+            // section. If it is gone anyway (manual deletion, corruption),
+            // that is a broken invariant, not a full section — fail loudly
+            // and distinctly rather than telling the student "section is
+            // full" about a section that has no capacity record at all.
+            let capacity_row_exists: bool = sqlx::query_scalar(
+                "SELECT EXISTS (SELECT 1 FROM section_capacity WHERE section_id = $1)",
+            )
+            .bind(command.section_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            if !capacity_row_exists {
+                return Err(AppError::Integrity(
+                    "section has no section_capacity row; the migration-0010 guarantee was bypassed",
+                ));
+            }
+
+            if !has_override(
                 &mut tx,
                 student_id,
                 context.term_id,
@@ -293,8 +310,9 @@ impl EnrollmentService {
                 "capacity",
             )
             .await?
-        {
-            return Err(AppError::Conflict("section is full".into()));
+            {
+                return Err(AppError::Conflict("section is full".into()));
+            }
         }
 
         // A capacity override needs an explicit capacity policy. For the demo,
@@ -486,7 +504,9 @@ impl EnrollmentService {
         .await?;
 
         if changed.rows_affected() != 1 {
-            return Err(AppError::Internal);
+            return Err(AppError::Integrity(
+                "drop could not release a seat: capacity row missing or enrolled_count drifted",
+            ));
         }
 
         self.audit

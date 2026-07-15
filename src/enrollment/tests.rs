@@ -38,6 +38,105 @@ async fn only_one_student_gets_the_last_seat(pool: sqlx::PgPool) {
     assert_eq!(enrolled_count, 1);
 }
 
+/// CLAUDE.md §1 item 4: a genuinely full section and a section whose capacity
+/// row is missing must fail differently. Full is an ordinary business denial
+/// (Conflict, "section is full"); a missing capacity row is a broken database
+/// invariant (Integrity, generic 500 to the client, loud in the log).
+#[sqlx::test(migrations = "./migrations")]
+async fn missing_capacity_row_fails_distinctly_from_a_full_section(pool: sqlx::PgPool) {
+    let fixture = seed_registration_fixture(&pool, 0).await;
+    let service =
+        crate::enrollment::EnrollmentService::new(pool.clone(), crate::audit::AuditWriter);
+
+    // Capacity 0: an honest business conflict.
+    let full = service
+        .register_for(
+            &fixture.registrar,
+            fixture.student_a,
+            crate::enrollment::RegisterCommand {
+                section_id: fixture.section_id,
+                idempotency_key: uuid::Uuid::new_v4(),
+            },
+        )
+        .await;
+    assert!(
+        matches!(
+            &full,
+            Err(crate::shared::error::AppError::Conflict(message))
+                if message.contains("section is full")
+        ),
+        "a full section is a Conflict: {full:?}"
+    );
+
+    // Delete the capacity row out from under the section (simulating the
+    // pre-0010 defect): the same request must now fail as a broken invariant,
+    // not masquerade as a full section.
+    sqlx::query("DELETE FROM section_capacity WHERE section_id = $1")
+        .bind(fixture.section_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let broken = service
+        .register_for(
+            &fixture.registrar,
+            fixture.student_a,
+            crate::enrollment::RegisterCommand {
+                section_id: fixture.section_id,
+                idempotency_key: uuid::Uuid::new_v4(),
+            },
+        )
+        .await;
+    assert!(
+        matches!(
+            &broken,
+            Err(crate::shared::error::AppError::Integrity(message))
+                if message.contains("capacity")
+        ),
+        "a missing capacity row is an Integrity fault: {broken:?}"
+    );
+
+    // Nothing was enrolled by either failure.
+    let enrollments: i64 = sqlx::query_scalar("SELECT count(*) FROM enrollment")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(enrollments, 0);
+}
+
+/// Migration 0010's trigger: inserting a bare section — any path, not just
+/// the academics service — creates its capacity row in the same transaction,
+/// starting at capacity 0 (fail closed until a registrar opens seats).
+#[sqlx::test(migrations = "./migrations")]
+async fn every_section_gets_a_capacity_row_from_the_trigger(pool: sqlx::PgPool) {
+    let fixture = seed_registration_fixture(&pool, 1).await;
+
+    let bare_section_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        r#"
+        INSERT INTO section (id, institution_id, term_id, course_id, section_code, status)
+        SELECT $1, institution_id, term_id, course_id, '99', 'open'
+        FROM section WHERE id = $2
+        "#,
+    )
+    .bind(bare_section_id)
+    .bind(fixture.section_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (capacity, enrolled_count): (i32, i32) = sqlx::query_as(
+        "SELECT capacity, enrolled_count FROM section_capacity WHERE section_id = $1",
+    )
+    .bind(bare_section_id)
+    .fetch_one(&pool)
+    .await
+    .expect("trigger created the capacity row with the section");
+
+    assert_eq!(capacity, 0);
+    assert_eq!(enrolled_count, 0);
+}
+
 /// ADR-8: one shared `add_drop_closes_at` governs adds AND drops. Before the
 /// deadline both actions work; after it both are refused — there is no window
 /// where a student may drop but not add (or vice versa).
@@ -241,6 +340,7 @@ async fn seed_registration_fixture(pool: &sqlx::PgPool, capacity: i32) -> Fixtur
         r#"
         INSERT INTO section_capacity (section_id, capacity, enrolled_count)
         VALUES ($1, $2, 0)
+        ON CONFLICT (section_id) DO UPDATE SET capacity = EXCLUDED.capacity
         "#,
     )
     .bind(section_id)

@@ -25,6 +25,14 @@ pub enum AppError {
     #[error("conflict: {0}")]
     Conflict(String),
 
+    /// A database invariant the schema is supposed to guarantee was found
+    /// broken (e.g. a section without its capacity row). Clients get the
+    /// generic 500 — this is never their fault — but unlike `Internal` the
+    /// service layer states exactly which invariant failed, and tests can
+    /// assert the failure is distinct from an ordinary business conflict.
+    #[error("data integrity violation: {0}")]
+    Integrity(&'static str),
+
     #[error("database error")]
     Database(#[from] sqlx::Error),
 
@@ -51,7 +59,7 @@ impl ResponseError for AppError {
             Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::Validation(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::Conflict(_) => StatusCode::CONFLICT,
-            Self::Database(_) | Self::Template(_) | Self::Internal => {
+            Self::Integrity(_) | Self::Database(_) | Self::Template(_) | Self::Internal => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
         }
@@ -66,14 +74,16 @@ impl ResponseError for AppError {
             Self::RateLimited => "rate_limited",
             Self::Validation(_) => "validation_error",
             Self::Conflict(_) => "conflict",
-            Self::Database(_) | Self::Template(_) | Self::Internal => "internal_error",
+            Self::Integrity(_) | Self::Database(_) | Self::Template(_) | Self::Internal => {
+                "internal_error"
+            }
         };
 
         // Do not expose raw database or internal errors to the client. The
         // detail goes to the server log instead, where the request-id span
         // ties it back to the failing request.
         let message = match self {
-            Self::Database(_) | Self::Template(_) | Self::Internal => {
+            Self::Integrity(_) | Self::Database(_) | Self::Template(_) | Self::Internal => {
                 tracing::error!(error = ?self, "internal error while handling request");
                 "An internal error occurred".to_owned()
             }
