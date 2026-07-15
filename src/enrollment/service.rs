@@ -72,8 +72,7 @@ impl EnrollmentService {
                 s.course_id,
                 s.status AS section_status,
                 t.registration_opens_at,
-                t.registration_closes_at,
-                t.drop_add_closes_at
+                t.add_drop_closes_at
             FROM section s
             JOIN academic_term t ON t.id = s.term_id
             WHERE s.id = $1
@@ -90,8 +89,10 @@ impl EnrollmentService {
             return Err(AppError::Conflict("section is not open".into()));
         }
 
+        // One shared deadline governs adds and drops (ADR-8): adds are allowed
+        // from registration_opens_at until add_drop_closes_at.
         let now = Utc::now();
-        if now < context.registration_opens_at || now >= context.registration_closes_at {
+        if now < context.registration_opens_at || now >= context.add_drop_closes_at {
             return Err(AppError::Conflict("registration window is closed".into()));
         }
 
@@ -382,7 +383,7 @@ impl EnrollmentService {
             SELECT
                 e.section_id,
                 s.term_id,
-                t.drop_add_closes_at
+                t.add_drop_closes_at
             FROM enrollment e
             JOIN section s ON s.id = e.section_id
             JOIN academic_term t ON t.id = s.term_id
@@ -445,7 +446,7 @@ impl EnrollmentService {
         .await?
         .ok_or(AppError::NotFound)?;
 
-        if Utc::now() >= row.drop_add_closes_at
+        if Utc::now() >= row.add_drop_closes_at
             && !has_override(
                 &mut tx,
                 student_id,
@@ -518,7 +519,7 @@ struct StudentTermState {
 struct DropContext {
     section_id: Uuid,
     term_id: Uuid,
-    drop_add_closes_at: chrono::DateTime<Utc>,
+    add_drop_closes_at: chrono::DateTime<Utc>,
 }
 
 #[derive(Serialize)]

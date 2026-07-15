@@ -93,3 +93,31 @@ without an entry here may not land in a commit.
 
 See Assumption A1 in `IMPLEMENTATION_PLAN.md`: only `backend/` is a git
 repository, and CLAUDE.md §6 requires docs to be committed with code.
+
+## ADR-8: one shared `add_drop_closes_at` deadline for adds and drops
+
+- **Original:** the design docs gave `academic_term` two deadlines —
+  `registration_closes_at` checked by adds, `drop_add_closes_at` checked by
+  drops — and never resolved whether a student may *add* during the drop/add
+  window (CLAUDE.md §1 item 5).
+- **Replacement:** migration 0009 consolidates them into a single
+  `add_drop_closes_at` column governing both actions (the phase-3 prompt's
+  resolved policy). `registration_closes_at` is dropped, not kept as a third
+  overlapping knob; the check becomes
+  `registration_opens_at < add_drop_closes_at`.
+- **Why:** the drop/add window exists so students can swap classes, and a
+  swap is a drop plus an add — a policy that allows one but not the other in
+  the same window is incoherent and was the unresolved question itself. One
+  column also removes an entire class of misconfiguration
+  (`registration_closes_at > drop_add_closes_at` was only prevented by a
+  CHECK, and the gap between the two produced the undecided behavior).
+- **Data migration:** existing rows keep their `drop_add_closes_at` value.
+  This preserves drop behavior exactly and extends adds to the end of the
+  same window; the alternative (keeping the earlier timestamp) would have
+  revoked drop rights students already had.
+- **Consequences:** per-term "registration closes early but drops continue"
+  policies are no longer expressible. If a real institution needs that, it
+  returns as an explicit, tested feature — not as two ambiguously related
+  columns. A registrar `deadline` override remains the escape hatch for
+  late changes (item 6 implementation).
+- **Proof:** `enrollment::tests::one_deadline_governs_both_adds_and_drops`.

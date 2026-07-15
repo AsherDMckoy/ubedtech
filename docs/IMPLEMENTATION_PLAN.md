@@ -278,5 +278,6 @@ flagged in session reports.)
 | A9 | 2026-07-14 | Which institution does a login belong to in this single-tenant deployment? | The institution of the license snapshot loaded at startup. | The deployment refuses to start without exactly this license row; no user-supplied institution selector means no cross-institution login probing. |
 | A10 | 2026-07-14 | Should login require a CSRF token? | No — login is the single CSRF exemption. | Pre-auth there is no session-bound token to present; the request carries no ambient authority (credentials are in the body, cookie is SameSite=Lax). Logout and everything else require the token. |
 
-(Phase 4.1's deadline default and Phase 7's license file format will be
-recorded here when those phases run.)
+| A11 | 2026-07-15 | The Phase 3 prompt resolved item 5 (one shared `add_drop_closes_at` for adds and drops) but not which value existing rows keep when the two old columns consolidate. | Rows keep their `drop_add_closes_at` value; `registration_closes_at` is dropped. | Preserves drop rights exactly as they were; extends adds to the end of the same window (the resolved policy). Keeping the earlier value would have revoked existing drop rights — the anti-conservative direction for students mid-term. ADR-8. |
+
+(Phase 7's license file format will be recorded here when that phase runs.)

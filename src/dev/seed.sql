@@ -60,8 +60,7 @@ INSERT INTO academic_term (
     starts_on,
     ends_on,
     registration_opens_at,
-    registration_closes_at,
-    drop_add_closes_at,
+    add_drop_closes_at,
     grade_entry_closes_at
 )
 VALUES (
@@ -72,7 +71,6 @@ VALUES (
     CURRENT_DATE,
     CURRENT_DATE + 120,
     now() - interval '7 days',
-    now() + interval '30 days',
     now() + interval '37 days',
     now() + interval '150 days'
 )

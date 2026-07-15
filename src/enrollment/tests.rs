@@ -38,6 +38,89 @@ async fn only_one_student_gets_the_last_seat(pool: sqlx::PgPool) {
     assert_eq!(enrolled_count, 1);
 }
 
+/// ADR-8: one shared `add_drop_closes_at` governs adds AND drops. Before the
+/// deadline both actions work; after it both are refused — there is no window
+/// where a student may drop but not add (or vice versa).
+#[sqlx::test(migrations = "./migrations")]
+async fn one_deadline_governs_both_adds_and_drops(pool: sqlx::PgPool) {
+    let fixture = seed_registration_fixture(&pool, 2).await;
+    let service =
+        crate::enrollment::EnrollmentService::new(pool.clone(), crate::audit::AuditWriter);
+
+    // Inside the window: an add succeeds.
+    let receipt = service
+        .register_for(
+            &fixture.registrar,
+            fixture.student_a,
+            crate::enrollment::RegisterCommand {
+                section_id: fixture.section_id,
+                idempotency_key: uuid::Uuid::new_v4(),
+            },
+        )
+        .await
+        .expect("add inside the window succeeds");
+
+    // Past the deadline: adds and drops are both refused.
+    sqlx::query(
+        "UPDATE academic_term SET add_drop_closes_at = now() - interval '1 minute' \
+         WHERE institution_id = $1",
+    )
+    .bind(fixture.registrar.institution_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let late_add = service
+        .register_for(
+            &fixture.registrar,
+            fixture.student_b,
+            crate::enrollment::RegisterCommand {
+                section_id: fixture.section_id,
+                idempotency_key: uuid::Uuid::new_v4(),
+            },
+        )
+        .await;
+    assert!(
+        matches!(
+            &late_add,
+            Err(crate::shared::error::AppError::Conflict(message))
+                if message.contains("registration window")
+        ),
+        "late add must be refused: {late_add:?}"
+    );
+
+    let late_drop = service
+        .drop_for(&fixture.registrar, fixture.student_a, receipt.enrollment_id)
+        .await;
+    assert!(
+        matches!(&late_drop, Err(crate::shared::error::AppError::Conflict(_))),
+        "late drop must be refused: {late_drop:?}"
+    );
+
+    // Reopen the window: the drop now works and frees the seat.
+    sqlx::query(
+        "UPDATE academic_term SET add_drop_closes_at = now() + interval '1 day' \
+         WHERE institution_id = $1",
+    )
+    .bind(fixture.registrar.institution_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    service
+        .drop_for(&fixture.registrar, fixture.student_a, receipt.enrollment_id)
+        .await
+        .expect("drop inside the reopened window succeeds");
+
+    let enrolled_count: i32 =
+        sqlx::query_scalar("SELECT enrolled_count FROM section_capacity WHERE section_id = $1")
+            .bind(fixture.section_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(enrolled_count, 0);
+}
+
 async fn seed_registration_fixture(pool: &sqlx::PgPool, capacity: i32) -> Fixture {
     use crate::shared::actor::{Actor, Role};
     use chrono::{Duration, Utc};
@@ -109,9 +192,9 @@ async fn seed_registration_fixture(pool: &sqlx::PgPool, capacity: i32) -> Fixtur
         r#"
         INSERT INTO academic_term (
             id, institution_id, code, name, starts_on, ends_on,
-            registration_opens_at, registration_closes_at, drop_add_closes_at
+            registration_opens_at, add_drop_closes_at
         )
-        VALUES ($1, $2, $3, 'Test Term', $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, 'Test Term', $4, $5, $6, $7)
         "#,
     )
     .bind(term_id)
@@ -120,7 +203,6 @@ async fn seed_registration_fixture(pool: &sqlx::PgPool, capacity: i32) -> Fixtur
     .bind(now.date_naive())
     .bind((now + Duration::days(120)).date_naive())
     .bind(now - Duration::hours(1))
-    .bind(now + Duration::hours(2))
     .bind(now + Duration::days(7))
     .execute(&mut *tx)
     .await

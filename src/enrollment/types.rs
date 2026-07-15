@@ -22,7 +22,5 @@ pub struct RegistrationContext {
     pub course_id: Uuid,
     pub section_status: String,
     pub registration_opens_at: DateTime<Utc>,
-    pub registration_closes_at: DateTime<Utc>,
-    #[allow(dead_code)] // read by the Phase 4.1 add-during-drop/add window policy
-    pub drop_add_closes_at: DateTime<Utc>,
+    pub add_drop_closes_at: DateTime<Utc>,
 }
