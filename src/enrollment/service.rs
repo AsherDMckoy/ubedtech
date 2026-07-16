@@ -365,31 +365,34 @@ impl EnrollmentService {
         }
 
         let enrollment_id = Uuid::new_v4();
-        let registered_at = Utc::now();
         let source = if actor.student_id == Some(student_id) {
             "student"
         } else {
             "registrar"
         };
 
-        sqlx::query(
+        // RETURNING gives back the timestamp as PostgreSQL stored it
+        // (microseconds). Building the receipt from a Rust-side Utc::now()
+        // would carry nanoseconds the database truncates, so an idempotent
+        // retry — which reads the row back — would not equal the original.
+        let registered_at: chrono::DateTime<Utc> = sqlx::query_scalar(
             r#"
             INSERT INTO enrollment (
                 id, institution_id, student_id, section_id, status,
                 registered_at, source, idempotency_key, created_by_user_id
             )
-            VALUES ($1, $2, $3, $4, 'enrolled', $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, 'enrolled', now(), $5, $6, $7)
+            RETURNING registered_at
             "#,
         )
         .bind(enrollment_id)
         .bind(actor.institution_id)
         .bind(student_id)
         .bind(command.section_id)
-        .bind(registered_at)
         .bind(source)
         .bind(command.idempotency_key)
         .bind(actor.user_id)
-        .execute(&mut *tx)
+        .fetch_one(&mut *tx)
         .await?;
 
         stamp_overrides_consumed(&mut tx, &consumed_override_ids, enrollment_id).await?;
