@@ -74,9 +74,30 @@ grantable or revocable over HTTP (operator bootstrap only — OPERATIONS.md).
 | `GET /ui/registration` | student | current enrollments + drop forms |
 | `POST /ui/registration/add`, `POST /ui/registration/drop` | student | success 303 back to the page (PRG); typed denial re-renders the page with the reason inline, status 409 |
 
-Everything else (records/documents `/ui/*` and `/api/v1/*` routes from
-earlier phases) sits behind session + CSRF + license gate; those endpoints
-get documented here as their phases harden them.
+## Records & grades (Phase 4)
+
+| Method & path | Who | Body → response |
+|---|---|---|
+| `POST /api/v1/sections/{id}/instructors` | registrar, institution_admin | `{instructor_user_id}` → 204; target must hold the instructor role (422) |
+| `GET /api/v1/instructor/sections` | instructor | 200 `[InstructorSection]` — assigned sections only |
+| `GET /api/v1/sections/{id}/roster` | assigned instructor; records_officer (any in institution) | 200 `{section, rows}`; unassigned ⇒ 404 |
+| `POST /api/v1/grades/draft` | assigned instructor (inside entry window); records_officer (window-exempt) | `{enrollment_id,grade_code,grade_points?,numeric_value?,expected_version}` → 200 `{version}`; published grade ⇒ 409 |
+| `POST /api/v1/grades/correct` | records_officer | draft body + `reason` → 200 `{version}`; state becomes `amended`, prior value+author kept in `grade_revision` |
+| `POST /api/v1/sections/{id}/grades/publish` | records_officer | → 200 `{published}` |
+| `POST /api/v1/students/{id}/transcript-snapshots` | records_officer | → 201 `{snapshot_id}`; artifact immutable, versions monotonic |
+| `GET /api/v1/me/grades?term_id` | student (self) | 200 published/amended rows only |
+| `GET /api/v1/me/history` | student (self) | 200 `{courses, snapshots}` — published/amended only |
+| `GET /api/v1/me/schedule?term_id` | student (self) | 200 meetings |
+
+Pages (plain forms): `GET /ui/instructor`, `GET /ui/instructor/sections/{id}`
+(roster + draft entry, states pending/draft/published/amended),
+`POST /ui/instructor/grades`, `POST /ui/instructor/sections/{id}/publish`
+(officer), `GET /ui/grades`, `GET /ui/history`. Denials re-render inline
+(409/422); successes redirect (PRG).
+
+Everything else (documents `/ui/*` and `/api/v1/*` routes from earlier
+phases) sits behind session + CSRF + license gate; those endpoints get
+documented here as their phases harden them.
 
 The authorization behind every row above is test-backed — see
 `docs/PERMISSIONS.md` for the matrix and proving tests.

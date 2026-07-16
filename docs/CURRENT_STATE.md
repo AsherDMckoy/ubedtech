@@ -292,3 +292,41 @@ Also delivered this session (per-slice commits in git history):
 
 **Open §1 defect: 3 (document_job reaper) — owed by Phase 6.1.** Deferred
 from the old plan: institution calendar/events, instructor assignment.
+
+---
+
+## Phase 4 outcome — records & grades (2026-07-15)
+
+(The session prompt numbered this "Phase 4"; it delivers this plan's
+"Phase 5 — Records". §1 item 3, the document-job reaper, is now the ONLY
+open item from the CLAUDE.md defect list — owed by the documents phase.)
+
+- **Instructor assignments** (`assign_instructor`: registrar/institution_
+  admin, target must hold the instructor role, idempotent, audited) and
+  **rosters scoped to assignments**: an instructor's roster and grading
+  reach exactly their assigned sections — any other real section id answers
+  404 (crafted-request tests); a records officer reads any section in the
+  institution and nothing beyond it.
+- **Grade integrity (migration 0013):** every UPDATE of `grade_record`
+  copies the prior row (value, state, author, version) into
+  `grade_revision` via trigger; grade rows are undeletable;
+  `transcript_snapshot` rows are immutable (UPDATE/DELETE refused).
+- **Draft → published → amended workflow:** draft entry can no longer
+  rewrite or unpublish a published grade (the pre-existing hole where
+  save_draft reset state to 'draft' unconditionally is closed); corrections
+  are records-officer commands with a required reason, preserved history,
+  and same-transaction audit. Grade-entry window enforced for instructors,
+  officer exempt; cross-institution enrollment ids answer 404 instead of
+  silently writing nothing.
+- **Student visibility:** published/amended-only is enforced in the queries
+  (`student_grades`, `academic_history`, snapshot content) — no calling
+  convention returns a draft; proven at service level and over the pages.
+- **Immutable transcript snapshots:** officer-generated (audited), monotonic
+  versions serialized on the student row lock, content proven to exclude
+  drafts; students list their own snapshots.
+- **Pages (plain forms, no JavaScript):** /ui/instructor, roster page with
+  per-row draft entry + pending/draft/published/amended states (entry locks
+  once published) + officer publish action, /ui/grades, /ui/history.
+- Test count: 92 → 100. Deferred: unofficial transcript print view,
+  Cache-Control headers on student views, concurrent snapshot-version race
+  test, correction UI (JSON endpoint only).

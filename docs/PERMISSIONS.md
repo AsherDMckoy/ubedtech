@@ -42,6 +42,19 @@ authenticated actor regardless of role; "anon" = no session required.
 | Browse catalog / current term (`GET /ui/catalog`, `GET /api/v1/catalog`, `GET /api/v1/terms/current`) | ❌ 401 | ✅ own institution's rows only | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | `catalog_and_current_term_are_institution_scoped` (two institutions), `ui::login_catalog_register_and_drop_work_as_plain_forms` |
 | Student registration page + form register/drop (`/ui/registration…`) | ❌ 401 | ✅ self | ❌ (no student profile ⇒ 403 from `require_student_self`) | ❌ same | ❌ | ❌ | ❌ | ❌ | `ui::login_catalog_register_and_drop_work_as_plain_forms`, `ui::every_rejection_case_renders_inline_feedback` |
 
+## Matrix (Phase 4: instructor assignments, grades, records)
+
+| Operation | anon | student | instructor | registrar | records_officer | document_officer | institution_admin | platform_licensing_admin | Proof (tests) |
+|---|---|---|---|---|---|---|---|---|---|
+| Assign an instructor to a section (`POST /api/v1/sections/{id}/instructors`) | ❌ | ❌ | ❌ | ✅ target must hold the instructor role | ❌ | ❌ | ✅ same | ❌ | `instructor_assignment_is_validated_scoped_and_idempotent` |
+| List own sections / read a roster (`GET /api/v1/instructor/sections`, `GET /api/v1/sections/{id}/roster`, `/ui/instructor…`) | ❌ 401 | ❌ 403 | ✅ assigned sections ONLY — any other real id is 404 | ❌ | ✅ any section in institution | ❌ | ❌ | ❌ | `rosters_are_visible_only_for_assigned_sections` (crafted-request 404s), `ui::instructor_enters_officer_publishes_student_sees_published_only` |
+| Save a draft grade (`POST /api/v1/grades/draft`, roster form) | ❌ | ❌ | ✅ assigned section only, inside the grade-entry window | ❌ | ✅ any in institution, window-exempt | ❌ | ❌ | ❌ | `unassigned_instructors_cannot_grade_and_students_never_see_drafts`, `grade_entry_window_binds_instructors_not_the_officer` |
+| Rewrite a published grade via draft entry | ❌ | ❌ | ❌ 409 for everyone — published grades only change through correction | ❌ | ❌ 409 | ❌ | ❌ | ❌ | `corrections_preserve_prior_value_and_author_in_history` |
+| Publish a section's draft grades (`POST /api/v1/sections/{id}/grades/publish`, roster form) | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | `corrections_preserve_prior_value_and_author_in_history` (officer publish), service role guard + `ui::…` (no publish button ≠ authorization; the service refuses) |
+| Correct a published grade (`POST /api/v1/grades/correct`) | ❌ | ❌ | ❌ | ❌ | ✅ reason required; prior value + author preserved in `grade_revision` | ❌ | ❌ | ❌ | `corrections_preserve_prior_value_and_author_in_history` |
+| Generate a transcript snapshot (`POST /api/v1/students/{id}/transcript-snapshots`) | ❌ | ❌ | ❌ | ❌ | ✅ own institution (else 404); artifact immutable by DB trigger | ❌ | ❌ | ❌ | `transcript_snapshots_are_immutable_versioned_and_published_only` |
+| Read own grades / academic history / snapshots (`GET /api/v1/me/grades`, `/api/v1/me/history`, `/ui/grades`, `/ui/history`) | ❌ 401 | ✅ self only; **published/amended only — the filter is in the query** | ❌ 403 (no student profile) | ❌ same | ❌ same | ❌ same | ❌ same | ❌ same | `unassigned_instructors_cannot_grade_and_students_never_see_drafts`, `academic_history_spans_terms_and_hides_drafts`, `ui::…` (draft invisible on pages) |
+
 Additional cross-cutting proofs:
 
 - CSRF applies to every state-changing operation above except login:
@@ -60,8 +73,5 @@ Additional cross-cutting proofs:
 These checks exist in code but have no per-role deny tests yet. They get
 rows when their phases add the tests (Phase 4/5/6/8):
 
-- Grade draft save: instructor assigned to the section, or records officer
-  (`records/grades.rs`).
-- Grade publish: records officer only (`records/grades.rs`).
 - Document request: student for self; approve/reject: document officer
   (`documents/service.rs`, `documents/http.rs` admin queue).

@@ -25,9 +25,16 @@ harness — an infrastructure flake, not a code failure). Run
 `cargo test --all-targets --all-features -- --test-threads=4` locally;
 CI's service container copes with the default.
 
-## Current suite (92 tests as of Phase 3)
+## Current suite (100 tests as of Phase 4)
 
-Phase 3 added 25 tests: `academics` (policy unit + role matrix,
+Phase 4 added 8 `records` tests: correction history (prior value + author
+preserved), entry-window enforcement, crafted-request roster/grading
+scoping, instructor-assignment validation, snapshot immutability +
+versioning + published-only content, academic history, and the full
+three-role UI flow (instructor enters → officer publishes → student sees
+published only).
+
+Phase 3 (92 tests) added 25: `academics` (policy unit + role matrix,
 institution scoping across two institutions, unique-code conflicts,
 transactional capacity, meeting/prerequisite validation, catalog),
 `enrollment` (deadline consolidation, distinct missing-capacity failure,

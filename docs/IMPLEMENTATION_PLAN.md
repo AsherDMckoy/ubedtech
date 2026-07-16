@@ -150,20 +150,31 @@ and 6 are closed.
 
 ## Phase 5 — Records & student views
 
-Depends on: Phase 2; enrollment data from Phase 4 for realistic tests.
+**STATUS: COMPLETE (2026-07-15)** — delivered by the session whose prompt
+named it "Phase 4"; remaining debt listed under 5.2/5.3/5.4. Added beyond
+the plan: grade REVISION HISTORY by database trigger (migration 0013, no
+service path can skip it), a records-office CORRECTION workflow (state
+`amended`, required reason, prior value + author preserved), instructor
+assignment + rosters scoped to assignments, officer-generated immutable
+transcript snapshots, academic-history views, and the instructor/officer/
+student pages.
 
-5.1 `[ ]` **Grade entry/publish hardening**: instructor-assignment policy
-    tests, version-conflict test, publish-only-by-records-officer test,
-    grade-entry window (`grade_entry_closes_at`) enforcement (currently
-    unchecked — new).
-5.2 `[ ]` **Student grades/schedule read models** already exist — add the
-    missing tests: students see only published/amended grades and only their
-    own; institution scoping; `Cache-Control: private, no-store` headers.
-5.3 `[ ]` **Unofficial transcript print view** (`web/pages/
-    unofficial_transcript_print.html`) wired to a real route with watermark
-    and timestamp.
-5.4 `[ ]` **Transcript snapshot invariants**: concurrent snapshot version
-    test (two approvals cannot take the same version).
+5.1 `[x]` **Grade entry/publish hardening** — assignment scoping with
+    crafted-request 404s (`rosters_are_visible_only_for_assigned_sections`,
+    `unassigned_instructors_cannot_grade_and_students_never_see_drafts`),
+    version conflicts + officer-only publish + published-grades-immune-to-
+    draft-entry (`corrections_preserve_prior_value_and_author_in_history`),
+    grade-entry window enforced for instructors with the officer exempt
+    (`grade_entry_window_binds_instructors_not_the_officer`).
+5.2 `[~]` **Student read models** — published/amended-only proven at the
+    query level and over HTTP pages; institution scoping in every query.
+    Remaining: `Cache-Control: private, no-store` headers on student views
+    (Phase 8 hardening).
+5.3 `[ ]` **Unofficial transcript print view** — deferred; `/ui/history` is
+    the student academic-history view, the watermarked print view remains.
+5.4 `[~]` **Snapshot invariants** — immutability now database-enforced
+    (trigger, tested) and versions serialize on the student row lock; the
+    dedicated concurrent-version race test remains.
 
 ---
 
@@ -279,5 +290,9 @@ flagged in session reports.)
 | A13 | 2026-07-15 | Which roles grant overrides and manage holds? Docs are silent. | Registrar only (institution_admin excluded). Academic structure (terms/courses/sections/meetings/prereqs) is registrar OR institution_admin. | Overrides/holds bypass integrity rules — one accountable authority. Structure setup must work before a registrar account exists, so the admin may also do it. Policy functions are one line to widen. |
 | A14 | 2026-07-15 | The prompt's no-JavaScript requirement makes browser flows the baseline, but no HTML login existed (Phase 2 login is JSON). | Added `GET/POST /ui/login` (small, shares the JSON login's code path); it joins login as the CSRF exemption (extends A10) and the license-exempt list. | Without it the student pages are unreachable in a real browser with JS off; the alternative (requiring a JSON client to bootstrap a cookie) defeats the requirement. |
 | A15 | 2026-07-15 | Does a `deadline` override let a registrar add a student before registration opens? | No — it lifts only the closing deadline. Before `registration_opens_at` everything is denied. | Early registration is a different privilege from late correction; fail closed until a real requirement shows up. |
+| A16 | 2026-07-15 | Who corrects a published grade, and can a published grade be re-entered as a draft? | Corrections are records-officer only, require a reason, and set state `amended`; draft entry refuses published/amended rows outright (409) for everyone including the officer. | A published grade is a fact students have seen — changing it must be an attributed, reasoned, history-preserving act, never a quiet re-save. The prior save_draft could silently unpublish; that hole is closed. |
+| A17 | 2026-07-15 | Does `grade_entry_closes_at` bind everyone? What does NULL mean? | The window binds instructors only; the records officer may enter late (the escape hatch). NULL = no deadline configured = no window. | Late grades are a real administrative need; routing them through the officer keeps one accountable authority. NULL-means-closed would brick grading on every term seeded before the column was used. |
+| A18 | 2026-07-15 | Where does revision history live? | A BEFORE UPDATE trigger copies the OLD grade row (value, state, author, version) into `grade_revision`; DELETE on grade_record is refused by trigger. | The history invariant must hold for every path — service, script, psql — not just the paths that remember to write a history row. Same reasoning as the 0010 capacity trigger. |
+| A19 | 2026-07-15 | May any user id be assigned as a section instructor? | No — the target must hold the `instructor` role in the institution (else 422), and only registrar/institution_admin assign. | Grading power must flow through the role system; assigning a student as instructor by id typo would otherwise grant it silently. |
 
 (Phase 7's license file format will be recorded here when that phase runs.)
