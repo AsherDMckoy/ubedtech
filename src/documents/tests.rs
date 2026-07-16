@@ -421,3 +421,126 @@ async fn downloads_are_authorized_and_checksum_verified(pool: PgPool) {
         Err(AppError::Forbidden)
     ));
 }
+
+/// Approval: officer-only, reasoned, institution-scoped; the immutable
+/// snapshot and the generation job land in the SAME transaction as the
+/// approved state. Rejection: reasoned and recorded.
+#[sqlx::test(migrations = "./migrations")]
+async fn approval_and_rejection_are_reasoned_scoped_and_atomic(pool: PgPool) {
+    use crate::documents::RequestDocumentCommand;
+    use crate::shared::error::AppError;
+
+    let fx = seed_doc_fixture(&pool).await;
+    let service = doc_service(&pool);
+    let request = |purpose: &str| {
+        service.request_for_self(
+            &fx.student,
+            RequestDocumentCommand {
+                document_type: "official_transcript".into(),
+                purpose: Some(purpose.into()),
+                delivery_method: "download".into(),
+            },
+        )
+    };
+    let first = request("approval test").await.unwrap().request_id;
+
+    // Authorization and validation, none of which may leave any state.
+    assert!(matches!(
+        service.approve(&fx.student, first, "self-approval").await,
+        Err(AppError::Forbidden)
+    ));
+    assert!(matches!(
+        service.approve(&fx.officer, first, "   ").await,
+        Err(AppError::Validation(_))
+    ));
+    let foreign_institution = Uuid::new_v4();
+    sqlx::query("INSERT INTO institution (id, code, name) VALUES ($1, $2, 'F U')")
+        .bind(foreign_institution)
+        .bind(format!("F-{}", &foreign_institution.to_string()[..8]))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let foreign_officer = actor(
+        foreign_institution,
+        Uuid::new_v4(),
+        Role::DocumentOfficer,
+        None,
+    );
+    assert!(matches!(
+        service.approve(&foreign_officer, first, "not yours").await,
+        Err(AppError::NotFound)
+    ));
+    let jobs: i64 = sqlx::query_scalar("SELECT count(*) FROM document_job")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(jobs, 0, "denied approvals queued nothing");
+
+    // The real approval: approved state, snapshot, and queued job are all
+    // present after the one commit — an approved request cannot exist
+    // without durable work to produce its artifact.
+    service
+        .approve(&fx.officer, first, "identity verified at counter")
+        .await
+        .unwrap();
+    let (status, snapshot_id): (String, Option<Uuid>) =
+        sqlx::query_as("SELECT status, current_snapshot_id FROM document_request WHERE id = $1")
+            .bind(first)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(status, "approved");
+    let snapshot_id = snapshot_id.expect("snapshot captured at approval time");
+    let snapshot_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM transcript_snapshot WHERE id = $1)")
+            .bind(snapshot_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(snapshot_exists);
+    let queued: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM document_job WHERE request_id = $1 AND status = 'queued'",
+    )
+    .bind(first)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(queued, 1);
+
+    // Approving twice: the request is no longer pending, so 404 — and no
+    // second job or snapshot appears.
+    assert!(matches!(
+        service.approve(&fx.officer, first, "again").await,
+        Err(AppError::NotFound)
+    ));
+
+    // Rejection requires a reason and records the decision.
+    let second = request("rejection test").await.unwrap().request_id;
+    assert!(matches!(
+        service.reject(&fx.officer, second, "  ").await,
+        Err(AppError::Validation(_))
+    ));
+    service
+        .reject(&fx.officer, second, "identity mismatch")
+        .await
+        .unwrap();
+    assert_eq!(request_status(&pool, second).await, "rejected");
+    let (decision, note): (String, Option<String>) =
+        sqlx::query_as("SELECT decision, note FROM document_approval WHERE request_id = $1")
+            .bind(second)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(decision, "rejected");
+    assert_eq!(note.as_deref(), Some("identity mismatch"));
+
+    // Both decisions audited.
+    let audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_event WHERE action IN \
+         ('document.approved', 'document.rejected')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audits, 2);
+}
