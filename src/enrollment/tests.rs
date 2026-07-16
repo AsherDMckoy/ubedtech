@@ -405,6 +405,160 @@ async fn override_grants_are_registrar_only_validated_and_scoped(pool: sqlx::PgP
     assert_eq!(overrides, 0);
 }
 
+/// Holds: a registrar-placed hold blocks registration with its own distinct
+/// denial; releasing it (or a single-use hold override) admits the student.
+/// Placement/release are registrar-only, institution-scoped, and idempotent.
+#[sqlx::test(migrations = "./migrations")]
+async fn holds_block_registration_until_released_or_overridden(pool: sqlx::PgPool) {
+    use crate::shared::error::AppError;
+
+    let fixture = seed_registration_fixture(&pool, 5).await;
+    let other = seed_registration_fixture(&pool, 5).await;
+    let service =
+        crate::enrollment::EnrollmentService::new(pool.clone(), crate::audit::AuditWriter);
+    let register = |student: uuid::Uuid| {
+        service.register_for(
+            &fixture.registrar,
+            student,
+            crate::enrollment::RegisterCommand {
+                section_id: fixture.section_id,
+                idempotency_key: uuid::Uuid::new_v4(),
+            },
+        )
+    };
+
+    // Only the registrar places holds; cross-institution targets 404; junk
+    // flags are rejected.
+    let student_actor = crate::shared::actor::Actor {
+        user_id: fixture.registrar.user_id,
+        institution_id: fixture.registrar.institution_id,
+        student_id: Some(fixture.student_a),
+        roles: std::collections::HashSet::from([crate::shared::actor::Role::Student]),
+    };
+    assert!(matches!(
+        service
+            .place_hold(
+                &student_actor,
+                fixture.student_a,
+                fixture.term_id,
+                "financial",
+                "self-inflicted"
+            )
+            .await,
+        Err(AppError::Forbidden)
+    ));
+    assert!(matches!(
+        service
+            .place_hold(
+                &fixture.registrar,
+                other.student_a,
+                fixture.term_id,
+                "financial",
+                "wrong school"
+            )
+            .await,
+        Err(AppError::NotFound)
+    ));
+    assert!(matches!(
+        service
+            .place_hold(
+                &fixture.registrar,
+                fixture.student_a,
+                fixture.term_id,
+                "Fin ancial!",
+                "reason"
+            )
+            .await,
+        Err(AppError::Validation(_))
+    ));
+
+    // Hold placed: registration is denied with the hold-specific reason.
+    service
+        .place_hold(
+            &fixture.registrar,
+            fixture.student_a,
+            fixture.term_id,
+            "financial",
+            "unpaid balance",
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        register(fixture.student_a).await,
+        Err(crate::enrollment::types::EnrollError::Denied(
+            crate::enrollment::types::Denial::Hold
+        ))
+    ));
+
+    // Idempotent re-place: no second audit row.
+    service
+        .place_hold(
+            &fixture.registrar,
+            fixture.student_a,
+            fixture.term_id,
+            "financial",
+            "unpaid balance",
+        )
+        .await
+        .unwrap();
+    let hold_audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_event WHERE action = 'enrollment.hold_placed'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(hold_audits, 1);
+
+    // A hold override admits one registration while the hold stands.
+    service
+        .grant_override(
+            &fixture.registrar,
+            fixture.student_a,
+            crate::enrollment::GrantOverrideCommand {
+                term_id: fixture.term_id,
+                section_id: Some(fixture.section_id),
+                override_type: "hold".into(),
+                reason: "dean approved despite balance".into(),
+                expires_at: None,
+            },
+        )
+        .await
+        .unwrap();
+    register(fixture.student_a)
+        .await
+        .expect("hold override admits");
+
+    // Releasing a hold unblocks the student entirely.
+    service
+        .place_hold(
+            &fixture.registrar,
+            fixture.student_b,
+            fixture.term_id,
+            "financial",
+            "unpaid balance",
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        register(fixture.student_b).await,
+        Err(crate::enrollment::types::EnrollError::Denied(
+            crate::enrollment::types::Denial::Hold
+        ))
+    ));
+    service
+        .release_hold(
+            &fixture.registrar,
+            fixture.student_b,
+            fixture.term_id,
+            "financial",
+        )
+        .await
+        .unwrap();
+    register(fixture.student_b)
+        .await
+        .expect("released hold no longer blocks");
+}
+
 /// ADR-8: one shared `add_drop_closes_at` governs adds AND drops. Before the
 /// deadline both actions work; after it both are refused — there is no window
 /// where a student may drop but not add (or vice versa).

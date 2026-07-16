@@ -28,6 +28,12 @@ pub fn require_can_grant_override(actor: &Actor) -> Result<(), AppError> {
     Err(AppError::Forbidden)
 }
 
+/// Holds block registration; placing and releasing them is the same
+/// authority as overriding them.
+pub fn require_can_manage_holds(actor: &Actor) -> Result<(), AppError> {
+    require_can_grant_override(actor)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

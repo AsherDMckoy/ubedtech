@@ -6,7 +6,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::enrollment::{
-    policy::{require_can_grant_override, require_can_register_for},
+    policy::{require_can_grant_override, require_can_manage_holds, require_can_register_for},
     types::{
         Denial, EnrollError, EnrollmentReceipt, GrantOverrideCommand, RegisterCommand,
         RegistrationContext,
@@ -717,6 +717,156 @@ impl EnrollmentService {
         tx.commit().await?;
         Ok(override_id)
     }
+
+    /// Place a registration hold flag on a student's term. Idempotent: an
+    /// already-present flag is a no-op with no audit row, so retries are
+    /// side-effect-free.
+    pub async fn place_hold(
+        &self,
+        actor: &Actor,
+        student_id: Uuid,
+        term_id: Uuid,
+        flag: &str,
+        reason: &str,
+    ) -> Result<(), AppError> {
+        require_can_manage_holds(actor)?;
+        let flag = valid_hold_flag(flag)?;
+        if reason.trim().is_empty() {
+            return Err(AppError::Validation("a hold requires a reason".into()));
+        }
+
+        let mut tx = self.pool.begin().await?;
+        self.check_hold_target(&mut tx, actor, student_id, term_id)
+            .await?;
+
+        sqlx::query(
+            "INSERT INTO student_term_registration (student_id, term_id) VALUES ($1, $2) \
+             ON CONFLICT (student_id, term_id) DO NOTHING",
+        )
+        .bind(student_id)
+        .bind(term_id)
+        .execute(&mut *tx)
+        .await?;
+
+        let added = sqlx::query(
+            r#"
+            UPDATE student_term_registration
+               SET hold_flags = hold_flags || $3, updated_at = now()
+             WHERE student_id = $1 AND term_id = $2 AND NOT ($3 = ANY(hold_flags))
+            "#,
+        )
+        .bind(student_id)
+        .bind(term_id)
+        .bind(flag)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if added == 0 {
+            return Ok(()); // flag already present
+        }
+
+        self.audit
+            .write(
+                &mut tx,
+                actor.institution_id,
+                actor.user_id,
+                "enrollment.hold_placed",
+                "student_profile",
+                student_id,
+                &serde_json::json!({ "term_id": term_id, "flag": flag, "reason": reason.trim() }),
+            )
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Remove a hold flag. Idempotent like `place_hold`.
+    pub async fn release_hold(
+        &self,
+        actor: &Actor,
+        student_id: Uuid,
+        term_id: Uuid,
+        flag: &str,
+    ) -> Result<(), AppError> {
+        require_can_manage_holds(actor)?;
+        let flag = valid_hold_flag(flag)?;
+
+        let mut tx = self.pool.begin().await?;
+        self.check_hold_target(&mut tx, actor, student_id, term_id)
+            .await?;
+
+        let removed = sqlx::query(
+            r#"
+            UPDATE student_term_registration
+               SET hold_flags = array_remove(hold_flags, $3), updated_at = now()
+             WHERE student_id = $1 AND term_id = $2 AND $3 = ANY(hold_flags)
+            "#,
+        )
+        .bind(student_id)
+        .bind(term_id)
+        .bind(flag)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if removed == 0 {
+            return Ok(());
+        }
+
+        self.audit
+            .write(
+                &mut tx,
+                actor.institution_id,
+                actor.user_id,
+                "enrollment.hold_released",
+                "student_profile",
+                student_id,
+                &serde_json::json!({ "term_id": term_id, "flag": flag }),
+            )
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn check_hold_target(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        actor: &Actor,
+        student_id: Uuid,
+        term_id: Uuid,
+    ) -> Result<(), AppError> {
+        let both_ok: bool = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS (SELECT 1 FROM student_profile WHERE id = $1 AND institution_id = $3)
+               AND EXISTS (SELECT 1 FROM academic_term WHERE id = $2 AND institution_id = $3)
+            "#,
+        )
+        .bind(student_id)
+        .bind(term_id)
+        .bind(actor.institution_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        if !both_ok {
+            return Err(AppError::NotFound);
+        }
+        Ok(())
+    }
+}
+
+/// Hold flags are short lowercase tokens ("financial", "advising"); they end
+/// up in URLs and audit detail, so keep them boring.
+fn valid_hold_flag(flag: &str) -> Result<&str, AppError> {
+    let flag = flag.trim();
+    if flag.is_empty()
+        || flag.len() > 40
+        || !flag
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    {
+        return Err(AppError::Validation(
+            "hold flag must be a short lowercase token".into(),
+        ));
+    }
+    Ok(flag)
 }
 
 #[derive(sqlx::FromRow)]

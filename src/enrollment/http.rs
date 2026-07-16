@@ -1,5 +1,5 @@
 use crate::shared::{actor::Actor, error::AppError};
-use actix_web::{HttpResponse, post, web};
+use actix_web::{HttpResponse, delete, post, web};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -70,6 +70,45 @@ pub async fn register_fragment(
 }
 
 #[derive(Deserialize)]
+pub struct PlaceHoldBody {
+    term_id: Uuid,
+    flag: String,
+    reason: String,
+}
+
+#[post("/api/v1/students/{student_id}/holds")]
+pub async fn place_hold(
+    actor: Actor,
+    service: web::Data<EnrollmentService>,
+    student_id: web::Path<Uuid>,
+    body: web::Json<PlaceHoldBody>,
+) -> Result<HttpResponse, AppError> {
+    service
+        .place_hold(
+            &actor,
+            student_id.into_inner(),
+            body.term_id,
+            &body.flag,
+            &body.reason,
+        )
+        .await?;
+    Ok(HttpResponse::NoContent().finish())
+}
+
+#[delete("/api/v1/students/{student_id}/terms/{term_id}/holds/{flag}")]
+pub async fn release_hold(
+    actor: Actor,
+    service: web::Data<EnrollmentService>,
+    path: web::Path<(Uuid, Uuid, String)>,
+) -> Result<HttpResponse, AppError> {
+    let (student_id, term_id, flag) = path.into_inner();
+    service
+        .release_hold(&actor, student_id, term_id, &flag)
+        .await?;
+    Ok(HttpResponse::NoContent().finish())
+}
+
+#[derive(Deserialize)]
 pub struct DropForm {
     enrollment_id: Uuid,
     csrf_token: String,
@@ -105,6 +144,8 @@ async fn render_registration_panel(_actor: &Actor) -> Result<String, AppError> {
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(register_json)
         .service(grant_override)
+        .service(place_hold)
+        .service(release_hold)
         .service(register_fragment)
         .service(drop_fragment);
 }
