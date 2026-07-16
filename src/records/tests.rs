@@ -561,6 +561,179 @@ async fn service_sections(pool: &PgPool, instructor: &Actor) -> Vec<Uuid> {
         .collect()
 }
 
+/// Transcript snapshots: records-officer command, monotonic versions,
+/// published-only content, and database-enforced immutability.
+#[sqlx::test(migrations = "./migrations")]
+async fn transcript_snapshots_are_immutable_versioned_and_published_only(pool: PgPool) {
+    let fx = seed_grade_fixture(&pool).await;
+    let grades = GradeService::new(pool.clone(), crate::audit::AuditWriter);
+    let snapshots = crate::records::TranscriptSnapshotService;
+
+    // One published grade and one draft-only enrollment in a sibling section.
+    grades
+        .save_draft(&fx.instructor, save_command(fx.enrollment_id, "B+", 0))
+        .await
+        .unwrap();
+    grades
+        .publish_section(&fx.officer, fx.section_id)
+        .await
+        .unwrap();
+    let other_section_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM section WHERE section_code = '02'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let draft_enrollment = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO enrollment (id, institution_id, student_id, section_id, status, \
+         registered_at, source, idempotency_key, created_by_user_id) \
+         VALUES ($1, $2, $3, $4, 'enrolled', now(), 'registrar', $5, $6)",
+    )
+    .bind(draft_enrollment)
+    .bind(fx.officer.institution_id)
+    .bind(fx.student.student_id.unwrap())
+    .bind(other_section_id)
+    .bind(Uuid::new_v4())
+    .bind(fx.officer.user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    grades
+        .save_draft(&fx.officer, save_command(draft_enrollment, "C", 0))
+        .await
+        .unwrap();
+
+    // Only the records officer generates snapshots; targets resolve inside
+    // the institution.
+    for who in [&fx.instructor, &fx.student] {
+        assert!(matches!(
+            snapshots
+                .generate(
+                    &pool,
+                    &crate::audit::AuditWriter,
+                    who,
+                    fx.student.student_id.unwrap()
+                )
+                .await,
+            Err(AppError::Forbidden)
+        ));
+    }
+    assert!(matches!(
+        snapshots
+            .generate(
+                &pool,
+                &crate::audit::AuditWriter,
+                &fx.officer,
+                Uuid::new_v4()
+            )
+            .await,
+        Err(AppError::NotFound)
+    ));
+
+    let snapshot_id = snapshots
+        .generate(
+            &pool,
+            &crate::audit::AuditWriter,
+            &fx.officer,
+            fx.student.student_id.unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // The snapshot holds exactly the published record — the draft C is not
+    // in the artifact.
+    let json: serde_json::Value =
+        sqlx::query_scalar("SELECT snapshot_json FROM transcript_snapshot WHERE id = $1")
+            .bind(snapshot_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let courses = json["courses"].as_array().unwrap();
+    assert_eq!(courses.len(), 1);
+    assert_eq!(courses[0]["grade_code"], "B+");
+
+    // Immutable artifact: neither UPDATE nor DELETE survives the trigger.
+    assert!(
+        sqlx::query("UPDATE transcript_snapshot SET snapshot_json = '{}' WHERE id = $1")
+            .bind(snapshot_id)
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("DELETE FROM transcript_snapshot WHERE id = $1")
+            .bind(snapshot_id)
+            .execute(&pool)
+            .await
+            .is_err()
+    );
+
+    // A second snapshot is a new monotonic version, and the student sees
+    // both in their own list (newest first).
+    snapshots
+        .generate(
+            &pool,
+            &crate::audit::AuditWriter,
+            &fx.officer,
+            fx.student.student_id.unwrap(),
+        )
+        .await
+        .unwrap();
+    let list = snapshots.own_snapshots(&pool, &fx.student).await.unwrap();
+    assert_eq!(
+        list.iter()
+            .map(|snapshot| snapshot.snapshot_version)
+            .collect::<Vec<_>>(),
+        vec![2, 1]
+    );
+
+    // Generation is audited.
+    let audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_event WHERE action = 'records.snapshot_created'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audits, 2);
+}
+
+/// Academic history spans terms and shows only published/amended grades —
+/// the same query-level rule as the per-term view.
+#[sqlx::test(migrations = "./migrations")]
+async fn academic_history_spans_terms_and_hides_drafts(pool: PgPool) {
+    let fx = seed_grade_fixture(&pool).await;
+    let grades = GradeService::new(pool.clone(), crate::audit::AuditWriter);
+
+    grades
+        .save_draft(&fx.instructor, save_command(fx.enrollment_id, "B+", 0))
+        .await
+        .unwrap();
+
+    // Draft only: history is empty.
+    assert!(
+        grades
+            .academic_history(&fx.student)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    grades
+        .publish_section(&fx.officer, fx.section_id)
+        .await
+        .unwrap();
+    let history = grades.academic_history(&fx.student).await.unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].grade_code, "B+");
+    assert_eq!(history[0].state, "published");
+
+    // A non-student actor has no history to read.
+    assert!(matches!(
+        grades.academic_history(&fx.officer).await,
+        Err(AppError::Forbidden)
+    ));
+}
+
 /// The grade-entry window binds instructors; the records officer is the
 /// late-entry escape hatch; a term without a deadline imposes none.
 #[sqlx::test(migrations = "./migrations")]

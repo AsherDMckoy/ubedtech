@@ -56,6 +56,19 @@ pub struct InstructorSection {
     pub enrolled_count: i64,
 }
 
+/// One line of the student's academic history (published/amended only).
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct HistoryRow {
+    pub term_code: String,
+    pub term_name: String,
+    pub course_code: String,
+    pub course_title: String,
+    pub credit_hours: f64,
+    pub grade_code: String,
+    pub grade_points: Option<f64>,
+    pub state: String,
+}
+
 /// One roster line: the enrollment plus its grade state, if any. `state`
 /// None means no grade entered yet ("pending" in the UI).
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -206,6 +219,40 @@ impl GradeService {
         .fetch_all(&self.pool)
         .await?;
 
+        Ok(rows)
+    }
+
+    /// The student's full academic history: every published or amended grade
+    /// across all terms. Drafts are excluded by the query itself — there is
+    /// no calling convention that returns them.
+    pub async fn academic_history(&self, actor: &Actor) -> Result<Vec<HistoryRow>, AppError> {
+        let student_id = actor.require_student_self()?;
+        let rows = sqlx::query_as::<_, HistoryRow>(
+            r#"
+            SELECT
+                t.code AS term_code,
+                t.name AS term_name,
+                c.code AS course_code,
+                c.title AS course_title,
+                c.credit_hours::float8 AS credit_hours,
+                g.grade_code,
+                g.grade_points,
+                g.state
+            FROM grade_record g
+            JOIN enrollment e ON e.id = g.enrollment_id
+            JOIN section s ON s.id = e.section_id
+            JOIN academic_term t ON t.id = s.term_id
+            JOIN course c ON c.id = s.course_id
+            WHERE e.student_id = $1
+              AND g.institution_id = $2
+              AND g.state IN ('published', 'amended')
+            ORDER BY t.starts_on, c.code
+            "#,
+        )
+        .bind(student_id)
+        .bind(actor.institution_id)
+        .fetch_all(&self.pool)
+        .await?;
         Ok(rows)
     }
 

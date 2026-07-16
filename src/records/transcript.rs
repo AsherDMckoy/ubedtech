@@ -1,11 +1,23 @@
+use crate::audit::AuditWriter;
+use crate::shared::actor::{Actor, Role};
 use crate::shared::error::AppError;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::{Postgres, Transaction};
+use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 #[derive(Clone, Default)]
 pub struct TranscriptSnapshotService;
+
+/// One row of a student's snapshot list: version + when, never the content
+/// hash or filesystem details.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct SnapshotSummary {
+    pub snapshot_id: Uuid,
+    pub snapshot_version: i64,
+    pub created_at: DateTime<Utc>,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TranscriptSnapshotData {
@@ -26,6 +38,62 @@ pub struct TranscriptCourse {
 }
 
 impl TranscriptSnapshotService {
+    /// Records-office command: take an immutable snapshot of the student's
+    /// published record right now. Versions are monotonic per student; the
+    /// rows themselves are frozen by a database trigger (migration 0013).
+    pub async fn generate(
+        &self,
+        pool: &PgPool,
+        audit: &AuditWriter,
+        actor: &Actor,
+        student_id: Uuid,
+    ) -> Result<Uuid, AppError> {
+        if !actor.has_role(Role::RecordsOfficer) {
+            return Err(AppError::Forbidden);
+        }
+        let mut tx = pool.begin().await?;
+        // `create` resolves the student inside the actor's institution (404
+        // otherwise) and locks the student row to serialize versions.
+        let snapshot_id = self
+            .create(&mut tx, actor.institution_id, student_id)
+            .await?;
+        audit
+            .write(
+                &mut tx,
+                actor.institution_id,
+                actor.user_id,
+                "records.snapshot_created",
+                "transcript_snapshot",
+                snapshot_id,
+                &serde_json::json!({ "student_id": student_id }),
+            )
+            .await?;
+        tx.commit().await?;
+        Ok(snapshot_id)
+    }
+
+    /// The student's own snapshot list, newest first.
+    pub async fn own_snapshots(
+        &self,
+        pool: &PgPool,
+        actor: &Actor,
+    ) -> Result<Vec<SnapshotSummary>, AppError> {
+        let student_id = actor.require_student_self()?;
+        let rows = sqlx::query_as::<_, SnapshotSummary>(
+            r#"
+            SELECT id AS snapshot_id, snapshot_version, created_at
+            FROM transcript_snapshot
+            WHERE institution_id = $1 AND student_id = $2
+            ORDER BY snapshot_version DESC
+            "#,
+        )
+        .bind(actor.institution_id)
+        .bind(student_id)
+        .fetch_all(pool)
+        .await?;
+        Ok(rows)
+    }
+
     pub async fn create(
         &self,
         tx: &mut Transaction<'_, Postgres>,

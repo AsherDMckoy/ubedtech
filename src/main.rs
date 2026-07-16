@@ -113,6 +113,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(grades.clone()))
             .app_data(web::Data::new(schedule.clone()))
             .app_data(web::Data::new(documents.clone()))
+            .app_data(web::Data::new(TranscriptSnapshotService))
             .app_data(web::Data::new(licensing.clone()))
             .app_data(web::Data::new(license_gate.clone()))
             .app_data(web::Data::new(readiness.clone()))

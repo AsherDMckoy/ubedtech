@@ -4,7 +4,8 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::records::grades::{CorrectGradeCommand, SaveGradeCommand};
-use crate::records::{GradeService, ScheduleQuery};
+use crate::records::{GradeService, ScheduleQuery, TranscriptSnapshotService};
+use sqlx::PgPool;
 
 #[derive(Deserialize)]
 pub struct TermQuery {
@@ -84,6 +85,42 @@ pub async fn roster_json(
     Ok(HttpResponse::Ok().json(service.roster(&actor, section_id.into_inner()).await?))
 }
 
+/// Records officer freezes the student's published record into an immutable
+/// snapshot (new monotonic version).
+#[post("/api/v1/students/{student_id}/transcript-snapshots")]
+pub async fn generate_snapshot_json(
+    actor: Actor,
+    service: web::Data<TranscriptSnapshotService>,
+    pool: web::Data<PgPool>,
+    student_id: web::Path<Uuid>,
+) -> Result<HttpResponse, AppError> {
+    let snapshot_id = service
+        .generate(
+            &pool,
+            &crate::audit::AuditWriter,
+            &actor,
+            student_id.into_inner(),
+        )
+        .await?;
+    Ok(HttpResponse::Created().json(serde_json::json!({ "snapshot_id": snapshot_id })))
+}
+
+/// The student's own academic history and snapshot list.
+#[get("/api/v1/me/history")]
+pub async fn history_json(
+    actor: Actor,
+    grades: web::Data<GradeService>,
+    snapshots: web::Data<TranscriptSnapshotService>,
+    pool: web::Data<PgPool>,
+) -> Result<HttpResponse, AppError> {
+    let courses = grades.academic_history(&actor).await?;
+    let snapshots = snapshots.own_snapshots(&pool, &actor).await?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "courses": courses,
+        "snapshots": snapshots,
+    })))
+}
+
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(grades_json)
         .service(schedule_json)
@@ -91,5 +128,7 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .service(correct_grade_json)
         .service(publish_section_json)
         .service(instructor_sections_json)
-        .service(roster_json);
+        .service(roster_json)
+        .service(generate_snapshot_json)
+        .service(history_json);
 }
