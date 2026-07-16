@@ -69,6 +69,23 @@ pub struct HistoryRow {
     pub state: String,
 }
 
+/// A section roster: header for the page, one row per active enrollment.
+#[derive(Debug, Serialize)]
+pub struct RosterView {
+    pub section: SectionHeader,
+    pub rows: Vec<RosterRow>,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct SectionHeader {
+    pub section_id: Uuid,
+    pub course_code: String,
+    pub course_title: String,
+    pub section_code: String,
+    pub term_name: String,
+    pub grade_entry_closes_at: Option<DateTime<Utc>>,
+}
+
 /// One roster line: the enrollment plus its grade state, if any. `state`
 /// None means no grade entered yet ("pending" in the UI).
 #[derive(Debug, Serialize, sqlx::FromRow)]
@@ -79,6 +96,14 @@ pub struct RosterRow {
     pub grade_code: Option<String>,
     pub state: Option<String>,
     pub version: Option<i64>,
+}
+
+impl RosterRow {
+    /// Draft entry applies to pending (no grade yet) and draft rows;
+    /// published/amended rows are corrected by the records office instead.
+    pub fn editable(&self) -> bool {
+        matches!(self.state.as_deref(), None | Some("draft"))
+    }
 }
 
 impl GradeService {
@@ -122,15 +147,11 @@ impl GradeService {
         Ok(sections)
     }
 
-    /// The roster of one section with each enrollment's grade state.
+    /// The roster of one section: header plus each enrollment's grade state.
     /// Instructors see only sections they are assigned to (anything else is
     /// 404, indistinguishable from nonexistent); a records officer sees any
     /// section in the institution.
-    pub async fn roster(
-        &self,
-        actor: &Actor,
-        section_id: Uuid,
-    ) -> Result<Vec<RosterRow>, AppError> {
+    pub async fn roster(&self, actor: &Actor, section_id: Uuid) -> Result<RosterView, AppError> {
         let visible: bool = if actor.has_role(Role::RecordsOfficer) {
             sqlx::query_scalar(
                 "SELECT EXISTS (SELECT 1 FROM section WHERE id = $1 AND institution_id = $2)",
@@ -163,6 +184,25 @@ impl GradeService {
             return Err(AppError::NotFound);
         }
 
+        let section = sqlx::query_as::<_, SectionHeader>(
+            r#"
+            SELECT
+                s.id AS section_id,
+                c.code AS course_code,
+                c.title AS course_title,
+                s.section_code,
+                t.name AS term_name,
+                t.grade_entry_closes_at
+            FROM section s
+            JOIN course c ON c.id = s.course_id
+            JOIN academic_term t ON t.id = s.term_id
+            WHERE s.id = $1
+            "#,
+        )
+        .bind(section_id)
+        .fetch_one(&self.pool)
+        .await?;
+
         let rows = sqlx::query_as::<_, RosterRow>(
             r#"
             SELECT
@@ -184,7 +224,7 @@ impl GradeService {
         .bind(section_id)
         .fetch_all(&self.pool)
         .await?;
-        Ok(rows)
+        Ok(RosterView { section, rows })
     }
 
     pub async fn student_grades(

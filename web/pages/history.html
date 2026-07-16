@@ -1,0 +1,45 @@
+{% extends "pages/base.html" %}
+{% block title %}Academic history{% endblock %}
+{% block content %}
+  <h1>Academic history</h1>
+  {% if courses.is_empty() %}
+    <p>No published grades on record.</p>
+  {% else %}
+    <table>
+      <caption>Published record (amended grades show their corrected value)</caption>
+      <thead>
+        <tr>
+          <th scope="col">Term</th>
+          <th scope="col">Course</th>
+          <th scope="col">Credits</th>
+          <th scope="col">Grade</th>
+          <th scope="col">State</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in courses %}
+          <tr>
+            <td>{{ row.term_name }} ({{ row.term_code }})</td>
+            <td>{{ row.course_code }} — {{ row.course_title }}</td>
+            <td>{{ row.credit_hours }}</td>
+            <td>{{ row.grade_code }}</td>
+            <td>{{ row.state }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  <h2>Transcript snapshots</h2>
+  {% if snapshots.is_empty() %}
+    <p>No transcript snapshots have been taken.</p>
+  {% else %}
+    <ul>
+      {% for snapshot in snapshots %}
+        <li>Version {{ snapshot.snapshot_version }} — {{ snapshot.created_at }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <p><a href="/ui/grades">Current term grades</a></p>
+{% endblock %}

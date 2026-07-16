@@ -424,8 +424,9 @@ async fn rosters_are_visible_only_for_assigned_sections(pool: PgPool) {
     assert_eq!(sections[0].enrolled_count, 1);
 
     let roster = service.roster(&fx.instructor, fx.section_id).await.unwrap();
-    assert_eq!(roster.len(), 1);
-    assert!(roster[0].state.is_none(), "no grade entered yet");
+    assert_eq!(roster.rows.len(), 1);
+    assert!(roster.rows[0].state.is_none(), "no grade entered yet");
+    assert_eq!(roster.section.section_code, "01");
 
     // Crafted requests: real section ids the instructor is NOT assigned to
     // answer 404 — same-institution sibling section and all of it for the
@@ -458,6 +459,7 @@ async fn rosters_are_visible_only_for_assigned_sections(pool: PgPool) {
             .roster(&fx.officer, fx.section_id)
             .await
             .unwrap()
+            .rows
             .len(),
         1
     );
@@ -771,4 +773,297 @@ async fn grade_entry_window_binds_instructors_not_the_officer(pool: PgPool) {
         )
         .await
         .expect("no deadline means no window");
+}
+
+// ---------------------------------------------------------------------------
+// Grade pages over plain forms: instructor entry, officer publish, student
+// views — no JavaScript anywhere in the flow.
+// ---------------------------------------------------------------------------
+
+mod ui {
+    use super::{GradeFixture, seed_grade_fixture};
+    use actix_web::http::StatusCode;
+    use actix_web::{test as actix_test, web};
+    use sqlx::PgPool;
+    use uuid::Uuid;
+
+    use crate::identity_access::http::SessionCookiePolicy;
+    use crate::identity_access::password::PasswordService;
+    use crate::identity_access::service::AuthService;
+    use crate::identity_access::sessions::SessionService;
+    use crate::licensing::{LicenseGate, LicenseSnapshot, LicenseStatus};
+
+    const PASSWORD: &str = "correct horse battery";
+
+    macro_rules! records_ui_app {
+        ($pool:expr, $institution:expr) => {{
+            let sessions = SessionService::new($pool.clone(), 1800, 43200);
+            let auth = AuthService::new(
+                $pool.clone(),
+                PasswordService::new(8, 1, 1).unwrap(),
+                sessions.clone(),
+                crate::audit::AuditWriter,
+                10,
+                900,
+            )
+            .unwrap();
+            let gate = LicenseGate::new(LicenseSnapshot {
+                institution_id: $institution,
+                deployment_id: Uuid::new_v4(),
+                status: LicenseStatus::Active,
+                valid_from: chrono::Utc::now() - chrono::Duration::days(1),
+                valid_until: chrono::Utc::now() + chrono::Duration::days(365),
+                version: 1,
+                feature_set: serde_json::json!({}),
+            });
+            actix_test::init_service(
+                actix_web::App::new()
+                    .app_data(web::Data::new(sessions))
+                    .app_data(web::Data::new(auth))
+                    .app_data(web::Data::new(gate))
+                    .app_data(web::Data::new(SessionCookiePolicy {
+                        secure: false,
+                        max_age_secs: 43200,
+                    }))
+                    .app_data(web::Data::new($pool.clone()))
+                    .app_data(web::Data::new(crate::academics::AcademicsService::new(
+                        $pool.clone(),
+                        crate::audit::AuditWriter,
+                    )))
+                    .app_data(web::Data::new(crate::records::GradeService::new(
+                        $pool.clone(),
+                        crate::audit::AuditWriter,
+                    )))
+                    .app_data(web::Data::new(crate::records::TranscriptSnapshotService))
+                    .wrap(actix_web::middleware::from_fn(
+                        crate::identity_access::csrf::csrf_middleware,
+                    ))
+                    .wrap(actix_web::middleware::from_fn(
+                        crate::identity_access::middleware::session_middleware,
+                    ))
+                    .configure(crate::identity_access::http::routes)
+                    .configure(crate::records::http::routes),
+            )
+            .await
+        }};
+    }
+
+    /// Give a fixture user a known username, a credential, and their role.
+    async fn credential(pool: &PgPool, user_id: Uuid, institution: Uuid, role: &str) -> String {
+        let username = format!("{role}-{}", &user_id.to_string()[..8]);
+        sqlx::query("UPDATE user_account SET username = $2 WHERE id = $1")
+            .bind(user_id)
+            .bind(&username)
+            .execute(pool)
+            .await
+            .unwrap();
+        let hash = PasswordService::new(8, 1, 1)
+            .unwrap()
+            .hash(PASSWORD)
+            .unwrap();
+        sqlx::query("INSERT INTO password_credential (user_id, password_hash) VALUES ($1, $2)")
+            .bind(user_id)
+            .bind(hash)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO user_role (institution_id, user_id, role_id) \
+             SELECT $1, $2, id FROM role WHERE code = $3",
+        )
+        .bind(institution)
+        .bind(user_id)
+        .bind(role)
+        .execute(pool)
+        .await
+        .unwrap();
+        username
+    }
+
+    async fn login<S, B>(app: &S, username: &str) -> actix_web::cookie::Cookie<'static>
+    where
+        S: actix_web::dev::Service<
+                actix_http::Request,
+                Response = actix_web::dev::ServiceResponse<B>,
+                Error = actix_web::Error,
+            >,
+        B: actix_web::body::MessageBody,
+    {
+        let response = actix_test::call_service(
+            app,
+            actix_test::TestRequest::post()
+                .uri("/ui/login")
+                .peer_addr("127.0.0.1:9999".parse().unwrap())
+                .set_form(serde_json::json!({ "username": username, "password": PASSWORD }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        response
+            .response()
+            .cookies()
+            .find(|cookie| cookie.name() == "ub_session")
+            .expect("session cookie")
+            .into_owned()
+    }
+
+    async fn get<S, B>(
+        app: &S,
+        cookie: &actix_web::cookie::Cookie<'static>,
+        uri: &str,
+    ) -> (StatusCode, String)
+    where
+        S: actix_web::dev::Service<
+                actix_http::Request,
+                Response = actix_web::dev::ServiceResponse<B>,
+                Error = actix_web::Error,
+            >,
+        B: actix_web::body::MessageBody,
+    {
+        let response = actix_test::call_service(
+            app,
+            actix_test::TestRequest::get()
+                .uri(uri)
+                .cookie(cookie.clone())
+                .to_request(),
+        )
+        .await;
+        let status = response.status();
+        let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        (status, body)
+    }
+
+    fn extract_input(body: &str, name: &str) -> String {
+        let at = body
+            .find(&format!("name=\"{name}\""))
+            .unwrap_or_else(|| panic!("no input named {name} in page"));
+        let rest = &body[at..];
+        let value_at = rest.find("value=\"").expect("input has a value") + "value=\"".len();
+        rest[value_at..].split('"').next().unwrap().to_owned()
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn instructor_enters_officer_publishes_student_sees_published_only(pool: PgPool) {
+        let fx: GradeFixture = seed_grade_fixture(&pool).await;
+        let institution = fx.officer.institution_id;
+        let instructor_login =
+            credential(&pool, fx.instructor.user_id, institution, "instructor").await;
+        let officer_login =
+            credential(&pool, fx.officer.user_id, institution, "records_officer").await;
+        let student_login = credential(&pool, fx.student.user_id, institution, "student").await;
+        let app = records_ui_app!(&pool, institution);
+        let other_section: Uuid =
+            sqlx::query_scalar("SELECT id FROM section WHERE section_code = '02'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        // Instructor: section list links to the roster; the student is
+        // pending; the unassigned sibling section is a 404 even though the
+        // id is real.
+        let instructor = login(&app, &instructor_login).await;
+        let (status, body) = get(&app, &instructor, "/ui/instructor").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("Records Course"));
+        let (status, roster) = get(
+            &app,
+            &instructor,
+            &format!("/ui/instructor/sections/{}", fx.section_id),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(roster.contains("pending"));
+        assert!(
+            !roster.contains("Publish all draft grades"),
+            "instructors get no publish button"
+        );
+        let (status, _) = get(
+            &app,
+            &instructor,
+            &format!("/ui/instructor/sections/{other_section}"),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        // Enter a draft through the form.
+        let csrf = extract_input(&roster, "csrf_token");
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/ui/instructor/grades")
+                .cookie(instructor.clone())
+                .set_form(serde_json::json!({
+                    "csrf_token": csrf,
+                    "section_id": fx.section_id,
+                    "enrollment_id": fx.enrollment_id,
+                    "grade_code": "B+",
+                    "grade_points": "3.3",
+                    "expected_version": 0,
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let (_, roster) = get(
+            &app,
+            &instructor,
+            &format!("/ui/instructor/sections/{}?notice=saved", fx.section_id),
+        )
+        .await;
+        assert!(roster.contains("draft") && roster.contains("B+"));
+        assert!(roster.contains("Draft grade saved."));
+
+        // Student: the draft is invisible on every page; instructor pages
+        // are forbidden outright.
+        let student = login(&app, &student_login).await;
+        let (status, body) = get(&app, &student, "/ui/grades").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(body.contains("No published grades yet"));
+        assert!(!body.contains("B+"), "draft grade must not leak: {body}");
+        let (status, _) = get(&app, &student, "/ui/instructor").await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        // Officer: sees the roster with a publish button and publishes.
+        let officer = login(&app, &officer_login).await;
+        let (_, officer_roster) = get(
+            &app,
+            &officer,
+            &format!("/ui/instructor/sections/{}", fx.section_id),
+        )
+        .await;
+        assert!(officer_roster.contains("Publish all draft grades"));
+        let officer_csrf = extract_input(&officer_roster, "csrf_token");
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri(&format!(
+                    "/ui/instructor/sections/{}/publish",
+                    fx.section_id
+                ))
+                .cookie(officer.clone())
+                .set_form(serde_json::json!({ "csrf_token": officer_csrf }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+        // Published rows lock their entry form on the roster.
+        let (_, roster) = get(
+            &app,
+            &officer,
+            &format!("/ui/instructor/sections/{}", fx.section_id),
+        )
+        .await;
+        assert!(roster.contains("published"));
+        assert!(roster.contains("locked"));
+
+        // Student now sees the published grade, and the history page shows
+        // the record with no snapshots yet.
+        let (_, body) = get(&app, &student, "/ui/grades").await;
+        assert!(body.contains("B+"));
+        let (status, history) = get(&app, &student, "/ui/history").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(history.contains("B+") && history.contains("published"));
+        assert!(history.contains("No transcript snapshots"));
+    }
 }

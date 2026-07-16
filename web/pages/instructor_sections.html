@@ -1,0 +1,34 @@
+{% extends "pages/base.html" %}
+{% block title %}My sections{% endblock %}
+{% block content %}
+  <h1>My sections</h1>
+  {% if sections.is_empty() %}
+    <p>You are not assigned to any sections.</p>
+  {% else %}
+    <table>
+      <caption>Assigned sections</caption>
+      <thead>
+        <tr>
+          <th scope="col">Term</th>
+          <th scope="col">Course</th>
+          <th scope="col">Section</th>
+          <th scope="col">Enrolled</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for section in sections %}
+          <tr>
+            <td>{{ section.term_name }}</td>
+            <td>
+              <a href="/ui/instructor/sections/{{ section.section_id }}">
+                {{ section.course_code }} — {{ section.course_title }}
+              </a>
+            </td>
+            <td>{{ section.section_code }}</td>
+            <td>{{ section.enrolled_count }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,74 @@
+{% extends "pages/base.html" %}
+{% block title %}Roster — {{ view.section.course_code }} {{ view.section.section_code }}{% endblock %}
+{% block content %}
+  <h1>{{ view.section.course_code }} — {{ view.section.course_title }},
+      section {{ view.section.section_code }}</h1>
+  <p>{{ view.section.term_name }}
+    {% if let Some(closes_at) = view.section.grade_entry_closes_at %}
+      — grade entry closes {{ closes_at }}
+    {% endif %}
+  </p>
+  {% if let Some(notice) = notice %}
+    <p role="status">{{ notice }}</p>
+  {% endif %}
+  {% if let Some(error) = error %}
+    <p role="alert">{{ error }}</p>
+  {% endif %}
+
+  <table>
+    <caption>Roster and grade states</caption>
+    <thead>
+      <tr>
+        <th scope="col">Student</th>
+        <th scope="col">Name</th>
+        <th scope="col">State</th>
+        <th scope="col">Grade</th>
+        <th scope="col">Entry</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in view.rows %}
+        <tr>
+          <td>{{ row.student_number }}</td>
+          <td>{{ row.student_name }}</td>
+          <td>
+            {% if let Some(state) = row.state %}{{ state }}{% else %}pending{% endif %}
+          </td>
+          <td>
+            {% if let Some(grade) = row.grade_code %}{{ grade }}{% else %}—{% endif %}
+          </td>
+          <td>
+            {% if row.editable() %}
+              <form method="post" action="/ui/instructor/grades">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="section_id" value="{{ view.section.section_id }}">
+                <input type="hidden" name="enrollment_id" value="{{ row.enrollment_id }}">
+                <input type="hidden" name="expected_version"
+                       value="{{ row.version.unwrap_or(0) }}">
+                <label>Grade
+                  <input name="grade_code" required maxlength="8" size="4"
+                         value="{% if let Some(grade) = row.grade_code %}{{ grade }}{% endif %}">
+                </label>
+                <label>Points
+                  <input name="grade_points" size="4" inputmode="decimal">
+                </label>
+                <button type="submit">Save draft</button>
+              </form>
+            {% else %}
+              locked
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if can_publish %}
+    <form method="post" action="/ui/instructor/sections/{{ view.section.section_id }}/publish">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit">Publish all draft grades</button>
+    </form>
+  {% endif %}
+
+  <p><a href="/ui/instructor">My sections</a></p>
+{% endblock %}
