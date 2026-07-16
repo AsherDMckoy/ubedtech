@@ -11,7 +11,6 @@ use uuid::Uuid;
 #[derive(Clone)]
 pub struct GradeService {
     pool: PgPool,
-    #[allow(dead_code)] // read by save_draft/publish_section, routed in Phase 5.1
     audit: AuditWriter,
 }
 
@@ -25,12 +24,24 @@ pub struct StudentGradeRow {
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)] // accepted by grade-entry routes added in Phase 5.1
 pub struct SaveGradeCommand {
     pub enrollment_id: Uuid,
     pub grade_code: String,
     pub grade_points: Option<f64>,
     pub numeric_value: Option<f64>,
+    pub expected_version: i64,
+}
+
+/// Post-publication correction by the records office: the prior value and
+/// author survive in `grade_revision` (database trigger), the new state is
+/// `amended`, and the required reason lands in the audit trail.
+#[derive(Debug, Deserialize)]
+pub struct CorrectGradeCommand {
+    pub enrollment_id: Uuid,
+    pub grade_code: String,
+    pub grade_points: Option<f64>,
+    pub numeric_value: Option<f64>,
+    pub reason: String,
     pub expected_version: i64,
 }
 
@@ -74,7 +85,6 @@ impl GradeService {
         Ok(rows)
     }
 
-    #[allow(dead_code)] // routed by the Phase 5.1 grade-entry HTTP adapter
     pub async fn save_draft(
         &self,
         actor: &Actor,
@@ -83,36 +93,62 @@ impl GradeService {
         if !actor.has_role(Role::Instructor) && !actor.has_role(Role::RecordsOfficer) {
             return Err(AppError::Forbidden);
         }
+        validate_grade_code(&command.grade_code)?;
 
         let mut tx = self.pool.begin().await?;
 
-        let assignment_allowed: bool = if actor.has_role(Role::RecordsOfficer) {
-            true
-        } else {
-            sqlx::query_scalar(
+        // Resolve the enrollment inside the actor's institution first: a
+        // cross-institution id answers 404 instead of silently writing
+        // nothing, and the same query fetches the term's grade-entry window.
+        let context = sqlx::query_as::<_, GradeEntryContext>(
+            r#"
+            SELECT e.section_id, t.grade_entry_closes_at
+            FROM enrollment e
+            JOIN section s ON s.id = e.section_id
+            JOIN academic_term t ON t.id = s.term_id
+            WHERE e.id = $1 AND e.institution_id = $2
+            "#,
+        )
+        .bind(command.enrollment_id)
+        .bind(actor.institution_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+        let is_officer = actor.has_role(Role::RecordsOfficer);
+
+        // Instructors grade only sections they are assigned to — enforced
+        // here in the service, not by which buttons a template shows.
+        if !is_officer {
+            let assigned: bool = sqlx::query_scalar(
                 r#"
                 SELECT EXISTS (
-                    SELECT 1
-                    FROM enrollment e
-                    JOIN instructor_assignment ia ON ia.section_id = e.section_id
-                    WHERE e.id = $1
-                      AND ia.instructor_user_id = $2
+                    SELECT 1 FROM instructor_assignment
+                    WHERE section_id = $1 AND instructor_user_id = $2
                 )
                 "#,
             )
-            .bind(command.enrollment_id)
+            .bind(context.section_id)
             .bind(actor.user_id)
             .fetch_one(&mut *tx)
-            .await?
-        };
+            .await?;
+            if !assigned {
+                return Err(AppError::Forbidden);
+            }
 
-        if !assignment_allowed {
-            return Err(AppError::Forbidden);
+            // The entry window binds instructors; the records officer is the
+            // escape hatch for late entry (assumption A17). A term with no
+            // deadline configured imposes none.
+            if let Some(closes_at) = context.grade_entry_closes_at
+                && Utc::now() >= closes_at
+            {
+                return Err(AppError::Conflict("grade entry window is closed".into()));
+            }
         }
 
         let existing = sqlx::query_as::<_, ExistingGrade>(
             r#"
-            SELECT id, grade_code, version
+            SELECT id, grade_code, state, version
             FROM grade_record
             WHERE enrollment_id = $1
             FOR UPDATE
@@ -124,6 +160,15 @@ impl GradeService {
 
         let new_version = match existing {
             Some(old) => {
+                // A published grade is a fact students have seen. Draft entry
+                // cannot quietly rewrite or unpublish it — that is what the
+                // correction workflow (state 'amended', reason, history) is
+                // for.
+                if old.state != "draft" {
+                    return Err(AppError::Conflict(
+                        "this grade is published; use a records-office correction".into(),
+                    ));
+                }
                 if old.version != command.expected_version {
                     return Err(AppError::Conflict(
                         "grade was changed by another user".into(),
@@ -223,7 +268,96 @@ impl GradeService {
         Ok(new_version)
     }
 
-    #[allow(dead_code)] // routed by the Phase 5.1 grade-publication HTTP adapter
+    /// Records-office correction of a published grade. The database trigger
+    /// preserves the prior value and its author in `grade_revision`; the
+    /// state becomes `amended` and the reason is audited in the same
+    /// transaction.
+    pub async fn correct_grade(
+        &self,
+        actor: &Actor,
+        command: CorrectGradeCommand,
+    ) -> Result<i64, AppError> {
+        if !actor.has_role(Role::RecordsOfficer) {
+            return Err(AppError::Forbidden);
+        }
+        validate_grade_code(&command.grade_code)?;
+        let reason = command.reason.trim();
+        if reason.is_empty() {
+            return Err(AppError::Validation(
+                "a grade correction requires a reason".into(),
+            ));
+        }
+
+        let mut tx = self.pool.begin().await?;
+
+        let existing = sqlx::query_as::<_, ExistingGrade>(
+            r#"
+            SELECT g.id, g.grade_code, g.state, g.version
+            FROM grade_record g
+            WHERE g.enrollment_id = $1 AND g.institution_id = $2
+            FOR UPDATE
+            "#,
+        )
+        .bind(command.enrollment_id)
+        .bind(actor.institution_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+        if existing.state == "draft" {
+            return Err(AppError::Conflict(
+                "draft grades are edited by entry, not corrected".into(),
+            ));
+        }
+        if existing.version != command.expected_version {
+            return Err(AppError::Conflict(
+                "grade was changed by another user".into(),
+            ));
+        }
+
+        let new_version: i64 = sqlx::query_scalar(
+            r#"
+            UPDATE grade_record
+               SET grade_code = $2,
+                   grade_points = $3,
+                   numeric_value = $4,
+                   state = 'amended',
+                   entered_by_user_id = $5,
+                   version = version + 1,
+                   updated_at = now()
+             WHERE id = $1
+            RETURNING version
+            "#,
+        )
+        .bind(existing.id)
+        .bind(&command.grade_code)
+        .bind(command.grade_points)
+        .bind(command.numeric_value)
+        .bind(actor.user_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        self.audit
+            .write(
+                &mut tx,
+                actor.institution_id,
+                actor.user_id,
+                "grade.corrected",
+                "grade_record",
+                existing.id,
+                &serde_json::json!({
+                    "old_grade": existing.grade_code,
+                    "new_grade": command.grade_code,
+                    "reason": reason,
+                    "new_version": new_version,
+                }),
+            )
+            .await?;
+
+        tx.commit().await?;
+        Ok(new_version)
+    }
+
     pub async fn publish_section(&self, actor: &Actor, section_id: Uuid) -> Result<u64, AppError> {
         if !actor.has_role(Role::RecordsOfficer) {
             return Err(AppError::Forbidden);
@@ -268,9 +402,25 @@ impl GradeService {
 }
 
 #[derive(sqlx::FromRow)]
-#[allow(dead_code)] // constructed by save_draft, routed in Phase 5.1
 struct ExistingGrade {
     id: Uuid,
     grade_code: String,
+    state: String,
     version: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct GradeEntryContext {
+    section_id: Uuid,
+    grade_entry_closes_at: Option<DateTime<Utc>>,
+}
+
+/// Grade codes are short registrar-defined tokens ("A", "B+", "INC").
+fn validate_grade_code(code: &str) -> Result<(), AppError> {
+    if code.trim().is_empty() || code.len() > 8 {
+        return Err(AppError::Validation(
+            "grade code must be 1–8 characters".into(),
+        ));
+    }
+    Ok(())
 }
