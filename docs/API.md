@@ -43,9 +43,40 @@ grantable or revocable over HTTP (operator bootstrap only — OPERATIONS.md).
 | `GET /institution-locked` | none | 200 HTML |
 | `POST /ui/platform/institutions/{id}/license` | platform_licensing_admin | form `status`+`reason`+`csrf_token` → 200 HTML fragment |
 
-Everything else (enrollment/records/documents `/ui/*` and `/api/v1/*`
-routes from earlier phases) sits behind session + CSRF + license gate; those
-endpoints get documented here as their phases harden them.
+## Academics (Phase 3; registrar or institution_admin for mutations)
+
+| Method & path | Who | Body → response |
+|---|---|---|
+| `POST /api/v1/terms` | registrar, institution_admin | `{code,name,starts_on,ends_on,registration_opens_at,add_drop_closes_at,grade_entry_closes_at?}` → 201 `{term_id}`; duplicate code ⇒ 409 |
+| `GET /api/v1/terms/current` | any authenticated | 200 `TermSummary` or 404 |
+| `POST /api/v1/courses` | registrar, institution_admin | `{code,title,credit_hours}` → 201 `{course_id}` |
+| `POST /api/v1/courses/{id}/prerequisites` | registrar, institution_admin | `{prerequisite_course_id,minimum_grade_points}` → 204 |
+| `POST /api/v1/sections` | registrar, institution_admin | `{term_id,course_id,section_code,capacity}` → 201 `{section_id}` (capacity set in the same tx) |
+| `PUT /api/v1/sections/{id}/capacity` | registrar, institution_admin | `{capacity}` → 204; below current enrollment ⇒ 409 |
+| `POST /api/v1/sections/{id}/meetings` | registrar, institution_admin | `{day_of_week,starts_at,ends_at,room_id?}` → 201 `{meeting_id}` |
+| `GET /api/v1/catalog?term_id&q&page` | any authenticated | 200 `[CatalogSection]`, 20/page, institution-scoped |
+
+## Enrollment (Phase 3)
+
+| Method & path | Who | Body → response |
+|---|---|---|
+| `POST /api/v1/me/enrollments` | student (self) | `{section_id,idempotency_key}` → 201 receipt; resubmitted key ⇒ the original receipt; denial ⇒ 409 with the reason |
+| `POST /api/v1/students/{id}/overrides` | registrar | `{term_id,section_id?,override_type,reason,expires_at?}` → 201 `{override_id}`; single-use, consumed by one enrollment |
+| `POST /api/v1/students/{id}/holds` | registrar | `{term_id,flag,reason}` → 204 (idempotent) |
+| `DELETE /api/v1/students/{id}/terms/{term_id}/holds/{flag}` | registrar | → 204 (idempotent) |
+
+## Student pages (plain HTML forms; work with JavaScript off)
+
+| Method & path | Who | Behavior |
+|---|---|---|
+| `GET /ui/login`, `POST /ui/login` | anon (CSRF- and license-exempt like JSON login) | form login; failure re-renders with the error (401), success 303 → `/ui/registration` |
+| `GET /ui/catalog?q&page` | any authenticated | current-term catalog search/browse with per-row register forms (server-minted idempotency keys) |
+| `GET /ui/registration` | student | current enrollments + drop forms |
+| `POST /ui/registration/add`, `POST /ui/registration/drop` | student | success 303 back to the page (PRG); typed denial re-renders the page with the reason inline, status 409 |
+
+Everything else (records/documents `/ui/*` and `/api/v1/*` routes from
+earlier phases) sits behind session + CSRF + license gate; those endpoints
+get documented here as their phases harden them.
 
 The authorization behind every row above is test-backed — see
 `docs/PERMISSIONS.md` for the matrix and proving tests.

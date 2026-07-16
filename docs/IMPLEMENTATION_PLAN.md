@@ -96,59 +96,55 @@ until this is closed. Depends on: Phase 1 (config, errors, health, CI).
 
 ---
 
-## Phase 3 — Institution & academics (structure the domain reads)
+## Phase 3 — Academics structure + enrollment correctness + student UI
 
-Depends on: Phase 2 (admin routes need auth).
+**STATUS: COMPLETE (2026-07-15)** except 3.4 (institution calendar) and
+instructor assignment from 3.5, which the Phase 3 session prompt did not
+include — they move to the next phase that needs them. The Phase 3 prompt
+absorbed the old "Phase 4 — enrollment hardening" slices (4.1–4.5 below);
+its "Phase 4" is records (this plan's Phase 5). CLAUDE.md §1 items 4, 5,
+and 6 are closed.
 
-3.1 `[ ]` **`academics/` module bootstrap + current-term query.**
-    Un-comment module; `GET /api/v1/terms/current` + sections listing with
-    pagination. Acceptance: institution-scoped listing test (two
-    institutions seeded; each sees only its own rows).
-3.2 `[ ]` **Term/course/section admin commands** (create/update, registrar
-    or institution_admin only) with audit in-transaction. Acceptance:
-    role-matrix tests, constraint tests (unique codes per institution).
-3.3 `[ ]` **Section creation creates `section_capacity` transactionally**
-    (fixes CLAUDE.md §1 item 4 at the source). Also add a backfill
-    migration for existing sections and a DB trigger or FK-style guarantee
-    so a section without a capacity row cannot exist. Acceptance: registering
-    against a section whose capacity row was deleted manually fails loudly
-    with a distinct error (test asserts the distinct message/code), and
-    section creation cannot commit without the capacity row.
-3.4 `[ ]` **Institution calendar/events** (`institution/` module): events
-    CRUD + `GET /api/v1/events`, admin-only mutations, audited.
-3.5 `[ ]` **Section meetings + instructor assignment** commands with
-    room/time validation.
-
-### Risks
-- Backfill for 3.3 must handle sections that already have enrollments.
-
----
-
-## Phase 4 — Enrollment correctness hardening
-
-Depends on: Phase 3 (capacity guarantee), Phase 2 (real actors).
-The seat-race test must stay green through every slice here.
-
-4.1 `[ ]` **Resolve add-vs-drop deadline policy (CLAUDE.md §1 item 5).**
-    Conservative default: adds are rejected after `registration_closes_at`
-    even inside the drop/add window (fail closed; a registrar `deadline`
-    override is the escape hatch). Configurable per deployment
-    (`ENROLLMENT_ALLOW_ADD_DURING_DROP_ADD`, default `false`). Record as
-    ADR + assumption. Acceptance: time-window unit tests for both settings.
-4.2 `[ ]` **Implement or delete the capacity override (item 6).**
-    Decision: implement for real — registrar-granted `capacity` override
-    consumes an override row (who, why, rule, expiry, consuming enrollment
-    id column added by migration) and increments capacity+enrolled together
-    so the DB `enrolled_count <= capacity` constraint still holds.
-    Acceptance: override path test, override-consumed-once test, audit
-    contains the override id; dead branch gone.
-4.3 `[ ]` **Idempotency + duplicate/replay tests** (same key twice returns
-    the first receipt; concurrent same-key requests produce one enrollment).
-4.4 `[ ]` **Drop races**: concurrent duplicate drops decrement exactly once;
-    drop of the last seat frees exactly one seat for a concurrent add.
-4.5 `[ ]` **Registration UI fragments** rendered from Askama templates
-    (replace hardcoded HTML strings in `enrollment/http.rs`) fed by one
-    registration-page query.
+3.1 `[x]` **`academics/` module + current-term query + catalog** —
+    paginated, institution-scoped (`catalog_and_current_term_are_
+    institution_scoped`).
+3.2 `[x]` **Term/course/section/meeting/prerequisite commands** (registrar
+    or institution_admin, audited in-tx; unique-code conflicts are 409s)
+    — `academics_commands_enforce_the_role_matrix`,
+    `codes_are_unique_per_institution_not_globally`.
+3.3 `[x]` **Capacity-row guarantee (item 4)** — migration 0010 backfill
+    (capacity = active enrollments) + trigger; service creates real
+    capacity in the same tx; missing row fails as `Integrity`, distinct
+    from "section is full" — `missing_capacity_row_fails_distinctly_from_
+    a_full_section`, `every_section_gets_a_capacity_row_from_the_trigger`.
+3.4 `[ ]` **Institution calendar/events** — not in the Phase 3 prompt;
+    deferred.
+3.5 `[~]` **Meetings done** (day/time/room validation); instructor
+    assignment deferred with 3.4.
+4.1 `[x]` **Deadline policy resolved (item 5)** — the phase prompt resolved
+    it differently from this plan's earlier sketch: ONE shared
+    `add_drop_closes_at` column governs adds and drops (migration 0009
+    consolidates, no third column, no config flag). ADR-8, assumption A11.
+    Proof: `one_deadline_governs_both_adds_and_drops`.
+4.2 `[x]` **Capacity override implemented for real (item 6)** — dead branch
+    gone; single-use override raises capacity+enrolled together, is stamped
+    with the consuming enrollment, and the bump reverts when that
+    enrollment drops. `capacity_override_admits_one_student_and_is_
+    consumed_once`, `override_grants_are_registrar_only_validated_and_
+    scoped`, `deadline_override_admits_a_late_add_and_a_late_drop`.
+4.3 `[x]` **Idempotency proofs** — `idempotent_resubmission_returns_the_
+    original_receipt` (concurrent + sequential same key ⇒ one enrollment,
+    original receipt).
+4.4 `[x]` **Drop races** — `concurrent_duplicate_drops_release_exactly_one_
+    seat`, `a_drop_racing_a_registration_keeps_the_counter_honest`.
+4.5 `[x]` **Student pages from Askama templates** (hardcoded fragments
+    deleted): login page, catalog search/browse, registration panel;
+    register/drop as plain form posts with PRG on success and inline typed
+    denial feedback (409) for full/prerequisite/duplicate/conflict/hold/
+    closed-window. Holds: registrar place/release
+    (`holds_block_registration_until_released_or_overridden`). UI proofs:
+    `ui::login_catalog_register_and_drop_work_as_plain_forms`,
+    `ui::every_rejection_case_renders_inline_feedback`.
 
 ---
 
@@ -279,5 +275,9 @@ flagged in session reports.)
 | A10 | 2026-07-14 | Should login require a CSRF token? | No — login is the single CSRF exemption. | Pre-auth there is no session-bound token to present; the request carries no ambient authority (credentials are in the body, cookie is SameSite=Lax). Logout and everything else require the token. |
 
 | A11 | 2026-07-15 | The Phase 3 prompt resolved item 5 (one shared `add_drop_closes_at` for adds and drops) but not which value existing rows keep when the two old columns consolidate. | Rows keep their `drop_add_closes_at` value; `registration_closes_at` is dropped. | Preserves drop rights exactly as they were; extends adds to the end of the same window (the resolved policy). Keeping the earlier value would have revoked existing drop rights — the anti-conservative direction for students mid-term. ADR-8. |
+| A12 | 2026-07-15 | Are overrides reusable until expiry, or one-shot? The prompt requires recording "which enrollment transaction consumed it", which only makes sense once. | Every override type is single-use: claimed under row lock, stamped with the consuming enrollment in the same tx. The capacity override's extra seat is the student's, not the section's — it reverts when that enrollment drops. A student needing N exceptional adds needs N overrides (or the hold released / capacity raised properly). | Fail-closed academic integrity: a lingering reusable override is a hidden boolean with an expiry. The registrar's real remedies (release the hold, raise capacity) stay the honest path. |
+| A13 | 2026-07-15 | Which roles grant overrides and manage holds? Docs are silent. | Registrar only (institution_admin excluded). Academic structure (terms/courses/sections/meetings/prereqs) is registrar OR institution_admin. | Overrides/holds bypass integrity rules — one accountable authority. Structure setup must work before a registrar account exists, so the admin may also do it. Policy functions are one line to widen. |
+| A14 | 2026-07-15 | The prompt's no-JavaScript requirement makes browser flows the baseline, but no HTML login existed (Phase 2 login is JSON). | Added `GET/POST /ui/login` (small, shares the JSON login's code path); it joins login as the CSRF exemption (extends A10) and the license-exempt list. | Without it the student pages are unreachable in a real browser with JS off; the alternative (requiring a JSON client to bootstrap a cookie) defeats the requirement. |
+| A15 | 2026-07-15 | Does a `deadline` override let a registrar add a student before registration opens? | No — it lifts only the closing deadline. Before `registration_opens_at` everything is denied. | Early registration is a different privilege from late correction; fail closed until a real requirement shows up. |
 
 (Phase 7's license file format will be recorded here when that phase runs.)

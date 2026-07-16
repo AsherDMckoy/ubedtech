@@ -25,7 +25,17 @@ harness — an infrastructure flake, not a code failure). Run
 `cargo test --all-targets --all-features -- --test-threads=4` locally;
 CI's service container copes with the default.
 
-## Current suite (67 tests as of Phase 2)
+## Current suite (92 tests as of Phase 3)
+
+Phase 3 added 25 tests: `academics` (policy unit + role matrix,
+institution scoping across two institutions, unique-code conflicts,
+transactional capacity, meeting/prerequisite validation, catalog),
+`enrollment` (deadline consolidation, distinct missing-capacity failure,
+single-use overrides incl. capacity and deadline, holds, idempotent
+resubmission, duplicate enrollment, schedule conflicts, prerequisites,
+duplicate-drop and drop-vs-add races) and `ui` (full plain-form
+login→catalog→register→drop flow; all six rejection cases rendering
+inline feedback). The seat-race test remains the anchor.
 
 Phase 2 added 45 tests across `identity_access` (password unit tests,
 session-store sqlx tests, HTTP lifecycle/CSRF/throttle/rotation/role tests,

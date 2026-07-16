@@ -71,10 +71,18 @@ Real middleware, not advice: every non-safe method with a resolved session
 must present the session-bound token — `X-CSRF-Token` header or `csrf_token`
 form field — matched in constant time against the hash stored on the session
 row. Tokens are per-session; a valid token from another session is rejected.
-The **only** exemption is login, which carries no ambient authority to forge
-(authentication comes entirely from the body credentials; the cookie is
-`SameSite=Lax`). Proofs: `csrf_missing_wrong_and_cross_session_tokens_are_
-403`, `csrf_form_field_is_accepted_and_the_body_survives_for_the_handler`.
+The **only** exemption is login (both `POST /api/v1/session/login` and the
+Phase 3 HTML form `POST /ui/login`), which carries no ambient authority to
+forge (authentication comes entirely from the body credentials; the cookie
+is `SameSite=Lax`). Proofs: `csrf_missing_wrong_and_cross_session_tokens_
+are_403`, `csrf_form_field_is_accepted_and_the_body_survives_for_the_
+handler`.
+
+Since Phase 3 the session row also stores the CSRF token itself (not just
+its hash) so server-rendered pages can embed it into forms at GET time —
+ADR-9. The session cookie token is still stored hash-only, so a database
+snapshot remains unreplayable; a CSRF token without its session cookie
+grants nothing. Sessions predating the column fail closed (re-login).
 
 ## License gate
 

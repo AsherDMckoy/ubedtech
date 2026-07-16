@@ -29,7 +29,18 @@ authenticated actor regardless of role; "anon" = no session required.
 | Change license status (`POST /ui/platform/institutions/{id}/license`) | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | `platform_admin_flips_the_license_end_to_end` (allow), `non_platform_roles_cannot_touch_the_license` (institution_admin — the strongest non-platform role — denied) |
 | Read license status (`GET /license/status`) | ✅ (recovery surface, works while locked) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | `locked_institution_answers_402_and_recovery_stays_reachable` |
 | Any non-exempt route while the license is locked | ❌ 402 for everyone | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ (must use the exempt platform UI) | `locked_institution_answers_402_and_recovery_stays_reachable`, `licensing::middleware` unit tests |
-| Register for a section | ❌ | ✅ self only | ❌ | ✅ any student in institution | ❌ | ❌ | ❌ | ❌ | partially: `enrollment::policy::require_can_register_for` is exercised by `only_one_student_gets_the_last_seat` (student-self path); the full per-role deny matrix is Phase 4/8 debt |
+| Register for a section | ❌ | ✅ self only | ❌ | ✅ any student in institution | ❌ | ❌ | ❌ | ❌ | `enrollment::policy::only_the_registrar_registers_other_students` (all 7 roles), `a_student_registers_only_for_themselves`, `only_one_student_gets_the_last_seat` |
+
+## Matrix (Phase 3: academics, enrollment, overrides, holds, student UI)
+
+| Operation | anon | student | instructor | registrar | records_officer | document_officer | institution_admin | platform_licensing_admin | Proof (tests) |
+|---|---|---|---|---|---|---|---|---|---|
+| Create term/course/section, set capacity, add meeting/prerequisite (`POST /api/v1/terms`, `/courses`, `/sections`, …) | ❌ | ❌ | ❌ | ✅ own institution | ❌ | ❌ | ✅ own institution | ❌ | `academics::policy::only_registrar_and_institution_admin_manage_academics` (all 7 roles), `academics_commands_enforce_the_role_matrix`, `section_creation_sets_capacity_in_the_same_transaction` (cross-institution 404) |
+| Grant a registration override (`POST /api/v1/students/{id}/overrides`) | ❌ | ❌ | ❌ | ✅ own institution, reason required | ❌ | ❌ | ❌ | ❌ | `enrollment::policy::only_the_registrar_grants_overrides` (all 7 roles), `override_grants_are_registrar_only_validated_and_scoped` |
+| Place/release a registration hold (`POST /api/v1/students/{id}/holds`, `DELETE …/holds/{flag}`) | ❌ | ❌ | ❌ | ✅ own institution, reason required | ❌ | ❌ | ❌ | ❌ | `holds_block_registration_until_released_or_overridden` (403/404/validation + block/release/override behavior) |
+| Drop an enrollment | ❌ | ✅ self only | ❌ | ✅ any student in institution | ❌ | ❌ | ❌ | ❌ | `enrollment::policy` role tests (same function as register), `one_deadline_governs_both_adds_and_drops`, `concurrent_duplicate_drops_release_exactly_one_seat` |
+| Browse catalog / current term (`GET /ui/catalog`, `GET /api/v1/catalog`, `GET /api/v1/terms/current`) | ❌ 401 | ✅ own institution's rows only | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | `catalog_and_current_term_are_institution_scoped` (two institutions), `ui::login_catalog_register_and_drop_work_as_plain_forms` |
+| Student registration page + form register/drop (`/ui/registration…`) | ❌ 401 | ✅ self | ❌ (no student profile ⇒ 403 from `require_student_self`) | ❌ same | ❌ | ❌ | ❌ | ❌ | `ui::login_catalog_register_and_drop_work_as_plain_forms`, `ui::every_rejection_case_renders_inline_feedback` |
 
 Additional cross-cutting proofs:
 
@@ -54,5 +65,3 @@ rows when their phases add the tests (Phase 4/5/6/8):
 - Grade publish: records officer only (`records/grades.rs`).
 - Document request: student for self; approve/reject: document officer
   (`documents/service.rs`, `documents/http.rs` admin queue).
-- Registration/drop **deny** cases (instructor/officer roles must be
-  rejected; only the student-self and registrar allow paths matter today).

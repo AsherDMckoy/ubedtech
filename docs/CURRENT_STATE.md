@@ -237,3 +237,58 @@ per-slice commits in git history):
 per `docs/IMPLEMENTATION_PLAN.md`. New debt recorded there and in
 `docs/PERMISSIONS.md`: per-role deny tests for enrollment/grades/documents,
 reverse-proxy IP policy for throttling.
+
+---
+
+## Phase 3 outcome (2026-07-15)
+
+**CLAUDE.md §1 items 4, 5, and 6 are CLOSED** (item 1 closed in Phase 2;
+item 2 was already fixed on disk; item 3 — the job reaper — remains open
+for Phase 6):
+
+- **Item 4 (capacity row guarantee):** migration 0010 backfills
+  `section_capacity` (capacity = active enrollments, exactly full) and a
+  trigger creates the row with every section insert on any path; the
+  academics service sets the real capacity in the same transaction. A
+  missing row now fails as a distinct `Integrity` fault (500, loud in the
+  log), never as "section is full". Proofs:
+  `missing_capacity_row_fails_distinctly_from_a_full_section`,
+  `every_section_gets_a_capacity_row_from_the_trigger`,
+  `section_creation_sets_capacity_in_the_same_transaction`.
+- **Item 5 (add vs drop deadline):** resolved by the Phase 3 prompt — one
+  shared `add_drop_closes_at` governs both actions; migration 0009
+  consolidates the two old columns (ADR-8, assumption A11). Proof:
+  `one_deadline_governs_both_adds_and_drops`.
+- **Item 6 (dead capacity-override branch):** replaced with a real,
+  single-use, fully recorded override system: who, rule, required reason,
+  expiry, and the consuming enrollment (migration 0011). Capacity override
+  raises capacity+enrolled together and reverts on drop. Registrar-only
+  grant API. Proofs: `capacity_override_admits_one_student_and_is_
+  consumed_once`, `deadline_override_admits_a_late_add_and_a_late_drop`,
+  `override_grants_are_registrar_only_validated_and_scoped`.
+
+Also delivered this session (per-slice commits in git history):
+
+- `academics/` module (was an empty directory): terms, courses, sections,
+  meetings, prerequisites — registrar/institution_admin commands, audited
+  in-tx; current-term query and paginated institution-scoped catalog
+  search. `institution/` and `jobs/` remain empty (calendar + instructor
+  assignment deferred; not in the Phase 3 prompt).
+- Typed registration denials (`enrollment::types::Denial`) replacing
+  message-string matching; `EnrollError` converts to `AppError` for JSON.
+- Registrar-managed holds (place/release, idempotent, audited) blocking
+  registration with their own denial; hold overrides admit single
+  registrations.
+- Required correctness tests: idempotent resubmission (concurrent +
+  sequential), duplicate enrollment, meeting-overlap conflicts,
+  prerequisite minimum-grade enforcement, duplicate-drop race, drop-vs-add
+  race. The seat-race test stayed green throughout.
+- Student-facing pages working with JavaScript off (plain forms, PRG):
+  `/ui/login` (new, ADR-9's render-time CSRF token via migration 0012),
+  `/ui/catalog`, `/ui/registration` with inline typed feedback for all six
+  rejection cases, HTTP-tested end to end. The hardcoded HTML fragment
+  stubs in `enrollment/http.rs` are gone.
+- Test count: 67 → 92 (`cargo test -- --test-threads=4` locally).
+
+**Open §1 defect: 3 (document_job reaper) — owed by Phase 6.1.** Deferred
+from the old plan: institution calendar/events, instructor assignment.
