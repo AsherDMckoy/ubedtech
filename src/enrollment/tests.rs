@@ -648,6 +648,387 @@ async fn one_deadline_governs_both_adds_and_drops(pool: sqlx::PgPool) {
     assert_eq!(enrolled_count, 0);
 }
 
+/// The required idempotency proof: resubmitting the same idempotency key —
+/// sequentially or concurrently — returns the ORIGINAL receipt, never a
+/// duplicate enrollment and never an error.
+#[sqlx::test(migrations = "./migrations")]
+async fn idempotent_resubmission_returns_the_original_receipt(pool: sqlx::PgPool) {
+    let fixture = seed_registration_fixture(&pool, 10).await;
+    let service =
+        crate::enrollment::EnrollmentService::new(pool.clone(), crate::audit::AuditWriter);
+    let key = uuid::Uuid::new_v4();
+    let register = || {
+        service.register_for(
+            &fixture.registrar,
+            fixture.student_a,
+            crate::enrollment::RegisterCommand {
+                section_id: fixture.section_id,
+                idempotency_key: key,
+            },
+        )
+    };
+
+    // Two concurrent submissions of the same key: both succeed, same receipt.
+    let (left, right) = tokio::join!(register(), register());
+    let left = left.expect("concurrent resubmission is not an error");
+    let right = right.expect("concurrent resubmission is not an error");
+    assert_eq!(left.enrollment_id, right.enrollment_id);
+
+    // A later retry (the classic browser re-POST) gets the same receipt too.
+    let retry = register().await.unwrap();
+    assert_eq!(retry.enrollment_id, left.enrollment_id);
+    assert_eq!(retry.registered_at, left.registered_at);
+
+    // Exactly one enrollment, one reserved seat, one audit row came out of
+    // three submissions.
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM enrollment")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(rows, 1);
+    let enrolled: i32 =
+        sqlx::query_scalar("SELECT enrolled_count FROM section_capacity WHERE section_id = $1")
+            .bind(fixture.section_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(enrolled, 1);
+    let audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_event WHERE action = 'enrollment.registered'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audits, 1);
+}
+
+/// A different idempotency key does not smuggle a student into the same
+/// section twice.
+#[sqlx::test(migrations = "./migrations")]
+async fn duplicate_enrollment_in_the_same_section_is_denied(pool: sqlx::PgPool) {
+    let fixture = seed_registration_fixture(&pool, 10).await;
+    let service =
+        crate::enrollment::EnrollmentService::new(pool.clone(), crate::audit::AuditWriter);
+    let register = || {
+        service.register_for(
+            &fixture.registrar,
+            fixture.student_a,
+            crate::enrollment::RegisterCommand {
+                section_id: fixture.section_id,
+                idempotency_key: uuid::Uuid::new_v4(),
+            },
+        )
+    };
+
+    register().await.unwrap();
+    assert!(matches!(
+        register().await,
+        Err(crate::enrollment::types::EnrollError::Denied(
+            crate::enrollment::types::Denial::AlreadyEnrolled
+        ))
+    ));
+    let enrolled: i32 =
+        sqlx::query_scalar("SELECT enrolled_count FROM section_capacity WHERE section_id = $1")
+            .bind(fixture.section_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(enrolled, 1);
+}
+
+/// Overlapping meeting times in the same term are a denial; back-to-back
+/// times are not.
+#[sqlx::test(migrations = "./migrations")]
+async fn schedule_conflicts_are_detected_by_meeting_overlap(pool: sqlx::PgPool) {
+    let fixture = seed_registration_fixture(&pool, 10).await;
+    let service =
+        crate::enrollment::EnrollmentService::new(pool.clone(), crate::audit::AuditWriter);
+    let register = |section: uuid::Uuid| {
+        service.register_for(
+            &fixture.registrar,
+            fixture.student_a,
+            crate::enrollment::RegisterCommand {
+                section_id: section,
+                idempotency_key: uuid::Uuid::new_v4(),
+            },
+        )
+    };
+
+    add_meeting(&pool, fixture.section_id, 1, "09:00:00", "10:00:00").await;
+    let overlapping = add_course_section(&pool, &fixture, "OVERLAP", 10).await;
+    add_meeting(&pool, overlapping, 1, "09:30:00", "10:30:00").await;
+    let back_to_back = add_course_section(&pool, &fixture, "SEQUEL", 10).await;
+    add_meeting(&pool, back_to_back, 1, "10:00:00", "11:00:00").await;
+
+    register(fixture.section_id).await.unwrap();
+    assert!(matches!(
+        register(overlapping).await,
+        Err(crate::enrollment::types::EnrollError::Denied(
+            crate::enrollment::types::Denial::ScheduleConflict
+        ))
+    ));
+    register(back_to_back)
+        .await
+        .expect("adjacent meeting times are not a conflict");
+}
+
+/// Prerequisites: an unmet or under-grade prerequisite denies; a published
+/// completion at or above the minimum admits.
+#[sqlx::test(migrations = "./migrations")]
+async fn prerequisites_deny_until_completed_with_the_minimum_grade(pool: sqlx::PgPool) {
+    let fixture = seed_registration_fixture(&pool, 10).await;
+    let service =
+        crate::enrollment::EnrollmentService::new(pool.clone(), crate::audit::AuditWriter);
+    let register = || {
+        service.register_for(
+            &fixture.registrar,
+            fixture.student_a,
+            crate::enrollment::RegisterCommand {
+                section_id: fixture.section_id,
+                idempotency_key: uuid::Uuid::new_v4(),
+            },
+        )
+    };
+
+    // The fixture's course now requires PREREQ with at least 2.0 points.
+    let prereq_section = add_course_section(&pool, &fixture, "PREREQ", 10).await;
+    let prereq_course: uuid::Uuid =
+        sqlx::query_scalar("SELECT course_id FROM section WHERE id = $1")
+            .bind(prereq_section)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let target_course: uuid::Uuid =
+        sqlx::query_scalar("SELECT course_id FROM section WHERE id = $1")
+            .bind(fixture.section_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    sqlx::query(
+        "INSERT INTO course_prerequisite (course_id, prerequisite_course_id, \
+         minimum_grade_points) VALUES ($1, $2, 2.0)",
+    )
+    .bind(target_course)
+    .bind(prereq_course)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // No completion at all: denied.
+    assert!(matches!(
+        register().await,
+        Err(crate::enrollment::types::EnrollError::Denied(
+            crate::enrollment::types::Denial::PrerequisiteNotMet
+        ))
+    ));
+
+    // A published grade below the minimum still denies.
+    let prereq_enrollment =
+        seed_completion(&pool, &fixture, prereq_section, fixture.student_a, 1.0).await;
+    assert!(matches!(
+        register().await,
+        Err(crate::enrollment::types::EnrollError::Denied(
+            crate::enrollment::types::Denial::PrerequisiteNotMet
+        ))
+    ));
+
+    // Raising it to the minimum admits.
+    sqlx::query("UPDATE grade_record SET grade_points = 3.0 WHERE enrollment_id = $1")
+        .bind(prereq_enrollment)
+        .execute(&pool)
+        .await
+        .unwrap();
+    register().await.expect("satisfied prerequisite admits");
+}
+
+/// Two concurrent drops of the same enrollment release exactly one seat.
+#[sqlx::test(migrations = "./migrations")]
+async fn concurrent_duplicate_drops_release_exactly_one_seat(pool: sqlx::PgPool) {
+    let fixture = seed_registration_fixture(&pool, 10).await;
+    let service =
+        crate::enrollment::EnrollmentService::new(pool.clone(), crate::audit::AuditWriter);
+
+    let receipt = service
+        .register_for(
+            &fixture.registrar,
+            fixture.student_a,
+            crate::enrollment::RegisterCommand {
+                section_id: fixture.section_id,
+                idempotency_key: uuid::Uuid::new_v4(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let left = service.drop_for(&fixture.registrar, fixture.student_a, receipt.enrollment_id);
+    let right = service.drop_for(&fixture.registrar, fixture.student_a, receipt.enrollment_id);
+    let (left, right) = tokio::join!(left, right);
+    assert_eq!(
+        usize::from(left.is_ok()) + usize::from(right.is_ok()),
+        1,
+        "exactly one drop succeeds: {left:?} / {right:?}"
+    );
+
+    let enrolled: i32 =
+        sqlx::query_scalar("SELECT enrolled_count FROM section_capacity WHERE section_id = $1")
+            .bind(fixture.section_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(enrolled, 0, "the seat was released exactly once");
+}
+
+/// A drop racing a registration for the last seat never oversells and never
+/// loses a seat: the counter always equals the surviving active enrollments.
+#[sqlx::test(migrations = "./migrations")]
+async fn a_drop_racing_a_registration_keeps_the_counter_honest(pool: sqlx::PgPool) {
+    let fixture = seed_registration_fixture(&pool, 1).await;
+    let service =
+        crate::enrollment::EnrollmentService::new(pool.clone(), crate::audit::AuditWriter);
+
+    let receipt = service
+        .register_for(
+            &fixture.registrar,
+            fixture.student_a,
+            crate::enrollment::RegisterCommand {
+                section_id: fixture.section_id,
+                idempotency_key: uuid::Uuid::new_v4(),
+            },
+        )
+        .await
+        .unwrap();
+
+    let drop = service.drop_for(&fixture.registrar, fixture.student_a, receipt.enrollment_id);
+    let add = service.register_for(
+        &fixture.registrar,
+        fixture.student_b,
+        crate::enrollment::RegisterCommand {
+            section_id: fixture.section_id,
+            idempotency_key: uuid::Uuid::new_v4(),
+        },
+    );
+    let (drop, add) = tokio::join!(drop, add);
+    drop.expect("the drop always succeeds");
+    // The add may win the freed seat or find the section still full —
+    // both are correct; overselling is not.
+
+    let active: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM enrollment WHERE section_id = $1 AND status = 'enrolled'",
+    )
+    .bind(fixture.section_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let enrolled_count: i32 =
+        sqlx::query_scalar("SELECT enrolled_count FROM section_capacity WHERE section_id = $1")
+            .bind(fixture.section_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(i64::from(enrolled_count), active);
+    assert_eq!(active == 1, add.is_ok());
+    assert!(enrolled_count <= 1);
+}
+
+/// New open section of a new course in the fixture's institution and term.
+async fn add_course_section(
+    pool: &sqlx::PgPool,
+    fixture: &Fixture,
+    course_code: &str,
+    capacity: i32,
+) -> uuid::Uuid {
+    let course_id = uuid::Uuid::new_v4();
+    let section_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO course (id, institution_id, code, title, credit_hours) \
+         VALUES ($1, $2, $3, $3, 3.0)",
+    )
+    .bind(course_id)
+    .bind(fixture.registrar.institution_id)
+    .bind(course_code)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO section (id, institution_id, term_id, course_id, section_code, status) \
+         VALUES ($1, $2, $3, $4, '01', 'open')",
+    )
+    .bind(section_id)
+    .bind(fixture.registrar.institution_id)
+    .bind(fixture.term_id)
+    .bind(course_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE section_capacity SET capacity = $2 WHERE section_id = $1")
+        .bind(section_id)
+        .bind(capacity)
+        .execute(pool)
+        .await
+        .unwrap();
+    section_id
+}
+
+async fn add_meeting(
+    pool: &sqlx::PgPool,
+    section_id: uuid::Uuid,
+    day: i16,
+    starts: &str,
+    ends: &str,
+) {
+    sqlx::query(
+        "INSERT INTO section_meeting (id, section_id, day_of_week, starts_at, ends_at) \
+         VALUES ($1, $2, $3, $4::time, $5::time)",
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(section_id)
+    .bind(day)
+    .bind(starts)
+    .bind(ends)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// A finished course: enrollment + published grade with the given points.
+async fn seed_completion(
+    pool: &sqlx::PgPool,
+    fixture: &Fixture,
+    section_id: uuid::Uuid,
+    student_id: uuid::Uuid,
+    grade_points: f64,
+) -> uuid::Uuid {
+    let enrollment_id = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO enrollment (id, institution_id, student_id, section_id, status, \
+         registered_at, source, idempotency_key, created_by_user_id) \
+         VALUES ($1, $2, $3, $4, 'enrolled', now(), 'registrar', $5, $6)",
+    )
+    .bind(enrollment_id)
+    .bind(fixture.registrar.institution_id)
+    .bind(student_id)
+    .bind(section_id)
+    .bind(uuid::Uuid::new_v4())
+    .bind(fixture.registrar.user_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO grade_record (id, institution_id, enrollment_id, grade_code, \
+         grade_points, state, entered_by_user_id, published_at) \
+         VALUES ($1, $2, $3, 'X', $4, 'published', $5, now())",
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(fixture.registrar.institution_id)
+    .bind(enrollment_id)
+    .bind(grade_points)
+    .bind(fixture.registrar.user_id)
+    .execute(pool)
+    .await
+    .unwrap();
+    enrollment_id
+}
+
 async fn seed_registration_fixture(pool: &sqlx::PgPool, capacity: i32) -> Fixture {
     use crate::shared::actor::{Actor, Role};
     use chrono::{Duration, Utc};
