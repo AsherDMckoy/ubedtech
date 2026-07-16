@@ -1,0 +1,51 @@
+{% extends "pages/base.html" %}
+{% block title %}My registration{% endblock %}
+{% block content %}
+  <h1>My registration</h1>
+  {% if let Some(notice) = notice %}
+    <p role="status">{{ notice }}</p>
+  {% endif %}
+  {% if let Some(error) = error %}
+    <p role="alert">{{ error }}</p>
+  {% endif %}
+
+  {% if let Some(term) = term %}
+    <h2>{{ term.name }} ({{ term.code }})</h2>
+    {% if enrollments.is_empty() %}
+      <p>You are not registered for any sections this term.</p>
+    {% else %}
+      <table>
+        <caption>Current enrollments</caption>
+        <thead>
+          <tr>
+            <th scope="col">Course</th>
+            <th scope="col">Section</th>
+            <th scope="col">Meets</th>
+            <th scope="col"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for enrollment in enrollments %}
+            <tr>
+              <td>{{ enrollment.course_code }} — {{ enrollment.course_title }}</td>
+              <td>{{ enrollment.section_code }}</td>
+              <td>{{ enrollment.meetings }}</td>
+              <td>
+                <form method="post" action="/ui/registration/drop">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <input type="hidden" name="enrollment_id"
+                         value="{{ enrollment.enrollment_id }}">
+                  <button type="submit">Drop</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+  {% else %}
+    <p>There is no active term right now.</p>
+  {% endif %}
+
+  <p><a href="/ui/catalog">Browse the catalog</a></p>
+{% endblock %}

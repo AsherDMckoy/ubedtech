@@ -26,7 +26,9 @@ pub const CSRF_HEADER: &str = "x-csrf-token";
 
 /// Paths that change state without an existing session's authority.
 /// Everything else with a session and an unsafe method needs the token.
-const EXEMPT_PATHS: &[&str] = &["/api/v1/session/login"];
+/// Both login forms qualify: authentication comes entirely from the body
+/// credentials, and pre-auth there is no session-bound token to present.
+const EXEMPT_PATHS: &[&str] = &["/api/v1/session/login", "/ui/login"];
 
 pub async fn csrf_middleware(
     mut req: ServiceRequest,

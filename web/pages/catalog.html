@@ -1,0 +1,64 @@
+{% extends "pages/base.html" %}
+{% block title %}Course catalog{% endblock %}
+{% block content %}
+  <h1>Course catalog</h1>
+  {% if let Some(term) = term %}
+    <p>{{ term.name }} ({{ term.code }}) — add/drop closes {{ term.add_drop_closes_at }}</p>
+
+    <form method="get" action="/ui/catalog">
+      <label for="q">Search courses</label>
+      <input id="q" name="q" type="search" value="{{ q }}">
+      <button type="submit">Search</button>
+    </form>
+
+    {% if rows.is_empty() %}
+      <p>No open sections match.</p>
+    {% else %}
+      <table>
+        <caption>Open sections</caption>
+        <thead>
+          <tr>
+            <th scope="col">Course</th>
+            <th scope="col">Section</th>
+            <th scope="col">Credits</th>
+            <th scope="col">Meets</th>
+            <th scope="col">Seats</th>
+            <th scope="col"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td>{{ row.section.course_code }} — {{ row.section.course_title }}</td>
+              <td>{{ row.section.section_code }}</td>
+              <td>{{ row.section.credit_hours }}</td>
+              <td>{{ row.section.meetings }}</td>
+              <td>{{ row.section.enrolled_count }}/{{ row.section.capacity }}</td>
+              <td>
+                <form method="post" action="/ui/registration/add">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <input type="hidden" name="section_id" value="{{ row.section.section_id }}">
+                  <input type="hidden" name="idempotency_key" value="{{ row.idempotency_key }}">
+                  <button type="submit">Register</button>
+                </form>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+
+    <nav aria-label="Catalog pages">
+      {% if page > 0 %}
+        <a href="/ui/catalog?q={{ q }}&amp;page={{ page - 1 }}">Previous</a>
+      {% endif %}
+      {% if rows.len() == 20 %}
+        <a href="/ui/catalog?q={{ q }}&amp;page={{ page + 1 }}">Next</a>
+      {% endif %}
+    </nav>
+  {% else %}
+    <p>There is no active term right now.</p>
+  {% endif %}
+
+  <p><a href="/ui/registration">My registration</a></p>
+{% endblock %}

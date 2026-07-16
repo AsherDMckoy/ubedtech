@@ -827,6 +827,49 @@ impl EnrollmentService {
         Ok(())
     }
 
+    /// The student's own active enrollments for one term, for the
+    /// registration panel.
+    pub async fn list_own_active(
+        &self,
+        actor: &Actor,
+        term_id: Uuid,
+    ) -> Result<Vec<crate::enrollment::types::EnrolledSection>, AppError> {
+        let student_id = actor.require_student_self()?;
+        let rows = sqlx::query_as::<_, crate::enrollment::types::EnrolledSection>(
+            r#"
+            SELECT
+                e.id AS enrollment_id,
+                c.code AS course_code,
+                c.title AS course_title,
+                s.section_code,
+                COALESCE(m.summary, '') AS meetings
+            FROM enrollment e
+            JOIN section s ON s.id = e.section_id
+            JOIN course c ON c.id = s.course_id
+            LEFT JOIN LATERAL (
+                SELECT string_agg(
+                           day_of_week || ' ' || to_char(starts_at, 'HH24:MI')
+                           || '-' || to_char(ends_at, 'HH24:MI'),
+                           ', ' ORDER BY day_of_week, starts_at
+                       ) AS summary
+                FROM section_meeting
+                WHERE section_id = s.id
+            ) m ON true
+            WHERE e.student_id = $1
+              AND e.institution_id = $2
+              AND e.status = 'enrolled'
+              AND s.term_id = $3
+            ORDER BY c.code, s.section_code
+            "#,
+        )
+        .bind(student_id)
+        .bind(actor.institution_id)
+        .bind(term_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
     async fn check_hold_target(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,

@@ -121,3 +121,28 @@ repository, and CLAUDE.md §6 requires docs to be committed with code.
   columns. A registrar `deadline` override remains the escape hatch for
   late changes (item 6 implementation).
 - **Proof:** `enrollment::tests::one_deadline_governs_both_adds_and_drops`.
+
+## ADR-9: the session row stores its CSRF token, not only the hash
+
+- **Original:** Phase 2 stored only `csrf_secret_hash`; the token existed
+  client-side only, returned once by the login JSON response. Sufficient for
+  API clients, impossible for server-rendered pages: a GET handler cannot
+  put a token it cannot reproduce into a form.
+- **Replacement:** migration 0012 adds `user_session.csrf_secret` (the token
+  itself); session resolution carries it into `CurrentSession`, and the
+  catalog/registration templates embed it in every state-changing form. The
+  middleware's constant-time hash comparison is unchanged. Sessions created
+  before the column simply no longer resolve (fail closed, re-login).
+- **Why:** the no-JavaScript requirement makes server-rendered forms the
+  baseline, and every mainstream server-rendered framework (Rails, Django)
+  stores the CSRF secret server-side for exactly this reason. A CSRF token
+  is not an authenticator: with the session token still stored hash-only, a
+  database snapshot yields nothing a cookie-less attacker can replay.
+- **Consequences:** an attacker with live database READ access can pair a
+  CSRF token with... nothing, absent the session cookie. The hash column is
+  now redundant in principle; it stays because the constant-time middleware
+  path is tested and this migration is additive (0001 is applied to real
+  databases).
+- **Proof:** `enrollment::tests::ui::login_catalog_register_and_drop_work_
+  as_plain_forms` (token rendered at GET, accepted at POST), existing CSRF
+  rejection tests unchanged.

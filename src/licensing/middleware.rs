@@ -24,6 +24,7 @@ pub(crate) fn is_license_exempt(path: &str) -> bool {
         "/institution-locked",
         "/api/v1/session/login",
         "/api/v1/session/logout",
+        "/ui/login",
     ];
     EXACT.contains(&path) || path.starts_with("/ui/platform/")
 }

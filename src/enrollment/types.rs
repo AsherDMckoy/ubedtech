@@ -65,6 +65,17 @@ impl From<EnrollError> for AppError {
     }
 }
 
+/// One row of the student's registration panel: an active enrollment with
+/// its course and meeting summary, from a single query.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct EnrolledSection {
+    pub enrollment_id: Uuid,
+    pub course_code: String,
+    pub course_title: String,
+    pub section_code: String,
+    pub meetings: String,
+}
+
 /// Registrar command creating a registration override: the full record
 /// demanded by CLAUDE.md §1 item 6 — who (the actor), which rule, why
 /// (required reason), expiry, and later which enrollment consumed it.

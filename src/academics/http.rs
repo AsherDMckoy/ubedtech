@@ -1,12 +1,14 @@
 use actix_web::{HttpResponse, get, post, put, web};
+use askama::Template;
 use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::academics::AcademicsService;
 use crate::academics::service::{
-    AddMeetingCommand, AddPrerequisiteCommand, CreateCourseCommand, CreateSectionCommand,
-    CreateTermCommand,
+    AddMeetingCommand, AddPrerequisiteCommand, CatalogSection, CreateCourseCommand,
+    CreateSectionCommand, CreateTermCommand, TermSummary,
 };
+use crate::identity_access::sessions::CurrentSession;
 use crate::shared::{actor::Actor, error::AppError};
 
 #[post("/api/v1/terms")]
@@ -114,6 +116,68 @@ async fn catalog(
     Ok(HttpResponse::Ok().json(sections))
 }
 
+#[derive(Template)]
+#[template(path = "pages/catalog.html")]
+struct CatalogPage<'a> {
+    csrf_token: &'a str,
+    term: Option<TermSummary>,
+    q: &'a str,
+    page: u32,
+    rows: Vec<CatalogRow>,
+}
+
+struct CatalogRow {
+    section: CatalogSection,
+    /// A fresh key per rendered form: refreshing after a submit replays the
+    /// same key and gets the original receipt instead of a second seat.
+    idempotency_key: Uuid,
+}
+
+#[derive(Deserialize)]
+struct CatalogPageQuery {
+    q: Option<String>,
+    #[serde(default)]
+    page: u32,
+}
+
+/// Catalog search + section browse for the current term. Plain forms; the
+/// register buttons post to /ui/registration/add with a server-minted
+/// idempotency key.
+#[get("/ui/catalog")]
+async fn catalog_page(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<AcademicsService>,
+    query: web::Query<CatalogPageQuery>,
+) -> Result<HttpResponse, AppError> {
+    let q = query.q.as_deref().unwrap_or("");
+    let term = service.current_term(&actor).await?;
+    let rows = match &term {
+        Some(term) => service
+            .search_catalog(&actor, term.id, Some(q), query.page)
+            .await?
+            .into_iter()
+            .map(|section| CatalogRow {
+                section,
+                idempotency_key: Uuid::new_v4(),
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+
+    let body = CatalogPage {
+        csrf_token: &current.csrf_token,
+        term,
+        q,
+        page: query.page,
+        rows,
+    }
+    .render()?;
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(body))
+}
+
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(create_term)
         .service(current_term)
@@ -122,5 +186,6 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .service(create_section)
         .service(set_capacity)
         .service(add_meeting)
-        .service(catalog);
+        .service(catalog)
+        .service(catalog_page);
 }

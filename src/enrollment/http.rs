@@ -1,8 +1,14 @@
+use crate::academics::AcademicsService;
+use crate::academics::service::TermSummary;
+use crate::identity_access::sessions::CurrentSession;
 use crate::shared::{actor::Actor, error::AppError};
-use actix_web::{HttpResponse, delete, post, web};
+use actix_web::http::StatusCode;
+use actix_web::{HttpResponse, delete, get, post, web};
+use askama::Template;
 use serde::Deserialize;
 use uuid::Uuid;
 
+use crate::enrollment::types::{EnrollError, EnrolledSection};
 use crate::enrollment::{EnrollmentService, GrantOverrideCommand, RegisterCommand};
 
 #[derive(Deserialize)]
@@ -41,17 +47,49 @@ pub async fn grant_override(
     Ok(HttpResponse::Created().json(serde_json::json!({ "override_id": override_id })))
 }
 
-#[post("/ui/registration/add")]
-pub async fn register_fragment(
+/// The student registration page: current-term enrollments with drop forms.
+/// Plain HTML over full-page requests — no JavaScript required.
+#[get("/ui/registration")]
+pub async fn registration_page(
     actor: Actor,
-    service: web::Data<EnrollmentService>,
+    current: CurrentSession,
+    enrollment: web::Data<EnrollmentService>,
+    academics: web::Data<AcademicsService>,
+    query: web::Query<NoticeQuery>,
+) -> Result<HttpResponse, AppError> {
+    // Notices are fixed strings selected by key — never echoed client input.
+    let notice = match query.notice.as_deref() {
+        Some("registered") => Some("You are registered."),
+        Some("dropped") => Some("The enrollment was dropped."),
+        _ => None,
+    };
+    render_registration(&actor, &current, &enrollment, &academics, notice, None)
+        .await
+        .map(|body| {
+            HttpResponse::Ok()
+                .content_type("text/html; charset=utf-8")
+                .body(body)
+        })
+}
+
+#[derive(Deserialize)]
+pub struct NoticeQuery {
+    notice: Option<String>,
+}
+
+/// Register from a plain form post. Success redirects (PRG); a typed denial
+/// re-renders the page with the reason inline and an honest 409.
+#[post("/ui/registration/add")]
+pub async fn register_form(
+    actor: Actor,
+    current: CurrentSession,
+    enrollment: web::Data<EnrollmentService>,
+    academics: web::Data<AcademicsService>,
     form: web::Form<RegisterForm>,
 ) -> Result<HttpResponse, AppError> {
-    // CSRF middleware should validate the token before this handler. Keeping the
-    // field in the form preserves non-JavaScript progressive enhancement.
-    let _ = &form.csrf_token;
+    let _ = &form.csrf_token; // validated by the CSRF middleware
 
-    service
+    let outcome = enrollment
         .register_self(
             &actor,
             RegisterCommand {
@@ -59,14 +97,99 @@ pub async fn register_fragment(
                 idempotency_key: form.idempotency_key,
             },
         )
-        .await
-        .map_err(AppError::from)?;
+        .await;
+    finish_ui_action(
+        &actor,
+        &current,
+        &enrollment,
+        &academics,
+        outcome.map(|_| "registered"),
+    )
+    .await
+}
 
-    // In a real project render Askama templates. The response must contain every
-    // element named by x-target.
-    Ok(HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(render_registration_panel(&actor).await?))
+#[post("/ui/registration/drop")]
+pub async fn drop_form(
+    actor: Actor,
+    current: CurrentSession,
+    enrollment: web::Data<EnrollmentService>,
+    academics: web::Data<AcademicsService>,
+    form: web::Form<DropForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let outcome = enrollment.drop_self(&actor, form.enrollment_id).await;
+    finish_ui_action(
+        &actor,
+        &current,
+        &enrollment,
+        &academics,
+        outcome.map(|_| "dropped"),
+    )
+    .await
+}
+
+/// Success ⇒ 303 back to the page (a refresh never resubmits); a denial ⇒
+/// the same page with the reason inline. Anything else keeps its error shape.
+async fn finish_ui_action(
+    actor: &Actor,
+    current: &CurrentSession,
+    enrollment: &EnrollmentService,
+    academics: &AcademicsService,
+    outcome: Result<&'static str, EnrollError>,
+) -> Result<HttpResponse, AppError> {
+    match outcome {
+        Ok(notice) => Ok(HttpResponse::SeeOther()
+            .insert_header(("Location", format!("/ui/registration?notice={notice}")))
+            .finish()),
+        Err(EnrollError::Denied(denial)) => {
+            let body = render_registration(
+                actor,
+                current,
+                enrollment,
+                academics,
+                None,
+                Some(denial.message()),
+            )
+            .await?;
+            Ok(HttpResponse::build(StatusCode::CONFLICT)
+                .content_type("text/html; charset=utf-8")
+                .body(body))
+        }
+        Err(EnrollError::App(error)) => Err(error),
+    }
+}
+
+#[derive(Template)]
+#[template(path = "pages/registration.html")]
+struct RegistrationPage<'a> {
+    csrf_token: &'a str,
+    term: Option<TermSummary>,
+    enrollments: Vec<EnrolledSection>,
+    notice: Option<&'a str>,
+    error: Option<&'a str>,
+}
+
+async fn render_registration(
+    actor: &Actor,
+    current: &CurrentSession,
+    enrollment: &EnrollmentService,
+    academics: &AcademicsService,
+    notice: Option<&str>,
+    error: Option<&str>,
+) -> Result<String, AppError> {
+    let term = academics.current_term(actor).await?;
+    let enrollments = match &term {
+        Some(term) => enrollment.list_own_active(actor, term.id).await?,
+        None => Vec::new(),
+    };
+    Ok(RegistrationPage {
+        csrf_token: &current.csrf_token,
+        term,
+        enrollments,
+        notice,
+        error,
+    }
+    .render()?)
 }
 
 #[derive(Deserialize)]
@@ -114,38 +237,12 @@ pub struct DropForm {
     csrf_token: String,
 }
 
-#[post("/ui/registration/drop")]
-pub async fn drop_fragment(
-    actor: Actor,
-    service: web::Data<EnrollmentService>,
-    form: web::Form<DropForm>,
-) -> Result<HttpResponse, AppError> {
-    let _ = &form.csrf_token;
-    service
-        .drop_self(&actor, form.enrollment_id)
-        .await
-        .map_err(AppError::from)?;
-
-    Ok(HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(render_registration_panel(&actor).await?))
-}
-
-async fn render_registration_panel(_actor: &Actor) -> Result<String, AppError> {
-    // Replace with an Askama template fed by one registration-page query.
-    Ok(r#"
-        <section id="registration-panel">
-            <p role="status">Registration updated.</p>
-        </section>
-        <div id="notifications" x-sync></div>
-    "#
-    .to_owned())
-}
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(register_json)
         .service(grant_override)
         .service(place_hold)
         .service(release_hold)
-        .service(register_fragment)
-        .service(drop_fragment);
+        .service(registration_page)
+        .service(register_form)
+        .service(drop_form);
 }

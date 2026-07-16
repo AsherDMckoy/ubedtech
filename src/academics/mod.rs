@@ -1,6 +1,6 @@
 pub(crate) mod http;
 mod policy;
-mod service;
+pub(crate) mod service;
 
 pub use service::AcademicsService;
 

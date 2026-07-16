@@ -35,6 +35,7 @@ pub async fn session_middleware(
             req.extensions_mut().insert(CurrentSession {
                 session_id: resolved.session_id,
                 csrf_token_hash: resolved.csrf_token_hash,
+                csrf_token: resolved.csrf_token,
             });
         }
     }

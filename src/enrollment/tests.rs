@@ -1169,6 +1169,7 @@ async fn seed_registration_fixture(pool: &sqlx::PgPool, capacity: i32) -> Fixtur
         },
         student_a,
         student_b,
+        student_user_a,
         section_id,
         term_id,
     }
@@ -1178,6 +1179,395 @@ struct Fixture {
     registrar: crate::shared::actor::Actor,
     student_a: uuid::Uuid,
     student_b: uuid::Uuid,
+    student_user_a: uuid::Uuid,
     section_id: uuid::Uuid,
     term_id: uuid::Uuid,
+}
+
+// ---------------------------------------------------------------------------
+// Student-facing pages: full HTTP flows over plain forms — the proof the UI
+// works with JavaScript off (nothing here executes a script).
+// ---------------------------------------------------------------------------
+
+mod ui {
+    use super::{Fixture, add_course_section, add_meeting, seed_registration_fixture};
+    use actix_web::http::StatusCode;
+    use actix_web::{test as actix_test, web};
+    use sqlx::PgPool;
+    use uuid::Uuid;
+
+    use crate::identity_access::http::SessionCookiePolicy;
+    use crate::identity_access::password::PasswordService;
+    use crate::identity_access::service::AuthService;
+    use crate::identity_access::sessions::SessionService;
+    use crate::licensing::{LicenseGate, LicenseSnapshot, LicenseStatus};
+
+    const PASSWORD: &str = "correct horse battery";
+
+    macro_rules! ui_app {
+        ($pool:expr, $institution:expr) => {{
+            let sessions = SessionService::new($pool.clone(), 1800, 43200);
+            let auth = AuthService::new(
+                $pool.clone(),
+                PasswordService::new(8, 1, 1).unwrap(),
+                sessions.clone(),
+                crate::audit::AuditWriter,
+                10,
+                900,
+            )
+            .unwrap();
+            let gate = LicenseGate::new(LicenseSnapshot {
+                institution_id: $institution,
+                deployment_id: Uuid::new_v4(),
+                status: LicenseStatus::Active,
+                valid_from: chrono::Utc::now() - chrono::Duration::days(1),
+                valid_until: chrono::Utc::now() + chrono::Duration::days(365),
+                version: 1,
+                feature_set: serde_json::json!({}),
+            });
+            actix_test::init_service(
+                actix_web::App::new()
+                    .app_data(web::Data::new(sessions))
+                    .app_data(web::Data::new(auth))
+                    .app_data(web::Data::new(gate))
+                    .app_data(web::Data::new(SessionCookiePolicy {
+                        secure: false,
+                        max_age_secs: 43200,
+                    }))
+                    .app_data(web::Data::new(crate::academics::AcademicsService::new(
+                        $pool.clone(),
+                        crate::audit::AuditWriter,
+                    )))
+                    .app_data(web::Data::new(crate::enrollment::EnrollmentService::new(
+                        $pool.clone(),
+                        crate::audit::AuditWriter,
+                    )))
+                    // Same order as main.rs: csrf inside session resolution.
+                    .wrap(actix_web::middleware::from_fn(
+                        crate::identity_access::csrf::csrf_middleware,
+                    ))
+                    .wrap(actix_web::middleware::from_fn(
+                        crate::identity_access::middleware::session_middleware,
+                    ))
+                    .configure(crate::identity_access::http::routes)
+                    .configure(crate::academics::http::routes)
+                    .configure(crate::enrollment::http::routes),
+            )
+            .await
+        }};
+    }
+
+    /// Give the fixture's student A a login credential and the student role.
+    async fn credential_student(pool: &PgPool, fixture: &Fixture) -> String {
+        let username = format!("stu-{}", &fixture.student_user_a.to_string()[..8]);
+        sqlx::query("UPDATE user_account SET username = $2 WHERE id = $1")
+            .bind(fixture.student_user_a)
+            .bind(&username)
+            .execute(pool)
+            .await
+            .unwrap();
+        let hash = PasswordService::new(8, 1, 1)
+            .unwrap()
+            .hash(PASSWORD)
+            .unwrap();
+        sqlx::query("INSERT INTO password_credential (user_id, password_hash) VALUES ($1, $2)")
+            .bind(fixture.student_user_a)
+            .bind(hash)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO user_role (institution_id, user_id, role_id) \
+             SELECT $1, $2, id FROM role WHERE code = 'student'",
+        )
+        .bind(fixture.registrar.institution_id)
+        .bind(fixture.student_user_a)
+        .execute(pool)
+        .await
+        .unwrap();
+        username
+    }
+
+    /// `<input ... name="{name}" ... value="...">` — first match, attribute
+    /// order and whitespace agnostic.
+    fn extract_input(body: &str, name: &str) -> String {
+        let at = body
+            .find(&format!("name=\"{name}\""))
+            .unwrap_or_else(|| panic!("no input named {name} in page"));
+        let rest = &body[at..];
+        let value_at = rest.find("value=\"").expect("input has a value") + "value=\"".len();
+        rest[value_at..]
+            .split('"')
+            .next()
+            .expect("closing quote")
+            .to_owned()
+    }
+
+    async fn login<S, B>(
+        app: &S,
+        username: &str,
+        password: &str,
+    ) -> actix_web::cookie::Cookie<'static>
+    where
+        S: actix_web::dev::Service<
+                actix_http::Request,
+                Response = actix_web::dev::ServiceResponse<B>,
+                Error = actix_web::Error,
+            >,
+        B: actix_web::body::MessageBody,
+    {
+        let response = actix_test::call_service(
+            app,
+            actix_test::TestRequest::post()
+                .uri("/ui/login")
+                .peer_addr("127.0.0.1:9999".parse().unwrap())
+                .set_form(serde_json::json!({ "username": username, "password": password }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response.headers().get("Location").unwrap(),
+            "/ui/registration"
+        );
+        response
+            .response()
+            .cookies()
+            .find(|cookie| cookie.name() == "ub_session")
+            .expect("form login sets the session cookie")
+            .into_owned()
+    }
+
+    async fn get_page<S, B>(
+        app: &S,
+        cookie: &actix_web::cookie::Cookie<'static>,
+        uri: &str,
+    ) -> String
+    where
+        S: actix_web::dev::Service<
+                actix_http::Request,
+                Response = actix_web::dev::ServiceResponse<B>,
+                Error = actix_web::Error,
+            >,
+        B: actix_web::body::MessageBody,
+    {
+        let response = actix_test::call_service(
+            app,
+            actix_test::TestRequest::get()
+                .uri(uri)
+                .cookie(cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK, "GET {uri}");
+        String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap()
+    }
+
+    /// POST a registration form; returns (status, body-as-text).
+    async fn post_add<S, B>(
+        app: &S,
+        cookie: &actix_web::cookie::Cookie<'static>,
+        csrf: &str,
+        section_id: Uuid,
+    ) -> (StatusCode, String)
+    where
+        S: actix_web::dev::Service<
+                actix_http::Request,
+                Response = actix_web::dev::ServiceResponse<B>,
+                Error = actix_web::Error,
+            >,
+        B: actix_web::body::MessageBody,
+    {
+        let response = actix_test::call_service(
+            app,
+            actix_test::TestRequest::post()
+                .uri("/ui/registration/add")
+                .cookie(cookie.clone())
+                .set_form(serde_json::json!({
+                    "csrf_token": csrf,
+                    "section_id": section_id,
+                    "idempotency_key": Uuid::new_v4(),
+                }))
+                .to_request(),
+        )
+        .await;
+        let status = response.status();
+        let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        (status, body)
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn login_catalog_register_and_drop_work_as_plain_forms(pool: PgPool) {
+        let fixture = seed_registration_fixture(&pool, 1).await;
+        let username = credential_student(&pool, &fixture).await;
+        let app = ui_app!(&pool, fixture.registrar.institution_id);
+
+        // The login page is reachable anonymously and is a plain form.
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get().uri("/ui/login").to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        assert!(body.contains("form method=\"post\" action=\"/ui/login\""));
+
+        // A wrong password re-renders the page with the error inline (401).
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/ui/login")
+                .peer_addr("127.0.0.1:9999".parse().unwrap())
+                .set_form(serde_json::json!({ "username": &username, "password": "wrong" }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        assert!(body.contains("Invalid username or password."));
+
+        // Real login → catalog shows the section with seats and a register form.
+        let cookie = login(&app, &username, PASSWORD).await;
+        let catalog = get_page(&app, &cookie, "/ui/catalog").await;
+        assert!(catalog.contains("Concurrency Test"), "course listed");
+        assert!(catalog.contains("0/1"), "seat counts shown");
+        let csrf = extract_input(&catalog, "csrf_token");
+        let listed_section: Uuid = extract_input(&catalog, "section_id").parse().unwrap();
+        assert_eq!(listed_section, fixture.section_id);
+
+        // Register via the form → PRG redirect → panel shows the enrollment.
+        let (status, _) = post_add(&app, &cookie, &csrf, fixture.section_id).await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let panel = get_page(&app, &cookie, "/ui/registration?notice=registered").await;
+        assert!(panel.contains("You are registered."));
+        assert!(panel.contains("Concurrency Test"));
+        let enrollment_id = extract_input(&panel, "enrollment_id");
+
+        // Drop via the form → redirect → panel is empty again.
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/ui/registration/drop")
+                .cookie(cookie.clone())
+                .set_form(serde_json::json!({
+                    "csrf_token": csrf,
+                    "enrollment_id": enrollment_id,
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let panel = get_page(&app, &cookie, "/ui/registration").await;
+        assert!(panel.contains("not registered for any sections"));
+
+        // The catalog search narrows: a nonsense query lists nothing.
+        let filtered = get_page(&app, &cookie, "/ui/catalog?q=NO-SUCH-COURSE").await;
+        assert!(filtered.contains("No open sections match."));
+    }
+
+    /// Every rejection case in the student capability list renders inline
+    /// feedback on the page (status 409), never a bare error blob.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn every_rejection_case_renders_inline_feedback(pool: PgPool) {
+        let fixture = seed_registration_fixture(&pool, 5).await;
+        let username = credential_student(&pool, &fixture).await;
+        let app = ui_app!(&pool, fixture.registrar.institution_id);
+        let service =
+            crate::enrollment::EnrollmentService::new(pool.clone(), crate::audit::AuditWriter);
+
+        // Scenario sections.
+        add_meeting(&pool, fixture.section_id, 1, "09:00:00", "10:00:00").await;
+        let overlapping = add_course_section(&pool, &fixture, "OVERLAP", 5).await;
+        add_meeting(&pool, overlapping, 1, "09:30:00", "10:30:00").await;
+        let full = add_course_section(&pool, &fixture, "FULL", 0).await;
+        let gated = add_course_section(&pool, &fixture, "ADVANCED", 5).await;
+        let basic = add_course_section(&pool, &fixture, "BASIC", 5).await;
+        let (gated_course, basic_course): (Uuid, Uuid) = (
+            sqlx::query_scalar("SELECT course_id FROM section WHERE id = $1")
+                .bind(gated)
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+            sqlx::query_scalar("SELECT course_id FROM section WHERE id = $1")
+                .bind(basic)
+                .fetch_one(&pool)
+                .await
+                .unwrap(),
+        );
+        sqlx::query(
+            "INSERT INTO course_prerequisite (course_id, prerequisite_course_id, \
+             minimum_grade_points) VALUES ($1, $2, 2.0)",
+        )
+        .bind(gated_course)
+        .bind(basic_course)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let cookie = login(&app, &username, PASSWORD).await;
+        let csrf = extract_input(&get_page(&app, &cookie, "/ui/catalog").await, "csrf_token");
+        let expect_inline = |status: StatusCode, body: String, message: &str| {
+            assert_eq!(status, StatusCode::CONFLICT, "{message}: {body}");
+            assert!(body.contains(message), "inline feedback missing: {message}");
+            assert!(
+                body.contains("<h1>My registration</h1>"),
+                "full page rendered"
+            );
+        };
+
+        // Closed window.
+        sqlx::query("UPDATE academic_term SET add_drop_closes_at = now() - interval '1 minute'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (status, body) = post_add(&app, &cookie, &csrf, fixture.section_id).await;
+        expect_inline(status, body, "registration window is closed");
+        sqlx::query("UPDATE academic_term SET add_drop_closes_at = now() + interval '7 days'")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // Hold.
+        service
+            .place_hold(
+                &fixture.registrar,
+                fixture.student_a,
+                fixture.term_id,
+                "financial",
+                "unpaid balance",
+            )
+            .await
+            .unwrap();
+        let (status, body) = post_add(&app, &cookie, &csrf, fixture.section_id).await;
+        expect_inline(status, body, "student has a registration hold");
+        service
+            .release_hold(
+                &fixture.registrar,
+                fixture.student_a,
+                fixture.term_id,
+                "financial",
+            )
+            .await
+            .unwrap();
+
+        // Successful registration to set up duplicate + conflict.
+        let (status, _) = post_add(&app, &cookie, &csrf, fixture.section_id).await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+
+        // Duplicate.
+        let (status, body) = post_add(&app, &cookie, &csrf, fixture.section_id).await;
+        expect_inline(status, body, "student is already enrolled in this section");
+
+        // Schedule conflict.
+        let (status, body) = post_add(&app, &cookie, &csrf, overlapping).await;
+        expect_inline(status, body, "schedule conflict detected");
+
+        // Full section.
+        let (status, body) = post_add(&app, &cookie, &csrf, full).await;
+        expect_inline(status, body, "section is full");
+
+        // Unmet prerequisite.
+        let (status, body) = post_add(&app, &cookie, &csrf, gated).await;
+        expect_inline(status, body, "prerequisite requirements are not satisfied");
+    }
 }

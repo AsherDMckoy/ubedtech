@@ -8,7 +8,9 @@
 //! the credentials in the body, and the session cookie is `SameSite=Lax`.
 
 use actix_web::cookie::{Cookie, SameSite, time};
-use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, post, web};
+use actix_web::http::StatusCode;
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, delete, get, post, web};
+use askama::Template;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -49,9 +51,30 @@ pub async fn login(
     policy: web::Data<SessionCookiePolicy>,
     body: web::Json<LoginRequest>,
 ) -> Result<HttpResponse, AppError> {
-    // Throttling keys on the socket peer address: it cannot be spoofed,
-    // unlike forwarded headers. Behind a reverse proxy this collapses to the
-    // proxy's address — see SECURITY.md before deploying one.
+    let session = authenticate(
+        &req,
+        &auth,
+        &sessions,
+        &gate,
+        &body.username,
+        &body.password,
+    )
+    .await?;
+    Ok(session_response(&policy, session))
+}
+
+/// The shared login sequence for the JSON API and the HTML form: throttle by
+/// socket peer address (unspoofable — see SECURITY.md before fronting with a
+/// proxy), rotate away any presented session, authenticate against the
+/// license snapshot's institution, log ids only.
+async fn authenticate(
+    req: &HttpRequest,
+    auth: &AuthService,
+    sessions: &SessionService,
+    gate: &LicenseGate,
+    username: &str,
+    password: &str,
+) -> Result<NewSession, AppError> {
     let client_ip = req
         .peer_addr()
         .map(|addr| addr.ip().to_string())
@@ -67,9 +90,8 @@ pub async fn login(
     // Single-tenant deployment: the institution is the one the license was
     // loaded for at startup.
     let institution_id = gate.snapshot().institution_id;
-
     let outcome = auth
-        .login(institution_id, &body.username, &body.password, &client_ip)
+        .login(institution_id, username, password, &client_ip)
         .await?;
 
     // Auth events are logged by ids only — never the username that was
@@ -79,21 +101,74 @@ pub async fn login(
         session_id = %outcome.session.session_id,
         "login succeeded"
     );
-
-    Ok(session_response(&policy, outcome.session))
+    Ok(outcome.session)
 }
 
-/// Builds the "here is your fresh session" response shared by login and
-/// self-service password change: hardened cookie + one-time CSRF token.
-fn session_response(policy: &SessionCookiePolicy, session: NewSession) -> HttpResponse {
-    let cookie = Cookie::build(SESSION_COOKIE, session.token.expose().to_owned())
+#[derive(Template)]
+#[template(path = "pages/login.html")]
+struct LoginPage<'a> {
+    error: Option<&'a str>,
+}
+
+/// HTML login for the no-JavaScript flow the student pages degrade to.
+#[get("/ui/login")]
+pub async fn login_page() -> Result<HttpResponse, AppError> {
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(LoginPage { error: None }.render()?))
+}
+
+#[post("/ui/login")]
+pub async fn login_form(
+    req: HttpRequest,
+    auth: web::Data<AuthService>,
+    sessions: web::Data<SessionService>,
+    gate: web::Data<LicenseGate>,
+    policy: web::Data<SessionCookiePolicy>,
+    form: web::Form<LoginRequest>,
+) -> Result<HttpResponse, AppError> {
+    match authenticate(
+        &req,
+        &auth,
+        &sessions,
+        &gate,
+        &form.username,
+        &form.password,
+    )
+    .await
+    {
+        Ok(session) => Ok(HttpResponse::SeeOther()
+            .cookie(session_cookie(&policy, &session))
+            .insert_header(("Location", "/ui/registration"))
+            .finish()),
+        // The uniform 401 renders inline; everything else (throttling,
+        // faults) keeps its JSON error shape and status.
+        Err(AppError::Unauthenticated) => Ok(HttpResponse::build(StatusCode::UNAUTHORIZED)
+            .content_type("text/html; charset=utf-8")
+            .body(
+                LoginPage {
+                    error: Some("Invalid username or password."),
+                }
+                .render()?,
+            )),
+        Err(other) => Err(other),
+    }
+}
+
+fn session_cookie(policy: &SessionCookiePolicy, session: &NewSession) -> Cookie<'static> {
+    Cookie::build(SESSION_COOKIE, session.token.expose().to_owned())
         .http_only(true)
         .secure(policy.secure)
         .same_site(SameSite::Lax)
         .path("/")
         .max_age(time::Duration::seconds(policy.max_age_secs))
-        .finish();
+        .finish()
+}
 
+/// Builds the "here is your fresh session" response shared by login and
+/// self-service password change: hardened cookie + one-time CSRF token.
+fn session_response(policy: &SessionCookiePolicy, session: NewSession) -> HttpResponse {
+    let cookie = session_cookie(policy, &session);
     HttpResponse::Ok().cookie(cookie).json(LoginResponse {
         csrf_token: session.csrf_token,
     })
@@ -244,6 +319,8 @@ fn parse_role(code: &str) -> Result<Role, AppError> {
 
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(login)
+        .service(login_page)
+        .service(login_form)
         .service(logout)
         .service(change_own_password)
         .service(reset_password)

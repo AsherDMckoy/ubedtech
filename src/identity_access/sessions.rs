@@ -57,14 +57,18 @@ pub struct ResolvedSession {
     pub actor: Actor,
     /// SHA-256 of the session's CSRF token, for the CSRF middleware.
     pub csrf_token_hash: Vec<u8>,
+    /// The token itself, for embedding into server-rendered forms (ADR-9).
+    pub csrf_token: String,
 }
 
 /// What the session middleware leaves in request extensions alongside the
-/// `Actor`: enough to log the session out and to check CSRF tokens.
+/// `Actor`: enough to log the session out, check CSRF tokens, and render
+/// them into forms.
 #[derive(Clone)]
 pub struct CurrentSession {
     pub session_id: Uuid,
     pub csrf_token_hash: Vec<u8>,
+    pub csrf_token: String,
 }
 
 #[derive(Clone)]
@@ -100,10 +104,10 @@ impl SessionService {
             r#"
             INSERT INTO user_session (
                 id, institution_id, user_id, session_version,
-                token_hash, csrf_secret_hash,
+                token_hash, csrf_secret_hash, csrf_secret,
                 expires_at, idle_expires_at, last_seen_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             "#,
         )
         .bind(session_id)
@@ -112,6 +116,7 @@ impl SessionService {
         .bind(session_version)
         .bind(sha256(token.0.as_bytes()))
         .bind(sha256(csrf_token.as_bytes()))
+        .bind(&csrf_token)
         .bind(now + self.absolute)
         .bind(now + self.idle)
         .bind(now)
@@ -137,6 +142,7 @@ impl SessionService {
                 s.institution_id,
                 s.session_version,
                 s.csrf_secret_hash,
+                s.csrf_secret,
                 s.expires_at,
                 s.idle_expires_at,
                 s.last_seen_at,
@@ -156,6 +162,7 @@ impl SessionService {
             LEFT JOIN role r ON r.id = ur.role_id
             WHERE s.token_hash = $1
               AND s.revoked_at IS NULL
+              AND s.csrf_secret IS NOT NULL
             GROUP BY s.id, u.id, sp.id
             "#,
         )
@@ -211,6 +218,7 @@ impl SessionService {
                 roles,
             },
             csrf_token_hash: row.csrf_secret_hash,
+            csrf_token: row.csrf_secret,
         }))
     }
 
@@ -246,6 +254,7 @@ struct SessionRow {
     institution_id: Uuid,
     session_version: i64,
     csrf_secret_hash: Vec<u8>,
+    csrf_secret: String,
     expires_at: DateTime<Utc>,
     idle_expires_at: DateTime<Utc>,
     last_seen_at: DateTime<Utc>,
