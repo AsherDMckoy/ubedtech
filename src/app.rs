@@ -12,7 +12,8 @@ use crate::config::Environment;
 // license middleware (slice 2.5) additionally locks these behind an active
 // license.
 pub fn protected_routes(cfg: &mut web::ServiceConfig) {
-    cfg.configure(crate::enrollment::http::routes)
+    cfg.configure(crate::academics::http::routes)
+        .configure(crate::enrollment::http::routes)
         .configure(crate::records::http::routes)
         .configure(crate::documents::http::routes);
 }

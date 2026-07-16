@@ -1,4 +1,4 @@
-// mod academics;
+mod academics;
 mod app;
 mod audit;
 mod config;
@@ -79,6 +79,7 @@ async fn main() -> std::io::Result<()> {
         max_age_secs: config.session_absolute_secs as i64,
     };
 
+    let academics = crate::academics::AcademicsService::new(pool.clone(), audit.clone());
     let enrollment = EnrollmentService::new(pool.clone(), audit.clone());
     let grades = GradeService::new(pool.clone(), audit.clone());
     let schedule = ScheduleQuery::new(pool.clone());
@@ -107,6 +108,7 @@ async fn main() -> std::io::Result<()> {
     let server = HttpServer::new(move || {
         App::new()
             .app_data(web::Data::new(pool.clone()))
+            .app_data(web::Data::new(academics.clone()))
             .app_data(web::Data::new(enrollment.clone()))
             .app_data(web::Data::new(grades.clone()))
             .app_data(web::Data::new(schedule.clone()))
