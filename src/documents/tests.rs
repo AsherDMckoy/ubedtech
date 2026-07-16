@@ -805,3 +805,26 @@ mod ui {
         assert!(bytes.starts_with(b"%PDF-"));
     }
 }
+
+/// FOR UPDATE SKIP LOCKED under real concurrency: two workers race one
+/// queued job; exactly one claims and completes it, the other finds nothing.
+#[sqlx::test(migrations = "./migrations")]
+async fn two_workers_cannot_claim_the_same_job(pool: PgPool) {
+    let fx = seed_doc_fixture(&pool).await;
+    let (request_id, _) = approved_request(&pool, &fx).await;
+
+    let left_worker = worker(&pool);
+    let right_worker = worker(&pool);
+    let (left, right) = tokio::join!(left_worker.run_once(), right_worker.run_once());
+    let claims = usize::from(left.unwrap()) + usize::from(right.unwrap());
+    assert_eq!(claims, 1, "exactly one worker claimed the job");
+
+    assert_eq!(request_status(&pool, request_id).await, "ready");
+    let artifacts: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM generated_document WHERE request_id = $1")
+            .bind(request_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(artifacts, 1);
+}

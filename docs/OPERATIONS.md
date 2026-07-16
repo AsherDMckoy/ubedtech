@@ -97,3 +97,43 @@ response header.
 `psql ubedtechdb` — migrations are applied automatically at startup;
 `src/dev/seed.sql` seeds an institution, dev student, term, and an active
 license for local work: `psql -d ubedtechdb -f src/dev/seed.sql`.
+
+## Document artifact storage
+
+Artifacts (generated PDFs) live behind the `DocumentStore` trait
+(`src/documents/storage.rs`) — the artifact-storage boundary CLAUDE.md §0
+sanctions a trait for. Two operations: `write(hash, bytes) -> storage_path`
+(must be atomic) and `read(storage_path) -> bytes`.
+
+**Development / single node:** `FilesystemDocumentStore` under
+`APP_DOCUMENT_STORAGE_PATH` (default `./var/documents`). Content-hash
+filenames sharded by hash prefix (`ab/abcdef….pdf`); writes are tmp+rename
+so a reader never sees a partial file. Back this directory up with the
+database (BACKUP_AND_RESTORE.md); artifacts are re-derivable from
+snapshots, but re-generation invalidates recorded checksums for signed
+copies already delivered.
+
+**Production (object storage):** implement `DocumentStore` against any
+S3-compatible API:
+
+- `write`: `PUT` to `documents/{hash[..2]}/{hash}.pdf` (single PUT is
+  atomic in S3 semantics; multipart completes atomically too). Return the
+  object key as the storage path. Enable bucket versioning + a deny-delete
+  bucket policy to mirror the immutability the filesystem store gets from
+  the database trigger + checksum verification.
+- `read`: `GET` by key.
+- The worker (`DocumentWorker<S: DocumentStore>`) and the download adapter
+  are already generic/injected — swap the constructed store in `main.rs`,
+  nothing else changes. Downloads re-verify sha256 against
+  `generated_document.content_hash` on every read, so storage corruption
+  or tampering is served as a 500, never as a document.
+
+## Orphaned document jobs (the reaper)
+
+A worker that dies mid-render leaves its job `running`. The worker loop
+reaps jobs whose `locked_at` is older than `APP_JOB_STALE_SECS` (default
+300) back to `queued` — or to terminal `failed` once the attempt budget
+(3) is spent — at startup and every 60 seconds. Set the threshold well
+above the longest legitimate render. `document_job.last_error` records
+both render failures and reap events; a terminally failed job also fails
+its request, visibly to the student and the officer queue.

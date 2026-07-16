@@ -25,9 +25,21 @@ harness — an infrastructure flake, not a code failure). Run
 `cargo test --all-targets --all-features -- --test-threads=4` locally;
 CI's service container copes with the default.
 
-## Current suite (100 tests as of Phase 4)
+## Current suite (109 tests as of Phase 5)
 
-Phase 4 added 8 `records` tests: correction history (prior value + author
+Phase 5 added 9 `documents` tests: crash recovery via the reaper (commit
+'running', reap, requeue, live worker completes), terminal reaping,
+live-job safety, two-worker SKIP LOCKED race, duplicate-job idempotency
+(one artifact ever), bounded retries with recorded reasons,
+approval/rejection atomicity + authorization, download authorization +
+checksum verification, and the full request→review→generate→download UI
+flow. It also fixed the intermittent idempotency-test failure previously
+misattributed to local pool exhaustion: the enrollment receipt carried a
+Rust-side nanosecond timestamp that PostgreSQL truncates to microseconds;
+receipts now use `INSERT … RETURNING`. (`PoolTimedOut` under unbounded
+parallelism remains real — keep `--test-threads=4` locally.)
+
+Phase 4 (100 tests) added 8 `records` tests: correction history (prior value + author
 preserved), entry-window enforcement, crafted-request roster/grading
 scoping, instructor-assignment validation, snapshot immutability +
 versioning + published-only content, academic history, and the full

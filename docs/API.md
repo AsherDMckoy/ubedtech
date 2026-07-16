@@ -95,9 +95,19 @@ Pages (plain forms): `GET /ui/instructor`, `GET /ui/instructor/sections/{id}`
 (officer), `GET /ui/grades`, `GET /ui/history`. Denials re-render inline
 (409/422); successes redirect (PRG).
 
-Everything else (documents `/ui/*` and `/api/v1/*` routes from earlier
-phases) sits behind session + CSRF + license gate; those endpoints get
-documented here as their phases harden them.
+## Documents (Phase 5)
+
+| Method & path | Who | Behavior |
+|---|---|---|
+| `GET /ui/documents` | student | request form + own requests with statuses (pending/approved/generating/ready/rejected/failed) and download links when ready |
+| `POST /ui/documents` | student | form `{document_type, purpose?, delivery_method}` → PRG; validation inline (422) |
+| `GET /ui/documents/{id}/download` | owning student; document_officer (own institution) | ready + current artifact only, else 404; sha256 re-verified against the recorded checksum; `Content-Disposition: attachment; filename="document.pdf"`; `Cache-Control: private, no-store` |
+| `GET /ui/admin/documents` | document_officer | pending queue |
+| `POST /ui/admin/documents/{id}/approve` | document_officer | reason REQUIRED; commits approval + immutable snapshot + generation job in one transaction → PRG; blank reason / already-decided render inline (422/404) |
+| `POST /ui/admin/documents/{id}/reject` | document_officer | reason REQUIRED; recorded on the decision → PRG |
+
+Generation runs in the background worker (`FOR UPDATE SKIP LOCKED`, 3
+attempts with recorded reasons, orphan reaper — see OPERATIONS.md).
 
 The authorization behind every row above is test-backed — see
 `docs/PERMISSIONS.md` for the matrix and proving tests.

@@ -330,3 +330,45 @@ open item from the CLAUDE.md defect list — owed by the documents phase.)
 - Test count: 92 → 100. Deferred: unofficial transcript print view,
   Cache-Control headers on student views, concurrent snapshot-version race
   test, correction UI (JSON endpoint only).
+
+---
+
+## Phase 5 outcome — documents (2026-07-16)
+
+**CLAUDE.md §1 item 3 is CLOSED — the defect list from the original review
+is now fully closed** (items 1, 2, 4, 5, 6 in earlier phases). Delivered
+(the session prompt named this "Phase 5"; it completes this plan's
+"Phase 6 — Documents"):
+
+- **Reaper:** the worker loop sweeps `running` jobs whose `locked_at`
+  exceeds `APP_JOB_STALE_SECS` (default 300) back to `queued` — or to
+  terminal `failed` past the attempt budget, failing the request honestly
+  — at startup and every 60s. Crash recovery proven exactly as the prompt
+  required: commit the 'running' state, run the reaper directly, assert
+  'queued', then a live worker completes the request.
+- **Worker correctness:** `FOR UPDATE SKIP LOCKED` claiming proven with a
+  two-worker race; bounded retries (3) with recorded failure reasons
+  proven with a deterministic failing render; completion is idempotent —
+  duplicate jobs converge on the single current artifact (partial unique
+  index + ON CONFLICT DO NOTHING). PDF rendering moved to the blocking
+  pool (`spawn_blocking`); all storage I/O is tokio::fs. Verified by
+  inspection: no render or blocking filesystem work on an HTTP runtime
+  thread.
+- **Workflow:** approval and rejection both require a reason (A20) and are
+  officer-only, institution-scoped; approval commits the immutable
+  snapshot, the approved state, and the generation job in one
+  transaction (denied attempts leave zero state).
+- **Storage boundary:** `DocumentStore` trait (write/read), filesystem
+  implementation (tmp+rename, hash-sharded), worker generic over it;
+  production object-storage adapter documented in OPERATIONS.md.
+- **Downloads:** every download passes `downloadable` (owner or officer,
+  ready + current, else 404) and re-verifies sha256 against the recorded
+  checksum before serving; fixed safe filename; `private, no-store`.
+- **Pages:** /ui/documents (request, track, download) and
+  /ui/admin/documents (reasoned review queue) as plain forms; full HTTP
+  flow test.
+- **Bug fixed en route:** enrollment receipts now take `registered_at`
+  from `INSERT … RETURNING` — the Rust-side nanosecond timestamp was the
+  real cause of the intermittent idempotency-test failure previously
+  blamed on pool exhaustion.
+- Test count: 100 → 109.

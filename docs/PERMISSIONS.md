@@ -55,6 +55,14 @@ authenticated actor regardless of role; "anon" = no session required.
 | Generate a transcript snapshot (`POST /api/v1/students/{id}/transcript-snapshots`) | ❌ | ❌ | ❌ | ❌ | ✅ own institution (else 404); artifact immutable by DB trigger | ❌ | ❌ | ❌ | `transcript_snapshots_are_immutable_versioned_and_published_only` |
 | Read own grades / academic history / snapshots (`GET /api/v1/me/grades`, `/api/v1/me/history`, `/ui/grades`, `/ui/history`) | ❌ 401 | ✅ self only; **published/amended only — the filter is in the query** | ❌ 403 (no student profile) | ❌ same | ❌ same | ❌ same | ❌ same | ❌ same | `unassigned_instructors_cannot_grade_and_students_never_see_drafts`, `academic_history_spans_terms_and_hides_drafts`, `ui::…` (draft invisible on pages) |
 
+## Matrix (Phase 5: documents)
+
+| Operation | anon | student | instructor | registrar | records_officer | document_officer | institution_admin | platform_licensing_admin | Proof (tests) |
+|---|---|---|---|---|---|---|---|---|---|
+| Request a document (`POST /ui/documents`) | ❌ 401 | ✅ self | ❌ 403 (no student profile) | ❌ same | ❌ same | ❌ same | ❌ same | ❌ same | `ui::request_review_generate_download_works_as_plain_forms`, `approval_and_rejection_are_reasoned_scoped_and_atomic` |
+| Read the review queue / approve / reject (`/ui/admin/documents…`) | ❌ 401 | ❌ 403 | ❌ | ❌ | ❌ | ✅ own institution; reason required for BOTH decisions; snapshot + job committed with the approval | ❌ | ❌ | `approval_and_rejection_are_reasoned_scoped_and_atomic` (403/422/404 + atomicity), `ui::…` (student 403 on the queue, blank reason inline) |
+| Download an artifact (`GET /ui/documents/{id}/download`) | ❌ 401 | ✅ own request only (else 404) | ❌ 403 | ❌ | ❌ | ✅ any in institution (else 404) | ❌ | ❌ | `downloads_are_authorized_and_checksum_verified` (owner/officer allow; other student, foreign officer 404; checksum verified), `ui::…` (HTTP attachment) |
+
 Additional cross-cutting proofs:
 
 - CSRF applies to every state-changing operation above except login:
@@ -73,5 +81,3 @@ Additional cross-cutting proofs:
 These checks exist in code but have no per-role deny tests yet. They get
 rows when their phases add the tests (Phase 4/5/6/8):
 
-- Document request: student for self; approve/reject: document officer
-  (`documents/service.rs`, `documents/http.rs` admin queue).

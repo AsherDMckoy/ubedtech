@@ -180,28 +180,32 @@ student pages.
 
 ## Phase 6 — Documents workflow & worker robustness
 
-Depends on: Phase 5 (snapshots), Phase 2 (document_officer auth).
+**STATUS: COMPLETE (2026-07-16)** — delivered by the session whose prompt
+named it "Phase 5". CLAUDE.md §1 item 3 is closed; **every item on the §1
+defect list is now closed.** Also delivered beyond the plan: approval now
+requires a reason like rejection (A20), the render runs on the blocking
+pool, completion is idempotent (duplicate jobs converge on the one
+artifact), and downloads re-verify the sha256 checksum on every read.
 
-6.1 `[ ]` **Job reaper (CLAUDE.md §1 item 3).** Periodic sweep in the worker
-    loop: `UPDATE document_job SET status='queued', locked_at=NULL,
-    locked_by=NULL WHERE status='running' AND locked_at < now() - $stale`
-    with attempts respected (goes to `failed` past the cap). Stale threshold
-    from config. Acceptance: integration test inserts a fake orphaned
-    running job with old `locked_at`, runs one sweep, asserts it is claimed
-    and completed by a live worker; terminal-failure path test.
-6.2 `[ ]` **Two-workers-one-job test** (`SKIP LOCKED` proof) and
-    crash-window test (job claimed, artifact never written → reaper
-    requeues, second run completes, exactly one current
-    `generated_document` per request — the partial unique index proves it).
-6.3 `[ ]` **Artifact download endpoint** with ownership/role authorization,
-    `Content-Disposition: attachment`, fixed safe filename, no filesystem
-    paths in responses. Acceptance: student can fetch own ready artifact,
-    cannot fetch another student's; officer can fetch any in-institution.
-6.4 `[ ]` **Document request/approval fragment pages** from `web/` templates
-    replacing inline template strings where they belong to pages.
-6.5 `[ ]` **Graceful worker shutdown**: worker listens on a shutdown signal
-    (watch channel) so in-flight render finishes or the job is released
-    before exit.
+6.1 `[x]` **Job reaper (item 3)** — sweep in the worker loop (startup +
+    every 60s), threshold `APP_JOB_STALE_SECS`; requeue or terminal-fail
+    past the attempt budget, request failed honestly. Proofs:
+    `a_crashed_workers_job_is_reaped_and_completed_by_a_live_worker`
+    (commit 'running', reap directly, back to 'queued', live worker
+    completes), `reaping_past_the_attempt_budget_fails_terminally`,
+    `the_reaper_leaves_live_jobs_alone`.
+6.2 `[x]` **Concurrency proofs** — `two_workers_cannot_claim_the_same_job`
+    (SKIP LOCKED), `duplicate_jobs_never_produce_a_second_artifact`
+    (partial unique index + ON CONFLICT DO NOTHING),
+    `failed_renders_retry_with_recorded_reasons_then_stop`.
+6.3 `[x]` **Authorized downloads** — owner or officer, institution-scoped,
+    ready+current only, checksum re-verified, fixed safe filename, no
+    paths in responses (`downloads_are_authorized_and_checksum_verified`).
+6.4 `[x]` **Pages** — /ui/documents (request/track/download) and
+    /ui/admin/documents (reasoned approve/reject queue), plain forms, full
+    HTTP flow test.
+6.5 `[x]` **Graceful worker shutdown** — delivered in Phase 1 (watch
+    channel); the reaper now also covers hard kills.
 
 ---
 
@@ -294,5 +298,7 @@ flagged in session reports.)
 | A17 | 2026-07-15 | Does `grade_entry_closes_at` bind everyone? What does NULL mean? | The window binds instructors only; the records officer may enter late (the escape hatch). NULL = no deadline configured = no window. | Late grades are a real administrative need; routing them through the officer keeps one accountable authority. NULL-means-closed would brick grading on every term seeded before the column was used. |
 | A18 | 2026-07-15 | Where does revision history live? | A BEFORE UPDATE trigger copies the OLD grade row (value, state, author, version) into `grade_revision`; DELETE on grade_record is refused by trigger. | The history invariant must hold for every path — service, script, psql — not just the paths that remember to write a history row. Same reasoning as the 0010 capacity trigger. |
 | A19 | 2026-07-15 | May any user id be assigned as a section instructor? | No — the target must hold the `instructor` role in the institution (else 422), and only registrar/institution_admin assign. | Grading power must flow through the role system; assigning a student as instructor by id typo would otherwise grant it silently. |
+| A20 | 2026-07-16 | The Phase 5 prompt requires "approval/rejection with a required reason" — did that mean both decisions or only rejection (as originally implemented)? | Both: an approval also refuses a blank reason (422). | Issuing an official document is the sensitive act; the decision trail should say why in both directions. Conservative reading of the prompt; one `trim().is_empty()` check to relax. |
+| A21 | 2026-07-16 | How stale is an orphaned job? | `APP_JOB_STALE_SECS`, default 300s — 60× the demo render time; reaped attempts count against the same budget of 3 as render failures. | A crash-looping worker must not retry forever any more than a failing render; five minutes cannot mistake a slow-but-alive render for a dead worker at demo document sizes. Deployments with heavyweight templates raise the knob. |
 
 (Phase 7's license file format will be recorded here when that phase runs.)
