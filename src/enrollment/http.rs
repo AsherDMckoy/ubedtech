@@ -3,7 +3,7 @@ use actix_web::{HttpResponse, post, web};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::enrollment::{EnrollmentService, RegisterCommand};
+use crate::enrollment::{EnrollmentService, GrantOverrideCommand, RegisterCommand};
 
 #[derive(Deserialize)]
 pub struct RegisterForm {
@@ -18,8 +18,27 @@ pub async fn register_json(
     service: web::Data<EnrollmentService>,
     body: web::Json<RegisterCommand>,
 ) -> Result<HttpResponse, AppError> {
-    let receipt = service.register_self(&actor, body.into_inner()).await?;
+    let receipt = service
+        .register_self(&actor, body.into_inner())
+        .await
+        .map_err(AppError::from)?;
     Ok(HttpResponse::Created().json(receipt))
+}
+
+/// Registrar grants a registration override — the explicit, auditable record
+/// (who, rule, why, expiry) that later gets stamped with the enrollment that
+/// consumed it. Never a hidden boolean.
+#[post("/api/v1/students/{student_id}/overrides")]
+pub async fn grant_override(
+    actor: Actor,
+    service: web::Data<EnrollmentService>,
+    student_id: web::Path<Uuid>,
+    body: web::Json<GrantOverrideCommand>,
+) -> Result<HttpResponse, AppError> {
+    let override_id = service
+        .grant_override(&actor, student_id.into_inner(), body.into_inner())
+        .await?;
+    Ok(HttpResponse::Created().json(serde_json::json!({ "override_id": override_id })))
 }
 
 #[post("/ui/registration/add")]
@@ -40,7 +59,8 @@ pub async fn register_fragment(
                 idempotency_key: form.idempotency_key,
             },
         )
-        .await?;
+        .await
+        .map_err(AppError::from)?;
 
     // In a real project render Askama templates. The response must contain every
     // element named by x-target.
@@ -62,7 +82,10 @@ pub async fn drop_fragment(
     form: web::Form<DropForm>,
 ) -> Result<HttpResponse, AppError> {
     let _ = &form.csrf_token;
-    service.drop_self(&actor, form.enrollment_id).await?;
+    service
+        .drop_self(&actor, form.enrollment_id)
+        .await
+        .map_err(AppError::from)?;
 
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
@@ -81,6 +104,7 @@ async fn render_registration_panel(_actor: &Actor) -> Result<String, AppError> {
 }
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(register_json)
+        .service(grant_override)
         .service(register_fragment)
         .service(drop_fragment);
 }

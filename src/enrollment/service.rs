@@ -6,9 +6,21 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::enrollment::{
-    policy::require_can_register_for,
-    types::{EnrollmentReceipt, RegisterCommand, RegistrationContext},
+    policy::{require_can_grant_override, require_can_register_for},
+    types::{
+        Denial, EnrollError, EnrollmentReceipt, GrantOverrideCommand, RegisterCommand,
+        RegistrationContext,
+    },
 };
+
+/// The rules a registrar may lift with `registration_override` rows.
+pub const OVERRIDE_TYPES: [&str; 5] = [
+    "hold",
+    "prerequisite",
+    "schedule_conflict",
+    "capacity",
+    "deadline",
+];
 
 #[derive(Clone)]
 pub struct EnrollmentService {
@@ -25,7 +37,7 @@ impl EnrollmentService {
         &self,
         actor: &Actor,
         command: RegisterCommand,
-    ) -> Result<EnrollmentReceipt, AppError> {
+    ) -> Result<EnrollmentReceipt, EnrollError> {
         let student_id = actor.require_student_self()?;
         self.register_for(actor, student_id, command).await
     }
@@ -35,8 +47,13 @@ impl EnrollmentService {
         actor: &Actor,
         student_id: Uuid,
         command: RegisterCommand,
-    ) -> Result<EnrollmentReceipt, AppError> {
+    ) -> Result<EnrollmentReceipt, EnrollError> {
         require_can_register_for(actor, student_id)?;
+
+        // Overrides claimed (row-locked) while checks pass; stamped as
+        // consumed by the new enrollment right after it exists. A rollback
+        // releases the locks, so a failed registration never burns one.
+        let mut consumed_override_ids: Vec<Uuid> = Vec::new();
 
         let mut tx = self.pool.begin().await?;
 
@@ -86,14 +103,31 @@ impl EnrollmentService {
         .ok_or(AppError::NotFound)?;
 
         if context.section_status != "open" {
-            return Err(AppError::Conflict("section is not open".into()));
+            return Err(EnrollError::Denied(Denial::SectionNotOpen));
         }
 
         // One shared deadline governs adds and drops (ADR-8): adds are allowed
-        // from registration_opens_at until add_drop_closes_at.
+        // from registration_opens_at until add_drop_closes_at. A registrar
+        // `deadline` override lifts the closing deadline for a late add; it
+        // never opens registration early.
         let now = Utc::now();
-        if now < context.registration_opens_at || now >= context.add_drop_closes_at {
-            return Err(AppError::Conflict("registration window is closed".into()));
+        if now < context.registration_opens_at {
+            return Err(EnrollError::Denied(Denial::WindowClosed));
+        }
+        if now >= context.add_drop_closes_at {
+            match claim_override(
+                &mut tx,
+                actor.institution_id,
+                student_id,
+                context.term_id,
+                Some(command.section_id),
+                "deadline",
+            )
+            .await?
+            {
+                Some(override_id) => consumed_override_ids.push(override_id),
+                None => return Err(EnrollError::Denied(Denial::WindowClosed)),
+            }
         }
 
         // Ensure the lock row exists, then lock it. All registration changes for
@@ -124,25 +158,18 @@ impl EnrollmentService {
         .await?;
 
         if term_state.status != "eligible" || !term_state.hold_flags.is_empty() {
-            let has_override: bool = sqlx::query_scalar(
-                r#"
-                SELECT EXISTS (
-                    SELECT 1
-                    FROM registration_override
-                    WHERE student_id = $1
-                      AND term_id = $2
-                      AND override_type = 'hold'
-                      AND (expires_at IS NULL OR expires_at > now())
-                )
-                "#,
+            match claim_override(
+                &mut tx,
+                actor.institution_id,
+                student_id,
+                context.term_id,
+                Some(command.section_id),
+                "hold",
             )
-            .bind(student_id)
-            .bind(context.term_id)
-            .fetch_one(&mut *tx)
-            .await?;
-
-            if !has_override {
-                return Err(AppError::Conflict("student has a registration hold".into()));
+            .await?
+            {
+                Some(override_id) => consumed_override_ids.push(override_id),
+                None => return Err(EnrollError::Denied(Denial::Hold)),
             }
         }
 
@@ -189,9 +216,7 @@ impl EnrollmentService {
         .await?;
 
         if duplicate {
-            return Err(AppError::Conflict(
-                "student is already enrolled in this section".into(),
-            ));
+            return Err(EnrollError::Denied(Denial::AlreadyEnrolled));
         }
 
         let prerequisites_met: bool = sqlx::query_scalar(
@@ -215,19 +240,20 @@ impl EnrollmentService {
         .fetch_one(&mut *tx)
         .await?;
 
-        if !prerequisites_met
-            && !has_override(
+        if !prerequisites_met {
+            match claim_override(
                 &mut tx,
+                actor.institution_id,
                 student_id,
                 context.term_id,
                 Some(command.section_id),
                 "prerequisite",
             )
             .await?
-        {
-            return Err(AppError::Conflict(
-                "prerequisite requirements are not satisfied".into(),
-            ));
+            {
+                Some(override_id) => consumed_override_ids.push(override_id),
+                None => return Err(EnrollError::Denied(Denial::PrerequisiteNotMet)),
+            }
         }
 
         let has_time_conflict: bool = sqlx::query_scalar(
@@ -255,17 +281,20 @@ impl EnrollmentService {
         .fetch_one(&mut *tx)
         .await?;
 
-        if has_time_conflict
-            && !has_override(
+        if has_time_conflict {
+            match claim_override(
                 &mut tx,
+                actor.institution_id,
                 student_id,
                 context.term_id,
                 Some(command.section_id),
                 "schedule_conflict",
             )
             .await?
-        {
-            return Err(AppError::Conflict("schedule conflict detected".into()));
+            {
+                Some(override_id) => consumed_override_ids.push(override_id),
+                None => return Err(EnrollError::Denied(Denial::ScheduleConflict)),
+            }
         }
 
         // The conditional update is the seat reservation algorithm. It does not
@@ -297,13 +326,18 @@ impl EnrollmentService {
             .fetch_one(&mut *tx)
             .await?;
             if !capacity_row_exists {
-                return Err(AppError::Integrity(
+                return Err(EnrollError::App(AppError::Integrity(
                     "section has no section_capacity row; the migration-0010 guarantee was bypassed",
-                ));
+                )));
             }
 
-            if !has_override(
+            // A registrar-granted capacity override admits one student past a
+            // full section by raising capacity and enrolled_count together, so
+            // the enrolled_count <= capacity constraint keeps holding and no
+            // unauthorized seat opens up for anyone else.
+            match claim_override(
                 &mut tx,
+                actor.institution_id,
                 student_id,
                 context.term_id,
                 Some(command.section_id),
@@ -311,16 +345,23 @@ impl EnrollmentService {
             )
             .await?
             {
-                return Err(AppError::Conflict("section is full".into()));
+                Some(override_id) => {
+                    consumed_override_ids.push(override_id);
+                    sqlx::query(
+                        r#"
+                        UPDATE section_capacity
+                           SET capacity = capacity + 1,
+                               enrolled_count = enrolled_count + 1,
+                               version = version + 1
+                         WHERE section_id = $1
+                        "#,
+                    )
+                    .bind(command.section_id)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+                None => return Err(EnrollError::Denied(Denial::SectionFull)),
             }
-        }
-
-        // A capacity override needs an explicit capacity policy. For the demo,
-        // it does not silently increase the counter beyond the database check.
-        if reserved.is_none() {
-            return Err(AppError::Conflict(
-                "capacity override requires registrar seat adjustment".into(),
-            ));
         }
 
         let enrollment_id = Uuid::new_v4();
@@ -351,6 +392,8 @@ impl EnrollmentService {
         .execute(&mut *tx)
         .await?;
 
+        stamp_overrides_consumed(&mut tx, &consumed_override_ids, enrollment_id).await?;
+
         self.audit
             .write(
                 &mut tx,
@@ -363,6 +406,7 @@ impl EnrollmentService {
                     student_id,
                     section_id: command.section_id,
                     source,
+                    overrides_consumed: &consumed_override_ids,
                 },
             )
             .await?;
@@ -377,7 +421,7 @@ impl EnrollmentService {
         })
     }
 
-    pub async fn drop_self(&self, actor: &Actor, enrollment_id: Uuid) -> Result<(), AppError> {
+    pub async fn drop_self(&self, actor: &Actor, enrollment_id: Uuid) -> Result<(), EnrollError> {
         let student_id = actor.require_student_self()?;
         self.drop_for(actor, student_id, enrollment_id).await
     }
@@ -387,8 +431,10 @@ impl EnrollmentService {
         actor: &Actor,
         student_id: Uuid,
         enrollment_id: Uuid,
-    ) -> Result<(), AppError> {
+    ) -> Result<(), EnrollError> {
         require_can_register_for(actor, student_id)?;
+
+        let mut consumed_override_ids: Vec<Uuid> = Vec::new();
 
         let mut tx = self.pool.begin().await?;
 
@@ -464,17 +510,20 @@ impl EnrollmentService {
         .await?
         .ok_or(AppError::NotFound)?;
 
-        if Utc::now() >= row.add_drop_closes_at
-            && !has_override(
+        if Utc::now() >= row.add_drop_closes_at {
+            match claim_override(
                 &mut tx,
+                actor.institution_id,
                 student_id,
                 row.term_id,
                 Some(row.section_id),
                 "deadline",
             )
             .await?
-        {
-            return Err(AppError::Conflict("drop/add period is closed".into()));
+            {
+                Some(override_id) => consumed_override_ids.push(override_id),
+                None => return Err(EnrollError::Denied(Denial::WindowClosed)),
+            }
         }
 
         sqlx::query(
@@ -490,24 +539,44 @@ impl EnrollmentService {
         .execute(&mut *tx)
         .await?;
 
+        // If this enrollment got in on a capacity override, the extra seat
+        // was that student's, not the section's: dropping reverts the
+        // capacity bump too, so no unauthorized seat leaks into the pool.
+        let consumed_capacity_override: bool = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS (
+                SELECT 1 FROM registration_override
+                WHERE consumed_by_enrollment_id = $1 AND override_type = 'capacity'
+            )
+            "#,
+        )
+        .bind(enrollment_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
         let changed = sqlx::query(
             r#"
             UPDATE section_capacity
                SET enrolled_count = enrolled_count - 1,
+                   capacity = capacity - $2,
                    version = version + 1
              WHERE section_id = $1
                AND enrolled_count > 0
+               AND capacity >= $2
             "#,
         )
         .bind(row.section_id)
+        .bind(i32::from(consumed_capacity_override))
         .execute(&mut *tx)
         .await?;
 
         if changed.rows_affected() != 1 {
-            return Err(AppError::Integrity(
+            return Err(EnrollError::App(AppError::Integrity(
                 "drop could not release a seat: capacity row missing or enrolled_count drifted",
-            ));
+            )));
         }
+
+        stamp_overrides_consumed(&mut tx, &consumed_override_ids, enrollment_id).await?;
 
         self.audit
             .write(
@@ -519,13 +588,134 @@ impl EnrollmentService {
                 enrollment_id,
                 &serde_json::json!({
                     "student_id": student_id,
-                    "section_id": row.section_id
+                    "section_id": row.section_id,
+                    "overrides_consumed": consumed_override_ids,
                 }),
             )
             .await?;
 
         tx.commit().await?;
         Ok(())
+    }
+
+    /// Registrar-granted override: the full record CLAUDE.md §1 item 6
+    /// demands — who grants it (the actor, audited), which rule it lifts,
+    /// why (required), when it expires, and — once used — which enrollment
+    /// consumed it (`stamp_overrides_consumed`).
+    pub async fn grant_override(
+        &self,
+        actor: &Actor,
+        student_id: Uuid,
+        command: GrantOverrideCommand,
+    ) -> Result<Uuid, AppError> {
+        require_can_grant_override(actor)?;
+
+        if !OVERRIDE_TYPES.contains(&command.override_type.as_str()) {
+            return Err(AppError::Validation(format!(
+                "unknown override type: {}",
+                command.override_type
+            )));
+        }
+        let reason = command.reason.trim();
+        if reason.is_empty() {
+            return Err(AppError::Validation("an override requires a reason".into()));
+        }
+        if let Some(expires_at) = command.expires_at
+            && expires_at <= Utc::now()
+        {
+            return Err(AppError::Validation(
+                "override expiry must be in the future".into(),
+            ));
+        }
+
+        let mut tx = self.pool.begin().await?;
+
+        // Targets resolve inside the actor's institution only; anything
+        // outside it answers 404, exactly like the identity admin routes.
+        let student_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM student_profile WHERE id = $1 AND institution_id = $2)",
+        )
+        .bind(student_id)
+        .bind(actor.institution_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !student_exists {
+            return Err(AppError::NotFound);
+        }
+
+        let term_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM academic_term WHERE id = $1 AND institution_id = $2)",
+        )
+        .bind(command.term_id)
+        .bind(actor.institution_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !term_exists {
+            return Err(AppError::NotFound);
+        }
+
+        if let Some(section_id) = command.section_id {
+            let section_in_term: Option<bool> = sqlx::query_scalar(
+                "SELECT term_id = $2 FROM section WHERE id = $1 AND institution_id = $3",
+            )
+            .bind(section_id)
+            .bind(command.term_id)
+            .bind(actor.institution_id)
+            .fetch_optional(&mut *tx)
+            .await?;
+            match section_in_term {
+                None => return Err(AppError::NotFound),
+                Some(false) => {
+                    return Err(AppError::Validation(
+                        "section does not belong to the term".into(),
+                    ));
+                }
+                Some(true) => {}
+            }
+        }
+
+        let override_id = Uuid::new_v4();
+        sqlx::query(
+            r#"
+            INSERT INTO registration_override (
+                id, institution_id, student_id, term_id, section_id,
+                override_type, granted_by_user_id, expires_at, note
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            "#,
+        )
+        .bind(override_id)
+        .bind(actor.institution_id)
+        .bind(student_id)
+        .bind(command.term_id)
+        .bind(command.section_id)
+        .bind(&command.override_type)
+        .bind(actor.user_id)
+        .bind(command.expires_at)
+        .bind(reason)
+        .execute(&mut *tx)
+        .await?;
+
+        self.audit
+            .write(
+                &mut tx,
+                actor.institution_id,
+                actor.user_id,
+                "enrollment.override_granted",
+                "registration_override",
+                override_id,
+                &serde_json::json!({
+                    "student_id": student_id,
+                    "term_id": command.term_id,
+                    "section_id": command.section_id,
+                    "override_type": command.override_type,
+                    "expires_at": command.expires_at,
+                }),
+            )
+            .await?;
+
+        tx.commit().await?;
+        Ok(override_id)
     }
 }
 
@@ -547,32 +737,71 @@ struct RegistrationAudit<'a> {
     student_id: Uuid,
     section_id: Uuid,
     source: &'a str,
+    overrides_consumed: &'a [Uuid],
 }
 
-async fn has_override(
+/// Lock one usable override (right rule, right student/term, unconsumed,
+/// unexpired, institution-scoped) and return its id. Section-specific
+/// overrides are preferred over term-wide ones. `FOR UPDATE SKIP LOCKED`
+/// means concurrent transactions never block here and can never claim the
+/// same row — an override is consumed by at most one enrollment transaction.
+/// The row lock (not a write) does the claiming, so a transaction that later
+/// fails releases the override untouched.
+async fn claim_override(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    institution_id: Uuid,
     student_id: Uuid,
     term_id: Uuid,
     section_id: Option<Uuid>,
     override_type: &str,
-) -> Result<bool, sqlx::Error> {
+) -> Result<Option<Uuid>, sqlx::Error> {
     sqlx::query_scalar(
         r#"
-        SELECT EXISTS (
-            SELECT 1
-            FROM registration_override
-            WHERE student_id = $1
-              AND term_id = $2
-              AND (section_id IS NULL OR section_id = $3)
-              AND override_type = $4
-              AND (expires_at IS NULL OR expires_at > now())
-        )
+        SELECT id
+        FROM registration_override
+        WHERE institution_id = $1
+          AND student_id = $2
+          AND term_id = $3
+          AND (section_id IS NULL OR section_id = $4)
+          AND override_type = $5
+          AND consumed_at IS NULL
+          AND (expires_at IS NULL OR expires_at > now())
+        ORDER BY section_id NULLS LAST, created_at
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
         "#,
     )
+    .bind(institution_id)
     .bind(student_id)
     .bind(term_id)
     .bind(section_id)
     .bind(override_type)
-    .fetch_one(&mut **tx)
+    .fetch_optional(&mut **tx)
     .await
+}
+
+/// Record which enrollment transaction consumed each claimed override — in
+/// the same transaction, so the record and the enrollment commit or roll
+/// back together.
+async fn stamp_overrides_consumed(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    override_ids: &[Uuid],
+    enrollment_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    if override_ids.is_empty() {
+        return Ok(());
+    }
+    sqlx::query(
+        r#"
+        UPDATE registration_override
+           SET consumed_at = now(),
+               consumed_by_enrollment_id = $2
+         WHERE id = ANY($1)
+        "#,
+    )
+    .bind(override_ids)
+    .bind(enrollment_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }

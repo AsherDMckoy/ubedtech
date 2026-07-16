@@ -2,10 +2,10 @@ pub(crate) mod http;
 mod policy;
 // mod queries;
 mod service;
-mod types;
+pub(crate) mod types;
 
 pub use service::EnrollmentService;
-pub use types::RegisterCommand;
+pub use types::{GrantOverrideCommand, RegisterCommand};
 
 #[cfg(test)]
 mod tests;
