@@ -458,6 +458,83 @@ impl AcademicsService {
         Ok(())
     }
 
+    /// Assign an instructor to a section. Idempotent (re-assigning writes no
+    /// second audit row). The target must live in the institution AND hold
+    /// the instructor role — grading power follows the role system, never a
+    /// bare user id.
+    pub async fn assign_instructor(
+        &self,
+        actor: &Actor,
+        section_id: Uuid,
+        instructor_user_id: Uuid,
+    ) -> Result<(), AppError> {
+        require_can_manage_academics(actor)?;
+
+        let mut tx = self.pool.begin().await?;
+        let section_ok: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM section WHERE id = $1 AND institution_id = $2)",
+        )
+        .bind(section_id)
+        .bind(actor.institution_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if !section_ok {
+            return Err(AppError::NotFound);
+        }
+
+        let target_is_instructor: Option<bool> = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS (
+                SELECT 1 FROM user_role ur
+                JOIN role r ON r.id = ur.role_id
+                WHERE ur.user_id = ua.id AND ur.institution_id = $2 AND r.code = 'instructor'
+            )
+            FROM user_account ua
+            WHERE ua.id = $1 AND ua.institution_id = $2
+            "#,
+        )
+        .bind(instructor_user_id)
+        .bind(actor.institution_id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        match target_is_instructor {
+            None => return Err(AppError::NotFound),
+            Some(false) => {
+                return Err(AppError::Validation(
+                    "the user does not hold the instructor role".into(),
+                ));
+            }
+            Some(true) => {}
+        }
+
+        let inserted = sqlx::query(
+            "INSERT INTO instructor_assignment (section_id, instructor_user_id) \
+             VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        )
+        .bind(section_id)
+        .bind(instructor_user_id)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if inserted == 0 {
+            return Ok(()); // already assigned
+        }
+
+        self.audit
+            .write(
+                &mut tx,
+                actor.institution_id,
+                actor.user_id,
+                "academics.instructor_assigned",
+                "section",
+                section_id,
+                &serde_json::json!({ "instructor_user_id": instructor_user_id }),
+            )
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// The term whose dates contain today (ties: the latest start).
     pub async fn current_term(&self, actor: &Actor) -> Result<Option<TermSummary>, AppError> {
         let term = sqlx::query_as::<_, TermSummary>(

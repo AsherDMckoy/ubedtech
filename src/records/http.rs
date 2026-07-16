@@ -65,10 +65,31 @@ pub async fn publish_section_json(
     Ok(HttpResponse::Ok().json(serde_json::json!({ "published": published })))
 }
 
+/// The instructor's own assigned sections.
+#[get("/api/v1/instructor/sections")]
+pub async fn instructor_sections_json(
+    actor: Actor,
+    service: web::Data<GradeService>,
+) -> Result<HttpResponse, AppError> {
+    Ok(HttpResponse::Ok().json(service.instructor_sections(&actor).await?))
+}
+
+/// Roster with grade states: assigned instructor or records officer.
+#[get("/api/v1/sections/{section_id}/roster")]
+pub async fn roster_json(
+    actor: Actor,
+    service: web::Data<GradeService>,
+    section_id: web::Path<Uuid>,
+) -> Result<HttpResponse, AppError> {
+    Ok(HttpResponse::Ok().json(service.roster(&actor, section_id.into_inner()).await?))
+}
+
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(grades_json)
         .service(schedule_json)
         .service(save_draft_json)
         .service(correct_grade_json)
-        .service(publish_section_json);
+        .service(publish_section_json)
+        .service(instructor_sections_json)
+        .service(roster_json);
 }

@@ -97,6 +97,24 @@ async fn add_meeting(
 }
 
 #[derive(Deserialize)]
+struct AssignInstructorBody {
+    instructor_user_id: Uuid,
+}
+
+#[post("/api/v1/sections/{section_id}/instructors")]
+async fn assign_instructor(
+    actor: Actor,
+    service: web::Data<AcademicsService>,
+    section_id: web::Path<Uuid>,
+    body: web::Json<AssignInstructorBody>,
+) -> Result<HttpResponse, AppError> {
+    service
+        .assign_instructor(&actor, section_id.into_inner(), body.instructor_user_id)
+        .await?;
+    Ok(HttpResponse::NoContent().finish())
+}
+
+#[derive(Deserialize)]
 struct CatalogQuery {
     term_id: Uuid,
     q: Option<String>,
@@ -186,6 +204,7 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .service(create_section)
         .service(set_capacity)
         .service(add_meeting)
+        .service(assign_instructor)
         .service(catalog)
         .service(catalog_page);
 }

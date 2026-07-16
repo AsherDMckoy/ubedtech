@@ -402,6 +402,165 @@ async fn unassigned_instructors_cannot_grade_and_students_never_see_drafts(pool:
     assert_eq!(amended[0].grade_code, "A-");
 }
 
+/// Rosters follow assignments: an instructor sees exactly their assigned
+/// sections and nothing else — an unassigned section in the same institution
+/// answers 404, indistinguishable from one that doesn't exist. The records
+/// officer sees any section in their institution and no further.
+#[sqlx::test(migrations = "./migrations")]
+async fn rosters_are_visible_only_for_assigned_sections(pool: PgPool) {
+    let fx = seed_grade_fixture(&pool).await;
+    let service = GradeService::new(pool.clone(), crate::audit::AuditWriter);
+    let other_section_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM section WHERE section_code = '02'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    // The assigned instructor: exactly one section listed, roster readable,
+    // ungraded student shows as pending (no state).
+    let sections = service.instructor_sections(&fx.instructor).await.unwrap();
+    assert_eq!(sections.len(), 1);
+    assert_eq!(sections[0].section_id, fx.section_id);
+    assert_eq!(sections[0].enrolled_count, 1);
+
+    let roster = service.roster(&fx.instructor, fx.section_id).await.unwrap();
+    assert_eq!(roster.len(), 1);
+    assert!(roster[0].state.is_none(), "no grade entered yet");
+
+    // Crafted requests: real section ids the instructor is NOT assigned to
+    // answer 404 — same-institution sibling section and all of it for the
+    // unassigned instructor.
+    assert!(matches!(
+        service.roster(&fx.instructor, other_section_id).await,
+        Err(AppError::NotFound)
+    ));
+    assert!(matches!(
+        service.roster(&fx.other_instructor, fx.section_id).await,
+        Err(AppError::NotFound)
+    ));
+    assert!(
+        service
+            .instructor_sections(&fx.other_instructor)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    // Students hold no roster power at all.
+    assert!(matches!(
+        service.roster(&fx.student, fx.section_id).await,
+        Err(AppError::Forbidden)
+    ));
+
+    // The records officer reads any section in the institution; a foreign
+    // officer reads none of them.
+    assert_eq!(
+        service
+            .roster(&fx.officer, fx.section_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    let foreign_institution = Uuid::new_v4();
+    sqlx::query("INSERT INTO institution (id, code, name) VALUES ($1, $2, 'Other U')")
+        .bind(foreign_institution)
+        .bind(format!("O-{}", &foreign_institution.to_string()[..8]))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let foreign_officer = actor(
+        foreign_institution,
+        seed_user(&pool, foreign_institution).await,
+        Role::RecordsOfficer,
+        None,
+    );
+    assert!(matches!(
+        service.roster(&foreign_officer, fx.section_id).await,
+        Err(AppError::NotFound)
+    ));
+}
+
+/// Instructor assignment is registrar/institution-admin work, requires the
+/// target to actually hold the instructor role, and is idempotent.
+#[sqlx::test(migrations = "./migrations")]
+async fn instructor_assignment_is_validated_scoped_and_idempotent(pool: PgPool) {
+    let fx = seed_grade_fixture(&pool).await;
+    let academics =
+        crate::academics::AcademicsService::new(pool.clone(), crate::audit::AuditWriter);
+    let registrar = actor(
+        fx.officer.institution_id,
+        seed_user(&pool, fx.officer.institution_id).await,
+        Role::Registrar,
+        None,
+    );
+    let other_section_id: Uuid =
+        sqlx::query_scalar("SELECT id FROM section WHERE section_code = '02'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    // Neither instructors nor officers assign instructors.
+    for who in [&fx.instructor, &fx.officer, &fx.student] {
+        assert!(matches!(
+            academics
+                .assign_instructor(who, other_section_id, fx.other_instructor.user_id)
+                .await,
+            Err(AppError::Forbidden)
+        ));
+    }
+
+    // The target must hold the instructor role (fx.officer does not).
+    assert!(matches!(
+        academics
+            .assign_instructor(&registrar, other_section_id, fx.officer.user_id)
+            .await,
+        Err(AppError::Validation(_))
+    ));
+
+    // Role rows live in user_role: give other_instructor the real role, then
+    // assignment works and unlocks the roster.
+    sqlx::query(
+        "INSERT INTO user_role (institution_id, user_id, role_id) \
+         SELECT $1, $2, id FROM role WHERE code = 'instructor'",
+    )
+    .bind(registrar.institution_id)
+    .bind(fx.other_instructor.user_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    academics
+        .assign_instructor(&registrar, other_section_id, fx.other_instructor.user_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        service_sections(&pool, &fx.other_instructor).await,
+        vec![other_section_id]
+    );
+
+    // Idempotent: re-assigning writes no second audit row.
+    academics
+        .assign_instructor(&registrar, other_section_id, fx.other_instructor.user_id)
+        .await
+        .unwrap();
+    let audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_event WHERE action = 'academics.instructor_assigned'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audits, 1);
+}
+
+async fn service_sections(pool: &PgPool, instructor: &Actor) -> Vec<Uuid> {
+    GradeService::new(pool.clone(), crate::audit::AuditWriter)
+        .instructor_sections(instructor)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|section| section.section_id)
+        .collect()
+}
+
 /// The grade-entry window binds instructors; the records officer is the
 /// late-entry escape hatch; a term without a deadline imposes none.
 #[sqlx::test(migrations = "./migrations")]
