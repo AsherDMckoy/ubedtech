@@ -91,14 +91,23 @@ impl DocumentService {
         })
     }
 
+    /// Approval requires a reason just like rejection: issuing an official
+    /// document is the sensitive act, and the decision trail must say why
+    /// (assumption A20).
     pub async fn approve(
         &self,
         actor: &Actor,
         request_id: Uuid,
-        note: Option<&str>,
+        note: &str,
     ) -> Result<(), AppError> {
         if !actor.has_role(Role::DocumentOfficer) {
             return Err(AppError::Forbidden);
+        }
+        let note = note.trim();
+        if note.is_empty() {
+            return Err(AppError::Validation(
+                "an approval reason is required".into(),
+            ));
         }
 
         let mut tx = self.pool.begin().await?;

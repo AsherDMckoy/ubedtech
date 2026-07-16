@@ -48,6 +48,10 @@ pub struct AppConfig {
     /// Length of the fixed throttle window (seconds). The counter resets
     /// when the window expires — throttling can never become permanent.
     pub login_throttle_window_secs: u64,
+    /// A document_job left 'running' longer than this is presumed orphaned
+    /// by a dead worker and is reaped back to the queue (CLAUDE.md §1
+    /// item 3). Must comfortably exceed the longest legitimate render.
+    pub job_stale_secs: u64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -151,6 +155,8 @@ impl AppConfig {
             "900",
             parse_positive_u64,
         )?;
+        let job_stale_secs =
+            parse_or_default(&get, "APP_JOB_STALE_SECS", "300", parse_positive_u64)?;
 
         if session_idle_secs > session_absolute_secs {
             return Err(ConfigError::Invalid {
@@ -180,6 +186,7 @@ impl AppConfig {
             session_absolute_secs,
             login_max_failures,
             login_throttle_window_secs,
+            job_stale_secs,
         })
     }
 }

@@ -91,6 +91,7 @@ async fn main() -> std::io::Result<()> {
         pool.clone(),
         config.worker_id.clone(),
         config.document_storage_path.clone(),
+        config.job_stale_secs,
     );
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
     let worker_handle = actix_web::rt::spawn(worker.run(shutdown_rx));

@@ -59,7 +59,11 @@ pub async fn approve_fragment(
 ) -> Result<HttpResponse, AppError> {
     let _ = &form.csrf_token;
     service
-        .approve(&actor, request_id.into_inner(), form.note.as_deref())
+        .approve(
+            &actor,
+            request_id.into_inner(),
+            form.note.as_deref().unwrap_or(""),
+        )
         .await?;
 
     Ok(HttpResponse::Ok()

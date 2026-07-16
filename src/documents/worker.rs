@@ -11,29 +11,48 @@ use uuid::Uuid;
 
 use crate::documents::storage::FilesystemDocumentStore;
 
+/// Attempts (claims) a job may consume before it fails terminally. The
+/// count includes claims that died with their worker and were reaped.
+const MAX_ATTEMPTS: i32 = 3;
+
+/// How often the run loop sweeps for orphaned jobs.
+const REAP_INTERVAL: Duration = Duration::from_secs(60);
+
 #[derive(Clone)]
 pub struct DocumentWorker {
     pool: PgPool,
     worker_id: String,
     store: FilesystemDocumentStore,
+    stale_after_secs: u64,
 }
 
 impl DocumentWorker {
-    pub fn new(pool: PgPool, worker_id: String, root: PathBuf) -> Self {
+    pub fn new(pool: PgPool, worker_id: String, root: PathBuf, stale_after_secs: u64) -> Self {
         Self {
             pool,
             worker_id,
             store: FilesystemDocumentStore::new(root),
+            stale_after_secs,
         }
     }
 
     /// Runs until `shutdown` flips to true. An in-flight job finishes before
     /// the loop exits, so graceful shutdown never abandons a claimed job
-    /// mid-render (the crash-recovery reaper in Phase 6.1 covers hard kills).
+    /// mid-render; jobs orphaned by a hard crash are recovered by
+    /// `reap_stale`, which runs at startup and then periodically.
     pub async fn run(self, mut shutdown: tokio::sync::watch::Receiver<bool>) {
+        let mut last_reap: Option<tokio::time::Instant> = None;
+
         loop {
             if *shutdown.borrow() {
                 break;
+            }
+
+            if last_reap.is_none_or(|at| at.elapsed() >= REAP_INTERVAL) {
+                if let Err(error) = self.reap_stale().await {
+                    tracing::error!(?error, "reaping orphaned document jobs failed");
+                }
+                last_reap = Some(tokio::time::Instant::now());
             }
 
             let idle_wait = match self.run_once().await {
@@ -56,7 +75,52 @@ impl DocumentWorker {
         tracing::info!("document worker stopped");
     }
 
-    async fn run_once(&self) -> Result<bool, AppError> {
+    /// CLAUDE.md §1 item 3: a worker that dies mid-render leaves its job
+    /// 'running' forever — nothing else will touch it. Any job whose
+    /// `locked_at` is older than the stale threshold is presumed orphaned:
+    /// back to the queue for another attempt, or terminally failed once the
+    /// attempt budget (already spent at claim time) is exhausted.
+    pub async fn reap_stale(&self) -> Result<u64, AppError> {
+        let mut tx = self.pool.begin().await?;
+
+        let reaped: Vec<(Uuid, String, Uuid)> = sqlx::query_as(
+            r#"
+            UPDATE document_job
+               SET status = CASE WHEN attempts >= $2 THEN 'failed' ELSE 'queued' END,
+                   last_error = 'reaped: worker '
+                       || COALESCE(locked_by, 'unknown')
+                       || ' presumed dead mid-render',
+                   locked_at = NULL,
+                   locked_by = NULL,
+                   available_at = now()
+             WHERE status = 'running'
+               AND locked_at < now() - make_interval(secs => $1)
+            RETURNING id, status, request_id
+            "#,
+        )
+        .bind(self.stale_after_secs as f64)
+        .bind(MAX_ATTEMPTS)
+        .fetch_all(&mut *tx)
+        .await?;
+
+        for (job_id, status, request_id) in &reaped {
+            tracing::warn!(%job_id, %request_id, outcome = %status, "reaped orphaned document job");
+            if status == "failed" {
+                sqlx::query(
+                    "UPDATE document_request SET status = 'failed', updated_at = now() \
+                     WHERE id = $1",
+                )
+                .bind(request_id)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+
+        tx.commit().await?;
+        Ok(reaped.len() as u64)
+    }
+
+    pub(crate) async fn run_once(&self) -> Result<bool, AppError> {
         let mut tx = self.pool.begin().await?;
 
         let job = sqlx::query_as::<_, ClaimedJob>(
@@ -135,7 +199,12 @@ impl DocumentWorker {
 
         // The demo adapter emits a valid minimal PDF. Production replaces only
         // the renderer with approved stationery, fonts, seals, and signatures.
-        let pdf_bytes = render_pdf(request_id, snapshot.as_ref())?;
+        // Rendering is CPU-bound, so it runs on the blocking pool — never on
+        // a runtime thread that is also serving HTTP (CLAUDE.md §4).
+        let pdf_bytes =
+            tokio::task::spawn_blocking(move || render_pdf(request_id, snapshot.as_ref()))
+                .await
+                .map_err(|_| AppError::Internal)??;
         let digest = Sha256::digest(&pdf_bytes);
         let hash_hex = hex::encode(digest);
         let path = self.store.write(&hash_hex, &pdf_bytes).await?;
@@ -150,6 +219,11 @@ impl DocumentWorker {
     async fn complete(&self, job: ClaimedJob, artifact: Artifact) -> Result<(), AppError> {
         let mut tx = self.pool.begin().await?;
 
+        // Idempotent completion: if a current artifact already exists for
+        // this request (a duplicate job, or a retry that crashed between
+        // inserting the artifact and marking the job complete), keep the
+        // first artifact — never a second one. The partial unique index is
+        // the guarantee; DO NOTHING makes the retry converge on it.
         sqlx::query(
             r#"
             INSERT INTO generated_document (
@@ -157,6 +231,7 @@ impl DocumentWorker {
                 storage_path, mime_type, size_bytes
             )
             VALUES ($1, $2, $3, $4, $5, 'application/pdf', $6)
+            ON CONFLICT (request_id) WHERE superseded_at IS NULL DO NOTHING
             "#,
         )
         .bind(Uuid::new_v4())
@@ -190,9 +265,9 @@ impl DocumentWorker {
         sqlx::query(
             r#"
             UPDATE document_job
-               SET status = CASE WHEN attempts >= 3 THEN 'failed' ELSE 'queued' END,
+               SET status = CASE WHEN attempts >= $3 THEN 'failed' ELSE 'queued' END,
                    available_at = CASE
-                       WHEN attempts >= 3 THEN available_at
+                       WHEN attempts >= $3 THEN available_at
                        ELSE now() + interval '30 seconds'
                    END,
                    last_error = $2,
@@ -203,6 +278,7 @@ impl DocumentWorker {
         )
         .bind(job_id)
         .bind(truncate_for_log(message, 1000))
+        .bind(MAX_ATTEMPTS)
         .execute(&mut *tx)
         .await?;
 
