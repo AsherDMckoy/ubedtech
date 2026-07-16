@@ -1,7 +1,13 @@
+//! Document HTTP adapters: the student request/track/download page, the
+//! officer review queue, and the authorized artifact download. All pages
+//! are plain forms (PRG on success, inline errors) — no JavaScript needed.
+
+use crate::identity_access::sessions::CurrentSession;
 use crate::shared::{
     actor::{Actor, Role},
     error::AppError,
 };
+use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, get, post, web};
 use askama::Template;
 use serde::Deserialize;
@@ -45,6 +51,54 @@ pub async fn download(
         .body(bytes))
 }
 
+// ---------------------------------------------------------------------------
+// Student page: request a document, track statuses, download when ready.
+// ---------------------------------------------------------------------------
+
+#[derive(sqlx::FromRow)]
+struct StudentRequestRow {
+    id: Uuid,
+    document_type: String,
+    status: String,
+    requested_at: chrono::DateTime<chrono::Utc>,
+}
+
+struct StudentRequestView {
+    id: Uuid,
+    label: &'static str,
+    status: String,
+    requested_at: String,
+}
+
+#[derive(Template)]
+#[template(path = "pages/documents.html")]
+struct DocumentsPage<'a> {
+    csrf_token: &'a str,
+    requests: Vec<StudentRequestView>,
+    notice: Option<&'a str>,
+    error: Option<&'a str>,
+}
+
+#[derive(Deserialize)]
+pub struct NoticeQuery {
+    notice: Option<String>,
+}
+
+#[get("/ui/documents")]
+pub async fn documents_page(
+    actor: Actor,
+    current: CurrentSession,
+    pool: web::Data<PgPool>,
+    query: web::Query<NoticeQuery>,
+) -> Result<HttpResponse, AppError> {
+    let notice = match query.notice.as_deref() {
+        Some("requested") => Some("Your request was submitted."),
+        _ => None,
+    };
+    let body = render_documents(&actor, &current, &pool, notice, None).await?;
+    Ok(html(StatusCode::OK, body))
+}
+
 #[derive(Deserialize)]
 pub struct RequestDocumentForm {
     document_type: String,
@@ -53,122 +107,51 @@ pub struct RequestDocumentForm {
     csrf_token: String,
 }
 
-#[post("/ui/document-requests")]
-pub async fn request_fragment(
+#[post("/ui/documents")]
+pub async fn request_form(
     actor: Actor,
+    current: CurrentSession,
     service: web::Data<DocumentService>,
     pool: web::Data<PgPool>,
     form: web::Form<RequestDocumentForm>,
 ) -> Result<HttpResponse, AppError> {
-    let _ = &form.csrf_token; // Validated by CSRF middleware.
+    let _ = &form.csrf_token; // validated by the CSRF middleware
 
-    service
+    let outcome = service
         .request_for_self(
             &actor,
             RequestDocumentCommand {
                 document_type: form.document_type.clone(),
-                purpose: form.purpose.clone(),
+                purpose: form
+                    .purpose
+                    .clone()
+                    .filter(|value| !value.trim().is_empty()),
                 delivery_method: form.delivery_method.clone(),
             },
         )
-        .await?;
+        .await;
 
-    Ok(HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(render_student_request_list(&actor, &pool).await?))
+    match outcome {
+        Ok(_) => Ok(see_other("/ui/documents?notice=requested")),
+        Err(AppError::Validation(message)) => {
+            let body = render_documents(&actor, &current, &pool, None, Some(&message)).await?;
+            Ok(html(StatusCode::UNPROCESSABLE_ENTITY, body))
+        }
+        Err(other) => Err(other),
+    }
 }
 
-#[derive(Deserialize)]
-pub struct DecisionForm {
-    note: Option<String>,
-    csrf_token: String,
-}
-
-#[post("/ui/admin/document-requests/{request_id}/approve")]
-pub async fn approve_fragment(
-    actor: Actor,
-    service: web::Data<DocumentService>,
-    pool: web::Data<PgPool>,
-    request_id: web::Path<Uuid>,
-    form: web::Form<DecisionForm>,
-) -> Result<HttpResponse, AppError> {
-    let _ = &form.csrf_token;
-    service
-        .approve(
-            &actor,
-            request_id.into_inner(),
-            form.note.as_deref().unwrap_or(""),
-        )
-        .await?;
-
-    Ok(HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(render_admin_queue(&actor, &pool, &form.csrf_token).await?))
-}
-
-#[post("/ui/admin/document-requests/{request_id}/reject")]
-pub async fn reject_fragment(
-    actor: Actor,
-    service: web::Data<DocumentService>,
-    pool: web::Data<PgPool>,
-    request_id: web::Path<Uuid>,
-    form: web::Form<DecisionForm>,
-) -> Result<HttpResponse, AppError> {
-    let note = form.note.as_deref().unwrap_or_default();
-    service
-        .reject(&actor, request_id.into_inner(), note)
-        .await?;
-
-    Ok(HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(render_admin_queue(&actor, &pool, &form.csrf_token).await?))
-}
-
-#[derive(sqlx::FromRow)]
-struct StudentRequestRow {
-    document_type: String,
-    status: String,
-    requested_at: chrono::DateTime<chrono::Utc>,
-}
-
-struct StudentRequestView {
-    document_type_label: &'static str,
-    status: String,
-    requested_at: String,
-}
-
-#[derive(Template)]
-#[template(
-    source = r#"
-<section id="document-request-list" aria-live="polite">
-  <h2>Your requests</h2>
-  {% if requests.is_empty() %}
-    <p>No document requests yet.</p>
-  {% else %}
-    <ul>
-    {% for request in requests %}
-      <li>
-        <strong>{{ request.document_type_label }}</strong>
-        — {{ request.status }}
-        <time datetime="{{ request.requested_at }}">{{ request.requested_at }}</time>
-      </li>
-    {% endfor %}
-    </ul>
-  {% endif %}
-</section>
-"#,
-    ext = "html"
-)]
-struct StudentRequestListTemplate<'a> {
-    requests: &'a [StudentRequestView],
-}
-
-async fn render_student_request_list(actor: &Actor, pool: &PgPool) -> Result<String, AppError> {
+async fn render_documents(
+    actor: &Actor,
+    current: &CurrentSession,
+    pool: &PgPool,
+    notice: Option<&str>,
+    error: Option<&str>,
+) -> Result<String, AppError> {
     let student_id = actor.require_student_self()?;
-
     let rows = sqlx::query_as::<_, StudentRequestRow>(
         r#"
-        SELECT document_type, status, requested_at
+        SELECT id, document_type, status, requested_at
         FROM document_request
         WHERE institution_id = $1 AND student_id = $2
         ORDER BY requested_at DESC
@@ -180,20 +163,28 @@ async fn render_student_request_list(actor: &Actor, pool: &PgPool) -> Result<Str
     .fetch_all(pool)
     .await?;
 
-    let requests: Vec<_> = rows
+    let requests = rows
         .into_iter()
         .map(|row| StudentRequestView {
-            document_type_label: document_type_label(&row.document_type),
+            id: row.id,
+            label: document_type_label(&row.document_type),
             status: row.status,
-            requested_at: row.requested_at.to_rfc3339(),
+            requested_at: row.requested_at.format("%Y-%m-%d %H:%M UTC").to_string(),
         })
         .collect();
 
-    Ok(StudentRequestListTemplate {
-        requests: &requests,
+    Ok(DocumentsPage {
+        csrf_token: &current.csrf_token,
+        requests,
+        notice,
+        error,
     }
     .render()?)
 }
+
+// ---------------------------------------------------------------------------
+// Officer queue: review, approve (reasoned), reject (reasoned).
+// ---------------------------------------------------------------------------
 
 #[derive(sqlx::FromRow)]
 struct PendingRequestRow {
@@ -206,57 +197,121 @@ struct PendingRequestRow {
 
 struct PendingRequestView {
     id: Uuid,
-    document_type_label: &'static str,
+    label: &'static str,
     student_number: String,
     purpose: String,
     requested_at: String,
 }
 
 #[derive(Template)]
-#[template(
-    source = r#"
-<section id="document-queue">
-  <h1>Pending document requests</h1>
-  {% if requests.is_empty() %}
-    <p>No pending requests.</p>
-  {% endif %}
-  {% for request in requests %}
-  <article>
-    <h2>{{ request.document_type_label }}</h2>
-    <p>Student: {{ request.student_number }}</p>
-    <p>Requested: {{ request.requested_at }}</p>
-    <p>{{ request.purpose }}</p>
-    <form method="post"
-          action="/ui/admin/document-requests/{{ request.id }}/approve"
-          x-target="document-queue">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <label>Approval note <textarea name="note"></textarea></label>
-      <button type="submit">Approve</button>
-    </form>
-    <form method="post"
-          action="/ui/admin/document-requests/{{ request.id }}/reject"
-          x-target="document-queue"
-          x-target.422="document-queue">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <label>Rejection reason <textarea name="note" required></textarea></label>
-      <button type="submit">Reject</button>
-    </form>
-  </article>
-  {% endfor %}
-</section>
-"#,
-    ext = "html"
-)]
-struct AdminQueueTemplate<'a> {
-    requests: &'a [PendingRequestView],
+#[template(path = "pages/document_queue.html")]
+struct QueuePage<'a> {
     csrf_token: &'a str,
+    requests: Vec<PendingRequestView>,
+    notice: Option<&'a str>,
+    error: Option<&'a str>,
 }
 
-async fn render_admin_queue(
+#[get("/ui/admin/documents")]
+pub async fn queue_page(
+    actor: Actor,
+    current: CurrentSession,
+    pool: web::Data<PgPool>,
+    query: web::Query<NoticeQuery>,
+) -> Result<HttpResponse, AppError> {
+    let notice = match query.notice.as_deref() {
+        Some("approved") => Some("Request approved; generation queued."),
+        Some("rejected") => Some("Request rejected."),
+        _ => None,
+    };
+    let body = render_queue(&actor, &current, &pool, notice, None).await?;
+    Ok(html(StatusCode::OK, body))
+}
+
+#[derive(Deserialize)]
+pub struct DecisionForm {
+    note: Option<String>,
+    csrf_token: String,
+}
+
+#[post("/ui/admin/documents/{request_id}/approve")]
+pub async fn approve_form(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<DocumentService>,
+    pool: web::Data<PgPool>,
+    request_id: web::Path<Uuid>,
+    form: web::Form<DecisionForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let outcome = service
+        .approve(
+            &actor,
+            request_id.into_inner(),
+            form.note.as_deref().unwrap_or(""),
+        )
+        .await;
+    finish_decision(&actor, &current, &pool, outcome, "approved").await
+}
+
+#[post("/ui/admin/documents/{request_id}/reject")]
+pub async fn reject_form(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<DocumentService>,
+    pool: web::Data<PgPool>,
+    request_id: web::Path<Uuid>,
+    form: web::Form<DecisionForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let outcome = service
+        .reject(
+            &actor,
+            request_id.into_inner(),
+            form.note.as_deref().unwrap_or(""),
+        )
+        .await;
+    finish_decision(&actor, &current, &pool, outcome, "rejected").await
+}
+
+/// PRG on success; validation problems and already-decided races render
+/// inline on the queue so the officer never loses their place.
+async fn finish_decision(
     actor: &Actor,
+    current: &CurrentSession,
     pool: &PgPool,
-    csrf_token: &str,
+    outcome: Result<(), AppError>,
+    notice: &str,
+) -> Result<HttpResponse, AppError> {
+    match outcome {
+        Ok(()) => Ok(see_other(&format!("/ui/admin/documents?notice={notice}"))),
+        Err(AppError::Validation(message)) => {
+            let body = render_queue(actor, current, pool, None, Some(&message)).await?;
+            Ok(html(StatusCode::UNPROCESSABLE_ENTITY, body))
+        }
+        Err(AppError::NotFound) => {
+            let body = render_queue(
+                actor,
+                current,
+                pool,
+                None,
+                Some("that request is no longer pending"),
+            )
+            .await?;
+            Ok(html(StatusCode::NOT_FOUND, body))
+        }
+        Err(other) => Err(other),
+    }
+}
+
+async fn render_queue(
+    actor: &Actor,
+    current: &CurrentSession,
+    pool: &PgPool,
+    notice: Option<&str>,
+    error: Option<&str>,
 ) -> Result<String, AppError> {
+    // Reading the queue is officer-only, like deciding it.
     if !actor.has_role(Role::DocumentOfficer) {
         return Err(AppError::Forbidden);
     }
@@ -280,20 +335,22 @@ async fn render_admin_queue(
     .fetch_all(pool)
     .await?;
 
-    let requests: Vec<_> = rows
+    let requests = rows
         .into_iter()
         .map(|row| PendingRequestView {
             id: row.id,
-            document_type_label: document_type_label(&row.document_type),
+            label: document_type_label(&row.document_type),
             student_number: row.student_number,
             purpose: row.purpose.unwrap_or_default(),
-            requested_at: row.requested_at.to_rfc3339(),
+            requested_at: row.requested_at.format("%Y-%m-%d %H:%M UTC").to_string(),
         })
         .collect();
 
-    Ok(AdminQueueTemplate {
-        requests: &requests,
-        csrf_token,
+    Ok(QueuePage {
+        csrf_token: &current.csrf_token,
+        requests,
+        notice,
+        error,
     }
     .render()?)
 }
@@ -307,9 +364,23 @@ fn document_type_label(value: &str) -> &'static str {
     }
 }
 
+fn html(status: StatusCode, body: String) -> HttpResponse {
+    HttpResponse::build(status)
+        .content_type("text/html; charset=utf-8")
+        .body(body)
+}
+
+fn see_other(location: &str) -> HttpResponse {
+    HttpResponse::SeeOther()
+        .insert_header(("Location", location.to_owned()))
+        .finish()
+}
+
 pub fn routes(cfg: &mut web::ServiceConfig) {
-    cfg.service(request_fragment)
-        .service(approve_fragment)
-        .service(reject_fragment)
-        .service(download);
+    cfg.service(documents_page)
+        .service(request_form)
+        .service(download)
+        .service(queue_page)
+        .service(approve_form)
+        .service(reject_form);
 }

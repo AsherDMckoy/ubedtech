@@ -544,3 +544,264 @@ async fn approval_and_rejection_are_reasoned_scoped_and_atomic(pool: PgPool) {
     .unwrap();
     assert_eq!(audits, 2);
 }
+
+// ---------------------------------------------------------------------------
+// Pages over plain forms: request → review → approve → generate → download.
+// ---------------------------------------------------------------------------
+
+mod ui {
+    use super::{DocFixture, seed_doc_fixture};
+    use actix_web::http::StatusCode;
+    use actix_web::{test as actix_test, web};
+    use sqlx::PgPool;
+    use uuid::Uuid;
+
+    use crate::documents::DocumentWorker;
+    use crate::documents::storage::FilesystemDocumentStore;
+    use crate::identity_access::http::SessionCookiePolicy;
+    use crate::identity_access::password::PasswordService;
+    use crate::identity_access::service::AuthService;
+    use crate::identity_access::sessions::SessionService;
+    use crate::licensing::{LicenseGate, LicenseSnapshot, LicenseStatus};
+
+    const PASSWORD: &str = "correct horse battery";
+
+    async fn credential(pool: &PgPool, user_id: Uuid, institution: Uuid, role: &str) -> String {
+        let username = format!("{role}-{}", &user_id.to_string()[..8]);
+        sqlx::query("UPDATE user_account SET username = $2 WHERE id = $1")
+            .bind(user_id)
+            .bind(&username)
+            .execute(pool)
+            .await
+            .unwrap();
+        let hash = PasswordService::new(8, 1, 1)
+            .unwrap()
+            .hash(PASSWORD)
+            .unwrap();
+        sqlx::query("INSERT INTO password_credential (user_id, password_hash) VALUES ($1, $2)")
+            .bind(user_id)
+            .bind(hash)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO user_role (institution_id, user_id, role_id) \
+             SELECT $1, $2, id FROM role WHERE code = $3",
+        )
+        .bind(institution)
+        .bind(user_id)
+        .bind(role)
+        .execute(pool)
+        .await
+        .unwrap();
+        username
+    }
+
+    fn extract_input(body: &str, name: &str) -> String {
+        let at = body
+            .find(&format!("name=\"{name}\""))
+            .unwrap_or_else(|| panic!("no input named {name} in page"));
+        let rest = &body[at..];
+        let value_at = rest.find("value=\"").expect("input has a value") + "value=\"".len();
+        rest[value_at..].split('"').next().unwrap().to_owned()
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn request_review_generate_download_works_as_plain_forms(pool: PgPool) {
+        let fx: DocFixture = seed_doc_fixture(&pool).await;
+        let institution = fx.officer.institution_id;
+        let student_login = credential(&pool, fx.student.user_id, institution, "student").await;
+        let officer_login =
+            credential(&pool, fx.officer.user_id, institution, "document_officer").await;
+
+        // One storage root shared by the app's download path and the worker.
+        let root = std::env::temp_dir().join(format!("ubed-doc-ui-{}", Uuid::new_v4()));
+        let sessions = SessionService::new(pool.clone(), 1800, 43200);
+        let auth = AuthService::new(
+            pool.clone(),
+            PasswordService::new(8, 1, 1).unwrap(),
+            sessions.clone(),
+            crate::audit::AuditWriter,
+            10,
+            900,
+        )
+        .unwrap();
+        let gate = LicenseGate::new(LicenseSnapshot {
+            institution_id: institution,
+            deployment_id: Uuid::new_v4(),
+            status: LicenseStatus::Active,
+            valid_from: chrono::Utc::now() - chrono::Duration::days(1),
+            valid_until: chrono::Utc::now() + chrono::Duration::days(365),
+            version: 1,
+            feature_set: serde_json::json!({}),
+        });
+        let app = actix_test::init_service(
+            actix_web::App::new()
+                .app_data(web::Data::new(sessions))
+                .app_data(web::Data::new(auth))
+                .app_data(web::Data::new(gate))
+                .app_data(web::Data::new(SessionCookiePolicy {
+                    secure: false,
+                    max_age_secs: 43200,
+                }))
+                .app_data(web::Data::new(pool.clone()))
+                .app_data(web::Data::new(super::doc_service(&pool)))
+                .app_data(web::Data::new(FilesystemDocumentStore::new(root.clone())))
+                .wrap(actix_web::middleware::from_fn(
+                    crate::identity_access::csrf::csrf_middleware,
+                ))
+                .wrap(actix_web::middleware::from_fn(
+                    crate::identity_access::middleware::session_middleware,
+                ))
+                .configure(crate::identity_access::http::routes)
+                .configure(crate::documents::http::routes),
+        )
+        .await;
+
+        let login = |username: String| {
+            actix_test::TestRequest::post()
+                .uri("/ui/login")
+                .peer_addr("127.0.0.1:9999".parse().unwrap())
+                .set_form(serde_json::json!({ "username": username, "password": PASSWORD }))
+                .to_request()
+        };
+        let student_response = actix_test::call_service(&app, login(student_login)).await;
+        let student_cookie = student_response
+            .response()
+            .cookies()
+            .find(|cookie| cookie.name() == "ub_session")
+            .unwrap()
+            .into_owned();
+        let officer_response = actix_test::call_service(&app, login(officer_login)).await;
+        let officer_cookie = officer_response
+            .response()
+            .cookies()
+            .find(|cookie| cookie.name() == "ub_session")
+            .unwrap()
+            .into_owned();
+
+        // Student requests through the form.
+        let page = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/ui/documents")
+                .cookie(student_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(page.status(), StatusCode::OK);
+        let body = String::from_utf8(actix_test::read_body(page).await.to_vec()).unwrap();
+        assert!(body.contains("No document requests yet."));
+        let student_csrf = extract_input(&body, "csrf_token");
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/ui/documents")
+                .cookie(student_cookie.clone())
+                .set_form(serde_json::json!({
+                    "csrf_token": student_csrf,
+                    "document_type": "official_transcript",
+                    "purpose": "visa application",
+                    "delivery_method": "download",
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+        // Students cannot open the officer queue.
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/ui/admin/documents")
+                .cookie(student_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+        // Officer sees the request; a blank approval reason renders inline.
+        let queue = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/ui/admin/documents")
+                .cookie(officer_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        let queue_body = String::from_utf8(actix_test::read_body(queue).await.to_vec()).unwrap();
+        assert!(queue_body.contains("Official transcript"));
+        assert!(queue_body.contains("visa application"));
+        let officer_csrf = extract_input(&queue_body, "csrf_token");
+        let request_id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM document_request LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri(&format!("/ui/admin/documents/{request_id}/approve"))
+                .cookie(officer_cookie.clone())
+                .set_form(serde_json::json!({ "csrf_token": officer_csrf, "note": "  " }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        assert!(body.contains("approval reason is required"));
+
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri(&format!("/ui/admin/documents/{request_id}/approve"))
+                .cookie(officer_cookie.clone())
+                .set_form(serde_json::json!({
+                    "csrf_token": officer_csrf,
+                    "note": "identity verified",
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+        // The worker (same storage root) generates the artifact.
+        let worker = DocumentWorker::new(pool.clone(), "ui-test-worker".into(), root.clone(), 60);
+        assert!(worker.run_once().await.unwrap());
+
+        // Student's page now shows ready + a download link, and the download
+        // itself is an attachment with PDF bytes.
+        let page = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/ui/documents")
+                .cookie(student_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        let body = String::from_utf8(actix_test::read_body(page).await.to_vec()).unwrap();
+        assert!(body.contains("ready"));
+        assert!(body.contains(&format!("/ui/documents/{request_id}/download")));
+
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri(&format!("/ui/documents/{request_id}/download"))
+                .cookie(student_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            response
+                .headers()
+                .get("Content-Disposition")
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("attachment")
+        );
+        let bytes = actix_test::read_body(response).await;
+        assert!(bytes.starts_with(b"%PDF-"));
+    }
+}

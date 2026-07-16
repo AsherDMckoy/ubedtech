@@ -1,0 +1,35 @@
+{% extends "pages/base.html" %}
+{% block title %}Document request queue{% endblock %}
+{% block content %}
+  <h1>Pending document requests</h1>
+  {% if let Some(notice) = notice %}
+    <p role="status">{{ notice }}</p>
+  {% endif %}
+  {% if let Some(error) = error %}
+    <p role="alert">{{ error }}</p>
+  {% endif %}
+
+  {% if requests.is_empty() %}
+    <p>No pending requests.</p>
+  {% endif %}
+  {% for request in requests %}
+    <article>
+      <h2>{{ request.label }} — {{ request.student_number }}</h2>
+      <p>Requested {{ request.requested_at }}{% if !request.purpose.is_empty() %} — “{{ request.purpose }}”{% endif %}</p>
+      <form method="post" action="/ui/admin/documents/{{ request.id }}/approve">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Approval reason
+          <input name="note" required maxlength="500">
+        </label>
+        <button type="submit">Approve</button>
+      </form>
+      <form method="post" action="/ui/admin/documents/{{ request.id }}/reject">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Rejection reason
+          <input name="note" required maxlength="500">
+        </label>
+        <button type="submit">Reject</button>
+      </form>
+    </article>
+  {% endfor %}
+{% endblock %}
