@@ -9,7 +9,7 @@ use sqlx::PgPool;
 use tokio::time::sleep;
 use uuid::Uuid;
 
-use crate::documents::storage::FilesystemDocumentStore;
+use crate::documents::storage::{DocumentStore, FilesystemDocumentStore};
 
 /// Attempts (claims) a job may consume before it fails terminally. The
 /// count includes claims that died with their worker and were reaped.
@@ -19,14 +19,14 @@ const MAX_ATTEMPTS: i32 = 3;
 const REAP_INTERVAL: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
-pub struct DocumentWorker {
+pub struct DocumentWorker<S: DocumentStore = FilesystemDocumentStore> {
     pool: PgPool,
     worker_id: String,
-    store: FilesystemDocumentStore,
+    store: S,
     stale_after_secs: u64,
 }
 
-impl DocumentWorker {
+impl DocumentWorker<FilesystemDocumentStore> {
     pub fn new(pool: PgPool, worker_id: String, root: PathBuf, stale_after_secs: u64) -> Self {
         Self {
             pool,
@@ -35,7 +35,9 @@ impl DocumentWorker {
             stale_after_secs,
         }
     }
+}
 
+impl<S: DocumentStore> DocumentWorker<S> {
     /// Runs until `shutdown` flips to true. An in-flight job finishes before
     /// the loop exits, so graceful shutdown never abandons a claimed job
     /// mid-render; jobs orphaned by a hard crash are recovered by

@@ -320,3 +320,104 @@ async fn failed_renders_retry_with_recorded_reasons_then_stop(pool: PgPool) {
         .unwrap();
     assert_eq!(artifacts, 0, "no fake success artifact");
 }
+
+/// Downloads: the owning student and the document officer succeed
+/// (institution-scoped); everyone else — another student, a foreign
+/// officer, a role with no student profile — gets 404/403. Bytes are a
+/// real PDF matching the recorded checksum, and a not-yet-ready request
+/// serves nothing.
+#[sqlx::test(migrations = "./migrations")]
+async fn downloads_are_authorized_and_checksum_verified(pool: PgPool) {
+    use crate::documents::storage::DocumentStore;
+    use crate::shared::error::AppError;
+    use sha2::{Digest, Sha256};
+
+    let fx = seed_doc_fixture(&pool).await;
+    let service = doc_service(&pool);
+
+    // Not ready yet: even the owner gets 404 before generation.
+    let (request_id, _) = approved_request(&pool, &fx).await;
+    assert!(matches!(
+        service.downloadable(&fx.student, request_id).await,
+        Err(AppError::NotFound)
+    ));
+
+    let root = std::env::temp_dir().join(format!("ubed-doc-test-{}", Uuid::new_v4()));
+    let worker = DocumentWorker::new(pool.clone(), "test-worker".into(), root.clone(), 60);
+    assert!(worker.run_once().await.unwrap());
+
+    // Owner and officer both resolve the artifact; the bytes are a PDF and
+    // match the recorded checksum.
+    for who in [&fx.student, &fx.officer] {
+        let artifact = service.downloadable(who, request_id).await.unwrap();
+        let store = crate::documents::storage::FilesystemDocumentStore::new(root.clone());
+        let bytes = store.read(&artifact.storage_path).await.unwrap();
+        assert!(bytes.starts_with(b"%PDF-"));
+        assert_eq!(Sha256::digest(&bytes).as_slice(), artifact.content_hash);
+    }
+
+    // Another student in the same institution: 404, not someone else's
+    // transcript.
+    let other_user = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO user_account (id, institution_id, username, email) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(other_user)
+    .bind(fx.student.institution_id)
+    .bind(format!("o-{}", &other_user.to_string()[..12]))
+    .bind(format!("{}@test.invalid", &other_user.to_string()[..12]))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let other_student_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO student_profile (id, institution_id, user_id, student_number, program_code) \
+         VALUES ($1, $2, $3, $4, 'CS')",
+    )
+    .bind(other_student_id)
+    .bind(fx.student.institution_id)
+    .bind(other_user)
+    .bind(format!("X-{}", &other_student_id.to_string()[..8]))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let other_student = actor(
+        fx.student.institution_id,
+        other_user,
+        Role::Student,
+        Some(other_student_id),
+    );
+    assert!(matches!(
+        service.downloadable(&other_student, request_id).await,
+        Err(AppError::NotFound)
+    ));
+
+    // A foreign officer and a profileless role get nothing either.
+    let foreign_institution = Uuid::new_v4();
+    sqlx::query("INSERT INTO institution (id, code, name) VALUES ($1, $2, 'F U')")
+        .bind(foreign_institution)
+        .bind(format!("F-{}", &foreign_institution.to_string()[..8]))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let foreign_officer = actor(
+        foreign_institution,
+        Uuid::new_v4(),
+        Role::DocumentOfficer,
+        None,
+    );
+    assert!(matches!(
+        service.downloadable(&foreign_officer, request_id).await,
+        Err(AppError::NotFound)
+    ));
+    let instructor = actor(
+        fx.student.institution_id,
+        Uuid::new_v4(),
+        Role::Instructor,
+        None,
+    );
+    assert!(matches!(
+        service.downloadable(&instructor, request_id).await,
+        Err(AppError::Forbidden)
+    ));
+}

@@ -2,13 +2,48 @@ use crate::shared::{
     actor::{Actor, Role},
     error::AppError,
 };
-use actix_web::{HttpResponse, post, web};
+use actix_web::{HttpResponse, get, post, web};
 use askama::Template;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::documents::storage::{DocumentStore, FilesystemDocumentStore};
 use crate::documents::{DocumentService, RequestDocumentCommand};
+
+/// Download a ready artifact. `downloadable` performs every authorization
+/// check (owner or officer, institution scope, ready + current); this
+/// adapter only fetches bytes and refuses to serve anything whose checksum
+/// no longer matches what was recorded at generation time.
+#[get("/ui/documents/{request_id}/download")]
+pub async fn download(
+    actor: Actor,
+    service: web::Data<DocumentService>,
+    store: web::Data<FilesystemDocumentStore>,
+    request_id: web::Path<Uuid>,
+) -> Result<HttpResponse, AppError> {
+    let artifact = service
+        .downloadable(&actor, request_id.into_inner())
+        .await?;
+
+    let bytes = store.read(&artifact.storage_path).await?;
+    if Sha256::digest(&bytes).as_slice() != artifact.content_hash.as_slice() {
+        return Err(AppError::Integrity(
+            "stored artifact does not match its recorded checksum",
+        ));
+    }
+
+    Ok(HttpResponse::Ok()
+        .content_type(artifact.mime_type)
+        // Fixed, safe filename — never derived from stored data or paths.
+        .insert_header((
+            "Content-Disposition",
+            "attachment; filename=\"document.pdf\"",
+        ))
+        .insert_header(("Cache-Control", "private, no-store"))
+        .body(bytes))
+}
 
 #[derive(Deserialize)]
 pub struct RequestDocumentForm {
@@ -275,5 +310,6 @@ fn document_type_label(value: &str) -> &'static str {
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(request_fragment)
         .service(approve_fragment)
-        .service(reject_fragment);
+        .service(reject_fragment)
+        .service(download);
 }

@@ -264,6 +264,55 @@ impl DocumentService {
     }
 }
 
+/// Everything the download adapter needs after authorization has passed.
+/// The storage path never appears in any response — it is handed straight
+/// to the store.
+#[derive(sqlx::FromRow)]
+pub struct ArtifactRef {
+    pub storage_path: String,
+    pub content_hash: Vec<u8>,
+    pub mime_type: String,
+}
+
+impl DocumentService {
+    /// Authorization gate for every download: the owning student or a
+    /// document officer, always inside the actor's institution, and only
+    /// for a ready request with a current (non-superseded) artifact.
+    /// Anything else is 404 — indistinguishable from nonexistent.
+    pub async fn downloadable(
+        &self,
+        actor: &Actor,
+        request_id: Uuid,
+    ) -> Result<ArtifactRef, AppError> {
+        let owner_filter = if actor.has_role(Role::DocumentOfficer) {
+            None
+        } else {
+            // Anyone without a student profile (instructor, registrar, …)
+            // holds no download power at all.
+            Some(actor.require_student_self()?)
+        };
+
+        sqlx::query_as::<_, ArtifactRef>(
+            r#"
+            SELECT gd.storage_path, gd.content_hash, gd.mime_type
+            FROM document_request dr
+            JOIN generated_document gd
+              ON gd.request_id = dr.id AND gd.superseded_at IS NULL
+            WHERE dr.id = $1
+              AND dr.institution_id = $2
+              AND dr.status = 'ready'
+              AND ($3::uuid IS NULL OR dr.student_id = $3)
+            "#,
+        )
+        .bind(request_id)
+        .bind(actor.institution_id)
+        .bind(owner_filter)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(AppError::NotFound)
+    }
+}
+
 #[derive(sqlx::FromRow)]
 struct PendingRequest {
     student_id: Uuid,

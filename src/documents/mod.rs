@@ -1,6 +1,6 @@
 pub(crate) mod http;
 mod service;
-mod storage;
+pub(crate) mod storage;
 mod worker;
 
 pub use service::{DocumentService, RequestDocumentCommand};

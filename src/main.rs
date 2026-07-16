@@ -85,6 +85,11 @@ async fn main() -> std::io::Result<()> {
     let schedule = ScheduleQuery::new(pool.clone());
     let transcript = TranscriptSnapshotService;
     let documents = DocumentService::new(pool.clone(), audit.clone(), transcript);
+    // The same store instance backs the worker's writes and the download
+    // adapter's reads (the artifact-storage boundary; docs/OPERATIONS.md).
+    let document_store = crate::documents::storage::FilesystemDocumentStore::new(
+        config.document_storage_path.clone(),
+    );
     let licensing = LicenseService::new(pool.clone(), license_gate.clone(), audit);
 
     let worker = DocumentWorker::new(
@@ -114,6 +119,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(grades.clone()))
             .app_data(web::Data::new(schedule.clone()))
             .app_data(web::Data::new(documents.clone()))
+            .app_data(web::Data::new(document_store.clone()))
             .app_data(web::Data::new(TranscriptSnapshotService))
             .app_data(web::Data::new(licensing.clone()))
             .app_data(web::Data::new(license_gate.clone()))
