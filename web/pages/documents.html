@@ -57,7 +57,7 @@
         {% for request in requests %}
           <tr>
             <td>{{ request.label }}</td>
-            <td>{{ request.status }}</td>
+            <td><span class="badge {{ crate::shared::assets::badge_class(request.status.as_str()) }}">{{ request.status }}</span></td>
             <td>{{ request.requested_at }}</td>
             <td>
               {% if request.status == "ready" %}

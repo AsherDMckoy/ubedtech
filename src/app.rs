@@ -24,6 +24,8 @@ pub fn protected_routes(cfg: &mut web::ServiceConfig) {
 // session routes, and the platform license-management fragment — a platform
 // licensing admin has to be able to sign in and unlock a locked deployment.
 pub fn recovery_routes(cfg: &mut web::ServiceConfig) {
+    // Stylesheet/script must load on the login and locked pages too.
+    cfg.configure(crate::shared::assets::routes);
     cfg.route("/health/live", web::get().to(health_live));
     cfg.route("/health/ready", web::get().to(health_ready));
     cfg.route("/license/status", web::get().to(license_status));

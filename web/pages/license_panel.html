@@ -12,7 +12,8 @@
   <section id="license-panel">
     <h2>Current license</h2>
     <dl>
-      <dt>Status</dt><dd>{{ status }}</dd>
+      <dt>Status</dt>
+      <dd><span class="badge {{ crate::shared::assets::badge_class(status) }}">{{ status }}</span></dd>
       <dt>Valid from</dt><dd>{{ valid_from }}</dd>
       <dt>Valid until</dt><dd>{{ valid_until }}</dd>
       <dt>Version</dt><dd>{{ version }}</dd>

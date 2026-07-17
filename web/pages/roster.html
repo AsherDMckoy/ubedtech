@@ -32,7 +32,11 @@
           <td>{{ row.student_number }}</td>
           <td>{{ row.student_name }}</td>
           <td>
-            {% if let Some(state) = row.state %}{{ state }}{% else %}pending{% endif %}
+            {% if let Some(state) = row.state %}
+              <span class="badge {{ crate::shared::assets::badge_class(state.as_str()) }}">{{ state }}</span>
+            {% else %}
+              <span class="badge badge-info">pending</span>
+            {% endif %}
           </td>
           <td>
             {% if let Some(grade) = row.grade_code %}{{ grade }}{% else %}—{% endif %}

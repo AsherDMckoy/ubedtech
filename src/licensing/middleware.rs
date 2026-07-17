@@ -26,7 +26,9 @@ pub(crate) fn is_license_exempt(path: &str) -> bool {
         "/api/v1/session/logout",
         "/ui/login",
     ];
-    EXACT.contains(&path) || path.starts_with("/ui/platform/")
+    // Static assets carry no institution data; the login and locked pages
+    // need their stylesheet while locked.
+    EXACT.contains(&path) || path.starts_with("/ui/platform/") || path.starts_with("/assets/")
 }
 
 pub async fn license_middleware(
@@ -70,6 +72,7 @@ mod tests {
             "/api/v1/session/login",
             "/api/v1/session/logout",
             "/ui/platform/institutions/123/license",
+            "/assets/app-0123abcd.css",
         ] {
             assert!(is_license_exempt(path), "{path} must stay reachable");
         }

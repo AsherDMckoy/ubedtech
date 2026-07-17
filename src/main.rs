@@ -155,6 +155,9 @@ async fn main() -> std::io::Result<()> {
                 crate::licensing::middleware::license_middleware,
             ))
             .wrap(middleware::NormalizePath::trim())
+            // Compression sits outside everything that produces bodies; the
+            // CSS/JS budget in docs/PERFORMANCE.md assumes it is on.
+            .wrap(middleware::Compress::default())
             .wrap(app::security_headers(environment))
             // Correlation + completion logging with redaction by construction;
             // replaces Logger::default(), which would log full query strings.

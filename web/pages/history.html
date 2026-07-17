@@ -23,7 +23,7 @@
             <td>{{ row.course_code }} — {{ row.course_title }}</td>
             <td>{{ row.credit_hours }}</td>
             <td>{{ row.grade_code }}</td>
-            <td>{{ row.state }}</td>
+            <td><span class="badge {{ crate::shared::assets::badge_class(row.state.as_str()) }}">{{ row.state }}</span></td>
           </tr>
         {% endfor %}
       </tbody>
