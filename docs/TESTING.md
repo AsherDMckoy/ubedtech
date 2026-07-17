@@ -13,6 +13,11 @@ cargo test --all-targets --all-features
 CI (`.github/workflows/ci.yml`) runs the same gates plus a release-profile
 build against a PostgreSQL 16 service.
 
+**Never pipe a gate into `tail`/`grep` inside a `&&` chain** — the chain
+sees the pipe's exit code, not the gate's, and a red gate slides straight
+into the commit. This has bitten twice (Phases 5 and 7). Run the gate
+bare, or end the pipeline with `; echo EXIT=$?` and read it.
+
 ## Database tests
 
 `#[sqlx::test(migrations = "./migrations")]` creates a fresh throwaway
