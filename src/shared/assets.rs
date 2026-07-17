@@ -63,6 +63,64 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.route(js_href(), web::get().to(js));
 }
 
+/// Structural accessibility audit for a rendered page, shared by every UI
+/// flow test (the "automated checks for the critical pages"). String-level
+/// on purpose — no HTML-parser dependency — so it catches the regressions
+/// that matter (missing labels, captions, landmarks, CSP violations)
+/// without pretending to replace a real browser + axe pass, which lives in
+/// the manual checklist (docs/FRONTEND_DESIGN_SYSTEM.md).
+#[cfg(test)]
+pub fn assert_page_a11y(html: &str) {
+    assert!(
+        html.contains("<html lang="),
+        "page must declare its language"
+    );
+    assert!(
+        html.contains(r#"name="viewport""#),
+        "page must have a viewport meta tag"
+    );
+    assert!(html.contains("<title>"), "page must have a title");
+    assert!(
+        html.contains(r#"class="skip-link""#),
+        "page must have the skip link"
+    );
+    assert!(html.contains("<main"), "page must have a main landmark");
+
+    let h1_count = html.matches("<h1").count();
+    assert_eq!(
+        h1_count, 1,
+        "page must have exactly one h1, found {h1_count}"
+    );
+
+    // Every visible form control needs a label (wrapping or for=). Hidden
+    // inputs are the only unlabeled controls allowed.
+    let visible_controls = html.matches("<input").count()
+        - html.matches(r#"type="hidden""#).count()
+        + html.matches("<select").count()
+        + html.matches("<textarea").count();
+    let labels = html.matches("<label").count();
+    assert!(
+        visible_controls <= labels,
+        "{visible_controls} visible form controls but only {labels} labels"
+    );
+
+    // Data tables carry captions and column scopes.
+    let tables = html.matches("<table").count();
+    let captions = html.matches("<caption").count();
+    assert_eq!(tables, captions, "{tables} tables but {captions} captions");
+    if tables > 0 {
+        assert!(
+            html.contains(r#"scope="col""#),
+            "tables must mark their column headers"
+        );
+    }
+
+    // Our CSP forbids inline handlers and styles; a page that needs them is
+    // a page that silently breaks in production.
+    assert!(!html.contains("onclick="), "inline event handler found");
+    assert!(!html.contains(" style=\""), "inline style attribute found");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -250,62 +308,4 @@ mod tests {
             assert!(ratio >= 3.0, "--focus on --{bg} is {ratio:.2}:1; needs 3:1");
         }
     }
-}
-
-/// Structural accessibility audit for a rendered page, shared by every UI
-/// flow test (the "automated checks for the critical pages"). String-level
-/// on purpose — no HTML-parser dependency — so it catches the regressions
-/// that matter (missing labels, captions, landmarks, CSP violations)
-/// without pretending to replace a real browser + axe pass, which lives in
-/// the manual checklist (docs/FRONTEND_DESIGN_SYSTEM.md).
-#[cfg(test)]
-pub fn assert_page_a11y(html: &str) {
-    assert!(
-        html.contains("<html lang="),
-        "page must declare its language"
-    );
-    assert!(
-        html.contains(r#"name="viewport""#),
-        "page must have a viewport meta tag"
-    );
-    assert!(html.contains("<title>"), "page must have a title");
-    assert!(
-        html.contains(r#"class="skip-link""#),
-        "page must have the skip link"
-    );
-    assert!(html.contains("<main"), "page must have a main landmark");
-
-    let h1_count = html.matches("<h1").count();
-    assert_eq!(
-        h1_count, 1,
-        "page must have exactly one h1, found {h1_count}"
-    );
-
-    // Every visible form control needs a label (wrapping or for=). Hidden
-    // inputs are the only unlabeled controls allowed.
-    let visible_controls = html.matches("<input").count()
-        - html.matches(r#"type="hidden""#).count()
-        + html.matches("<select").count()
-        + html.matches("<textarea").count();
-    let labels = html.matches("<label").count();
-    assert!(
-        visible_controls <= labels,
-        "{visible_controls} visible form controls but only {labels} labels"
-    );
-
-    // Data tables carry captions and column scopes.
-    let tables = html.matches("<table").count();
-    let captions = html.matches("<caption").count();
-    assert_eq!(tables, captions, "{tables} tables but {captions} captions");
-    if tables > 0 {
-        assert!(
-            html.contains(r#"scope="col""#),
-            "tables must mark their column headers"
-        );
-    }
-
-    // Our CSP forbids inline handlers and styles; a page that needs them is
-    // a page that silently breaks in production.
-    assert!(!html.contains("onclick="), "inline event handler found");
-    assert!(!html.contains(" style=\""), "inline style attribute found");
 }
