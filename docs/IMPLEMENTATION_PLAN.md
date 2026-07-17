@@ -117,8 +117,8 @@ and 6 are closed.
     capacity in the same tx; missing row fails as `Integrity`, distinct
     from "section is full" — `missing_capacity_row_fails_distinctly_from_
     a_full_section`, `every_section_gets_a_capacity_row_from_the_trigger`.
-3.4 `[ ]` **Institution calendar/events** — not in the Phase 3 prompt;
-    deferred.
+3.4 `[x]` **Institution calendar/events** — delivered with Phase 7 (the
+    "Phase 6" session prompt); see 3.4 under Phase 7 below.
 3.5 `[~]` **Meetings done** (day/time/room validation); instructor
     assignment deferred with 3.4.
 4.1 `[x]` **Deadline policy resolved (item 5)** — the phase prompt resolved
@@ -209,25 +209,44 @@ artifact), and downloads re-verify the sha256 checksum on every read.
 
 ---
 
-## Phase 7 — Licensing operations
+## Phase 7 — Licensing operations & institution administration
 
-Depends on: Phase 2 (platform admin auth), Phase 6 patterns for tests.
+**STATUS: COMPLETE (2026-07-16)** — delivered by the session whose prompt
+named it "Phase 6". Also delivered beyond this plan: institution settings
+(name/timezone), per-institution document-type configuration (fail-closed
+enforcement inside the request transaction), plan item 3.4 (events/
+holidays + admin calendar page), and the explicit admin-no-bypass proof.
 
-7.1 `[ ]` **Real recovery routes**: license status (JSON + page), license
-    import for self-hosted (signed file verification path — `signed_license
-    .rs` exists, unwired), locked page. Available while locked.
-7.2 `[ ]` **Platform suspend/activate endpoints** (`/api/v1/platform/...`)
-    restricted to `PlatformLicensingAdmin`, wired to `LicenseService`,
-    snapshot swap after commit. Acceptance: end-to-end 402 flip test
-    (extends 2.5), boundary test at exact `valid_until` instant.
-7.3 `[ ]` **License panel UI** for the platform operator (`license_panel
-    .html`).
+7.1 `[x]` **Real recovery routes** — `/license/status` (Phase 2),
+    `/institution-locked` (Phase 2), and now a REAL `POST /license/import`:
+    Ed25519-signed file verified against `APP_LICENSE_PUBLIC_KEY`
+    (format v1 frozen, ADR-10 — signature covers the exact `claims_json`
+    bytes); deployment id, validity window, and institution checked; row
+    update + `license_change` + audit in ONE transaction; gate swap after
+    commit. Reachable while locked, requires an authenticated admin (A22).
+    Proofs: `import::a_signed_license_import_unlocks_a_locked_deployment`,
+    `import::bad_or_misdirected_license_files_are_rejected`.
+7.2 `[x]` **Platform suspend/activate** — existed via
+    `/ui/platform/institutions/{id}/license` since Phase 2 (no separate
+    `/api/v1/platform/` surface needed; ponytail: one route is enough).
+    New: the end-to-end lock test also proves NO account is suspended and
+    NO session revoked as a side effect
+    (`a_disabled_license_locks_the_institution_but_suspends_nobody`), and
+    the half-open validity boundary is unit-tested
+    (`the_validity_window_is_half_open`).
+7.3 `[x]` **License panel UI** — `GET /ui/platform/license`
+    (`license_panel.html`): current license, change history, reasoned
+    suspend/activate form (PRG); license-exempt so it works while locked.
+3.4 `[x]` **Institution calendar/events** (deferred from Phase 3) —
+    `institution/` module, migration 0014, `/ui/admin/calendar`;
+    admin-only, scoped, audited, holidays are calendar data only (A23).
 
-### Risk
-- On-disk signed license file format is expensive to reverse once customers
-  hold files. If Phase 7 reaches import implementation, freeze a canonical,
-  versioned serialization first — this is one of the "stop and ask"
-  category items per CLAUDE.md §7 if unclear.
+### Risk (resolved)
+- The signed license file format was the "stop and ask" candidate; it was
+  frozen as versioned format v1 BEFORE any file exists (import previously
+  answered 501, so there is nothing to migrate) — ADR-10 records the
+  envelope and its evolution rules. No ask needed: no irreversible state
+  existed.
 
 ---
 
@@ -300,5 +319,8 @@ flagged in session reports.)
 | A19 | 2026-07-15 | May any user id be assigned as a section instructor? | No — the target must hold the `instructor` role in the institution (else 422), and only registrar/institution_admin assign. | Grading power must flow through the role system; assigning a student as instructor by id typo would otherwise grant it silently. |
 | A20 | 2026-07-16 | The Phase 5 prompt requires "approval/rejection with a required reason" — did that mean both decisions or only rejection (as originally implemented)? | Both: an approval also refuses a blank reason (422). | Issuing an official document is the sensitive act; the decision trail should say why in both directions. Conservative reading of the prompt; one `trim().is_empty()` check to relax. |
 | A21 | 2026-07-16 | How stale is an orphaned job? | `APP_JOB_STALE_SECS`, default 300s — 60× the demo render time; reaped attempts count against the same budget of 3 as render failures. | A crash-looping worker must not retry forever any more than a failing render; five minutes cannot mistake a slow-but-alive render for a dead worker at demo document sizes. Deployments with heavyweight templates raise the knob. |
+| A22 | 2026-07-16 | May `/license/import` be anonymous? The signature alone proves platform authority, but `license_change.changed_by_user_id` and `audit_event.actor_user_id` are NOT NULL by design. | Import requires an authenticated `institution_admin` or `platform_licensing_admin` (401/403 otherwise). Login is license-exempt, so a locked deployment can still recover: sign in, then import. | Fail closed and keep the audit trail honest — a recovery action with no attributable actor would be the only unaudited sensitive mutation in the system. Cheap to relax if a headless recovery path is ever demanded. |
+| A23 | 2026-07-16 | Do holidays/events affect policy (deadlines, registration windows)? Not specified. | No — events are calendar data only; term dates alone govern policy windows. | Conservative: an admin adding a holiday must not silently move an academic deadline. If holiday-aware deadlines become a requirement, they get their own explicit rule and tests. |
+| A24 | 2026-07-16 | Default state for per-institution document types, and effect on in-flight requests? | All three types enabled on migration and for new institutions (trigger); disabling blocks NEW requests only (fail closed on missing rows), pending/approved requests continue. | Preserves existing behavior on upgrade; cancelling in-flight officer-approved work because of a config toggle would destroy state the officer already vouched for. |
 
-(Phase 7's license file format will be recorded here when that phase runs.)
+(The Phase 7 license file format is frozen as format v1 — ADR-10.)

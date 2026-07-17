@@ -111,3 +111,23 @@ attempts with recorded reasons, orphan reaper — see OPERATIONS.md).
 
 The authorization behind every row above is test-backed — see
 `docs/PERMISSIONS.md` for the matrix and proving tests.
+
+## Institution administration (Phase 6; institution_admin only)
+
+| Method & path | Body → response |
+|---|---|
+| `GET /api/v1/institution/settings` | 200 `{name, timezone, document_types: [{document_type, enabled}]}` |
+| `PUT /api/v1/institution/settings` | `{name, timezone}` → 204; timezone must exist in `pg_timezone_names` (else 422) |
+| `PUT /api/v1/institution/document-types/{type}` | `{enabled}` → 204; disabled types refuse NEW student requests (fail closed) |
+
+Pages (plain forms): `GET /ui/admin/calendar` (events/holidays list +
+create form), `POST /ui/admin/calendar` (create; 422/409 inline),
+`POST /ui/admin/calendar/{id}/delete`. All audited in the same transaction.
+
+## Licensing (Phase 6 additions)
+
+| Method & path | Who | Behavior |
+|---|---|---|
+| `GET /ui/platform/license` | platform_licensing_admin (license-exempt) | license panel: current status, change history, suspend/activate form |
+| `POST /ui/platform/institutions/{id}/license` | platform_licensing_admin | now PRG: 303 → the panel; validation renders inline (422) |
+| `POST /license/import` | institution_admin or platform_licensing_admin (license-exempt, NOT anonymous) | signed license file (format v1, docs/SECURITY.md) → 200 `{status, valid_from, valid_until, version}`; any verification failure → 422 with a fixed message |

@@ -76,8 +76,28 @@ Additional cross-cutting proofs:
   `sessions::suspended_account_sessions_do_not_resolve`,
   `suspension_revokes_sessions_and_blocks_relogin`.
 
+## Matrix (Phase 6: institution administration & licensing)
+
+| Operation | anon | student | instructor | registrar | records_officer | document_officer | institution_admin | platform_licensing_admin | Proof (tests) |
+|---|---|---|---|---|---|---|---|---|---|
+| Manage events/holidays (`/ui/admin/calendar`, create/delete) | ❌ 401 | ❌ 403 | ❌ | ❌ | ❌ | ❌ | ✅ own institution only (foreign event ⇒ 404); audited in-tx | ❌ | `events_are_admin_only_validated_scoped_and_audited`, `ui::calendar_admin_works_as_plain_forms` (student 403) |
+| Read/update institution settings (`GET/PUT /api/v1/institution/settings`) | ❌ 401 | ❌ 403 | ❌ | ❌ | ❌ | ❌ | ✅ name + timezone (validated against `pg_timezone_names`); audited in-tx | ❌ | `settings_and_document_types_are_admin_only_validated_and_audited` |
+| Enable/disable a document type (`PUT /api/v1/institution/document-types/{type}`) | ❌ 401 | ❌ 403 | ❌ | ❌ | ❌ | ❌ | ✅ audited; new requests fail closed on a disabled or missing row | ❌ | `settings_and_document_types_are_admin_only_validated_and_audited`, `disabling_a_document_type_blocks_new_requests_fail_closed` |
+| View the license panel (`GET /ui/platform/license`, reachable while locked) | ❌ 401 | ❌ 403 | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | `a_disabled_license_locks_the_institution_but_suspends_nobody` |
+| Change license status (`POST /ui/platform/institutions/{id}/license`) | ❌ 401 | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ 403 | ✅ reason required; change record + audit in one tx | `platform_admin_flips_the_license_end_to_end`, `non_platform_roles_cannot_touch_the_license` |
+| Import a signed license (`POST /license/import`, reachable while locked) | ❌ 401 | ❌ 403 | ❌ | ❌ | ❌ | ❌ | ✅ Ed25519 signature verified against the deployment public key — the signature is the authority | ✅ same | `import::a_signed_license_import_unlocks_a_locked_deployment`, `import::bad_or_misdirected_license_files_are_rejected` |
+
+`institution_admin` explicitly holds NO power inside enrollment, grades, or
+documents — the admin surfaces call the same services as every other
+interface, and those services refuse the role at their own boundary:
+`institution_admin_does_not_bypass_domain_rules` (registration for self and
+others, grade drafts/corrections/publication, document approval/rejection/
+download — all denied, nothing written). Disabling a license suspends no
+account and revokes no session: `a_disabled_license_locks_the_institution_
+but_suspends_nobody`.
+
 ## Implemented but not yet test-backed (must not be trusted; matrix debt)
 
 These checks exist in code but have no per-role deny tests yet. They get
-rows when their phases add the tests (Phase 4/5/6/8):
+rows when their phases add the tests (Phase 8):
 

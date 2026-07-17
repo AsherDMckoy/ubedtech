@@ -20,6 +20,8 @@ overrides real environment variables. See `.env.example` for the full list.
 | `APP_WORKER_ID` | `document-worker-1` | claims jobs under this name (`document_job.locked_by`) |
 | `APP_SHUTDOWN_TIMEOUT_SECS` | 30 | HTTP drain and worker-stop budget |
 | `APP_READINESS_INTERVAL_SECS` | 5 | readiness prober cadence |
+| `APP_JOB_STALE_SECS` | 300 | dead-worker reap threshold for `running` document jobs |
+| `APP_LICENSE_PUBLIC_KEY` | unset | self-hosted only: Ed25519 public key (hex) for signed license imports; unset = imports refused |
 | `RUST_LOG` | `info,actix_web=info,sqlx=warn` | tracing filter (EnvFilter syntax) |
 
 ## Startup sequence
@@ -76,13 +78,8 @@ institution exists. Rules enforced by the command:
 SIGTERM/SIGINT → actix stops accepting, drains in-flight requests (up to
 `APP_SHUTDOWN_TIMEOUT_SECS`), then the document worker is signaled and given
 the same budget to finish its current job. A job interrupted by a hard kill
-stays `running` until the Phase 6.1 reaper requeues it — until that lands,
-check `document_job` for stale `running` rows after a crash:
-
-```sql
-SELECT id, request_id, locked_by, locked_at FROM document_job
-WHERE status = 'running' AND locked_at < now() - interval '10 minutes';
-```
+stays `running` only until the reaper requeues it (see "Orphaned document
+jobs" below) — no manual intervention needed.
 
 ## Logs
 
@@ -137,3 +134,19 @@ reaps jobs whose `locked_at` is older than `APP_JOB_STALE_SECS` (default
 above the longest legitimate render. `document_job.last_error` records
 both render failures and reap events; a terminally failed job also fails
 its request, visibly to the student and the officer queue.
+
+## License operations
+
+- **Hosted:** the platform licensing admin manages licenses at
+  `/ui/platform/license` (status, history, reasoned suspend/activate).
+  The page and its POST are license-exempt, so a locked deployment can
+  always be unlocked: sign in (login is also exempt), open the panel.
+  Disabling a license answers 402 institution-wide but suspends no
+  accounts and revokes no sessions — reactivation restores service with
+  everyone's sessions intact.
+- **Self-hosted:** recovery is `POST /license/import` with a
+  platform-signed license file (format, signing, and key rotation:
+  docs/SECURITY.md). Configure `APP_LICENSE_PUBLIC_KEY` (public key only —
+  never the signing key) and restart; an institution admin logs in and
+  imports the file. Every import and status change lands in
+  `license_change` plus an audit event, in the same transaction.

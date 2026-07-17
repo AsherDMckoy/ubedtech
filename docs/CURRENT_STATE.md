@@ -372,3 +372,40 @@ is now fully closed** (items 1, 2, 4, 5, 6 in earlier phases). Delivered
   real cause of the intermittent idempotency-test failure previously
   blamed on pool exhaustion.
 - Test count: 100 → 109.
+
+## Phase 6 outcome — institution administration & licensing (2026-07-16)
+
+Delivered by the "Phase 6" session prompt (this plan's Phase 7 plus the
+deferred 3.4):
+
+- **Events/holidays** (`institution/` module, migration 0014): admin-only,
+  institution-scoped, audited in-tx; `/ui/admin/calendar` plain-form page.
+  Calendar data only — policy windows stay governed by term dates (A23).
+- **Institution settings**: name + timezone over JSON
+  (`/api/v1/institution/settings`), timezone validated against
+  `pg_timezone_names`; audited.
+- **Document-type configuration** (migration 0015, trigger-guaranteed rows
+  like section_capacity): admin toggles per type; `request_for_self`
+  checks inside its transaction and fails closed on disabled/missing rows;
+  the student form offers only enabled types; in-flight requests are
+  untouched (A24).
+- **No-bypass proof**: `institution_admin_does_not_bypass_domain_rules` —
+  the admin role is refused by enrollment, grades, and documents services
+  directly, so no admin route can bypass domain rules.
+- **Hosted licensing**: `GET /ui/platform/license` panel (status, change
+  history, reasoned suspend/activate, PRG), reachable while locked. The
+  acceptance test proves a disabled license answers 402 institution-wide
+  on a still-valid session while health/recovery/license-management stay
+  reachable, and suspends NO account and revokes NO session. Validity
+  window proven half-open at the exact `valid_until` instant.
+- **Self-hosted signed licensing**: real `POST /license/import` —
+  Ed25519 verification against `APP_LICENSE_PUBLIC_KEY`, format v1 frozen
+  (ADR-10: signature over the exact `claims_json` bytes), deployment/
+  window/institution checks, update + change record + audit in one
+  transaction, gate swap after commit. Requires an authenticated admin
+  (A22). The private signing key exists only in the test module — grep
+  confirms `SigningKey` appears nowhere in the binary. SECURITY.md now
+  documents the format, signing procedure, and key rotation.
+- Test count: 109 → 119.
+
+Phase 7 (frontend/UX hardening) not started, per session scope.

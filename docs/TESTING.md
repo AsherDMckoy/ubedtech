@@ -25,7 +25,20 @@ harness — an infrastructure flake, not a code failure). Run
 `cargo test --all-targets --all-features -- --test-threads=4` locally;
 CI's service container copes with the default.
 
-## Current suite (109 tests as of Phase 5)
+## Current suite (119 tests as of Phase 6)
+
+Phase 6 added 10: `institution` (events/holidays admin-only + scoped +
+audited, settings + document-type config validation and auditing, the
+fail-closed disabled-type proof, the calendar UI flow, and the explicit
+`institution_admin_does_not_bypass_domain_rules` proof), `licensing` (the
+institution-wide lock test proving nobody is suspended, the half-open
+validity-window boundary, and the signed-license import pair — a valid
+import unlocks end to end; tampered/foreign-key/wrong-deployment/expired/
+misdirected/unknown-format files are all rejected with nothing written),
+and `config` (public-key parsing). The Ed25519 signing key exists only in
+`licensing::tests::import`.
+
+## Previous phases (still green)
 
 Phase 5 added 9 `documents` tests: crash recovery via the reaper (commit
 'running', reap, requeue, live worker completes), terminal reaping,
