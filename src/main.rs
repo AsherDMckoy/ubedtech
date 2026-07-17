@@ -6,7 +6,7 @@ mod db;
 mod documents;
 mod enrollment;
 mod identity_access;
-// mod institution;
+mod institution;
 // mod jobs;
 mod licensing;
 mod records;
@@ -90,6 +90,8 @@ async fn main() -> std::io::Result<()> {
     let document_store = crate::documents::storage::FilesystemDocumentStore::new(
         config.document_storage_path.clone(),
     );
+    let institution_admin =
+        crate::institution::InstitutionService::new(pool.clone(), audit.clone());
     let licensing = LicenseService::new(pool.clone(), license_gate.clone(), audit);
 
     let worker = DocumentWorker::new(
@@ -119,6 +121,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(grades.clone()))
             .app_data(web::Data::new(schedule.clone()))
             .app_data(web::Data::new(documents.clone()))
+            .app_data(web::Data::new(institution_admin.clone()))
             .app_data(web::Data::new(document_store.clone()))
             .app_data(web::Data::new(TranscriptSnapshotService))
             .app_data(web::Data::new(licensing.clone()))

@@ -15,7 +15,8 @@ pub fn protected_routes(cfg: &mut web::ServiceConfig) {
     cfg.configure(crate::academics::http::routes)
         .configure(crate::enrollment::http::routes)
         .configure(crate::records::http::routes)
-        .configure(crate::documents::http::routes);
+        .configure(crate::documents::http::routes)
+        .configure(crate::institution::http::routes);
 }
 
 // Reachable while the institution license is locked (see

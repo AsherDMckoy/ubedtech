@@ -1,0 +1,57 @@
+{% extends "pages/base.html" %}
+{% block title %}Events and holidays{% endblock %}
+{% block content %}
+  <h1>Events and holidays</h1>
+  {% if let Some(notice) = notice %}
+    <p role="status">{{ notice }}</p>
+  {% endif %}
+  {% if let Some(error) = error %}
+    <p role="alert">{{ error }}</p>
+  {% endif %}
+
+  <form method="post" action="/ui/admin/calendar">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Title
+      <input name="title" required maxlength="200">
+    </label>
+    <label>Type
+      <select name="event_type">
+        <option value="holiday">Holiday</option>
+        <option value="event">Event</option>
+      </select>
+    </label>
+    <label>Starts
+      <input type="date" name="starts_on" required>
+    </label>
+    <label>Ends
+      <input type="date" name="ends_on" required>
+    </label>
+    <button type="submit">Add</button>
+  </form>
+
+  {% if events.is_empty() %}
+    <p>No events yet.</p>
+  {% else %}
+    <table>
+      <thead>
+        <tr><th>Title</th><th>Type</th><th>Starts</th><th>Ends</th><th></th></tr>
+      </thead>
+      <tbody>
+        {% for event in events %}
+          <tr>
+            <td>{{ event.title }}</td>
+            <td>{{ event.kind_label }}</td>
+            <td>{{ event.starts_on }}</td>
+            <td>{{ event.ends_on }}</td>
+            <td>
+              <form method="post" action="/ui/admin/calendar/{{ event.id }}/delete">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit">Remove</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}
