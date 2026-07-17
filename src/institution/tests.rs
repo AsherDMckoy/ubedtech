@@ -318,6 +318,108 @@ async fn disabling_a_document_type_blocks_new_requests_fail_closed(pool: PgPool)
     assert_eq!(pending, 1);
 }
 
+/// The prompt's explicit requirement: administration routes must not bypass
+/// the domain rules of other features. The admin surfaces call the same
+/// services as everyone else, and — proven here, not assumed — the
+/// institution_admin role itself carries no power inside enrollment, grades,
+/// or documents. Each denial is the SERVICE refusing, so no HTTP route,
+/// present or future, can hand an admin a bypass.
+#[sqlx::test(migrations = "./migrations")]
+async fn institution_admin_does_not_bypass_domain_rules(pool: PgPool) {
+    use crate::enrollment::types::EnrollError;
+    use crate::records::grades::{CorrectGradeCommand, SaveGradeCommand};
+
+    let fx = seed_admin_fixture(&pool).await;
+    let admin = &fx.admin;
+    let audit = crate::audit::AuditWriter;
+
+    // Enrollment: an admin can neither register some student nor "self".
+    let enrollment = crate::enrollment::EnrollmentService::new(pool.clone(), audit.clone());
+    let register = crate::enrollment::RegisterCommand {
+        section_id: Uuid::new_v4(),
+        idempotency_key: Uuid::new_v4(),
+    };
+    let for_other = enrollment
+        .register_for(
+            admin,
+            Uuid::new_v4(),
+            crate::enrollment::RegisterCommand {
+                section_id: register.section_id,
+                idempotency_key: Uuid::new_v4(),
+            },
+        )
+        .await;
+    assert!(matches!(
+        for_other,
+        Err(EnrollError::App(AppError::Forbidden))
+    ));
+    let for_self = enrollment.register_self(admin, register).await;
+    assert!(matches!(
+        for_self,
+        Err(EnrollError::App(AppError::Forbidden))
+    ));
+
+    // Grades: draft entry, correction, and publication all refuse the admin.
+    let grades = crate::records::GradeService::new(pool.clone(), audit.clone());
+    let draft = grades
+        .save_draft(
+            admin,
+            SaveGradeCommand {
+                enrollment_id: Uuid::new_v4(),
+                grade_code: "A".into(),
+                grade_points: Some(4.0),
+                numeric_value: None,
+                expected_version: 0,
+            },
+        )
+        .await;
+    assert!(matches!(draft, Err(AppError::Forbidden)), "{draft:?}");
+    let correction = grades
+        .correct_grade(
+            admin,
+            CorrectGradeCommand {
+                enrollment_id: Uuid::new_v4(),
+                grade_code: "B".into(),
+                grade_points: Some(3.0),
+                numeric_value: None,
+                reason: "admin says so".into(),
+                expected_version: 1,
+            },
+        )
+        .await;
+    assert!(matches!(correction, Err(AppError::Forbidden)));
+    let publish = grades.publish_section(admin, Uuid::new_v4()).await;
+    assert!(matches!(publish, Err(AppError::Forbidden)));
+
+    // Documents: deciding requests and downloading artifacts both refuse.
+    let documents = crate::documents::DocumentService::new(
+        pool.clone(),
+        audit.clone(),
+        crate::records::TranscriptSnapshotService,
+    );
+    let approve = documents
+        .approve(admin, Uuid::new_v4(), "admin approval")
+        .await;
+    assert!(matches!(approve, Err(AppError::Forbidden)));
+    let reject = documents
+        .reject(admin, Uuid::new_v4(), "admin rejection")
+        .await;
+    assert!(matches!(reject, Err(AppError::Forbidden)));
+    let download = documents.downloadable(admin, Uuid::new_v4()).await;
+    assert!(matches!(download, Err(AppError::Forbidden)));
+
+    // And nothing above left a trace.
+    let enrollments: i64 = sqlx::query_scalar("SELECT count(*) FROM enrollment")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let decisions: i64 = sqlx::query_scalar("SELECT count(*) FROM document_approval")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!((enrollments, decisions), (0, 0));
+}
+
 mod ui {
     use super::{AdminFixture, seed_admin_fixture};
     use actix_web::http::StatusCode;
