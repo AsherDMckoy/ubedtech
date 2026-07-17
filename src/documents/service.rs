@@ -53,6 +53,24 @@ impl DocumentService {
         let request_id = Uuid::new_v4();
         let mut tx = self.pool.begin().await?;
 
+        // Institution-configurable availability (migration 0015). Fail
+        // closed: no row and a disabled row both refuse the request.
+        let enabled: Option<bool> = sqlx::query_scalar(
+            r#"
+            SELECT enabled FROM institution_document_type
+            WHERE institution_id = $1 AND document_type = $2
+            "#,
+        )
+        .bind(actor.institution_id)
+        .bind(&command.document_type)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if !enabled.unwrap_or(false) {
+            return Err(AppError::Validation(
+                "this document type is not available at your institution".into(),
+            ));
+        }
+
         sqlx::query(
             r#"
             INSERT INTO document_request (

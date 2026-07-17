@@ -158,6 +158,60 @@ async fn render_calendar(
     .render()?)
 }
 
+// ---------------------------------------------------------------------------
+// Settings + document-type configuration (JSON, institution admin only).
+// ---------------------------------------------------------------------------
+
+#[actix_web::get("/api/v1/institution/settings")]
+pub async fn get_settings(
+    actor: Actor,
+    service: web::Data<InstitutionService>,
+) -> Result<HttpResponse, AppError> {
+    let settings = service.settings(&actor).await?;
+    let document_types = service.document_type_settings(&actor).await?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "name": settings.name,
+        "timezone": settings.timezone,
+        "document_types": document_types,
+    })))
+}
+
+#[derive(Deserialize)]
+pub struct UpdateSettingsBody {
+    name: String,
+    timezone: String,
+}
+
+#[actix_web::put("/api/v1/institution/settings")]
+pub async fn put_settings(
+    actor: Actor,
+    service: web::Data<InstitutionService>,
+    body: web::Json<UpdateSettingsBody>,
+) -> Result<HttpResponse, AppError> {
+    service
+        .update_settings(&actor, &body.name, &body.timezone)
+        .await?;
+    Ok(HttpResponse::NoContent().finish())
+}
+
+#[derive(Deserialize)]
+pub struct DocumentTypeBody {
+    enabled: bool,
+}
+
+#[actix_web::put("/api/v1/institution/document-types/{document_type}")]
+pub async fn put_document_type(
+    actor: Actor,
+    service: web::Data<InstitutionService>,
+    document_type: web::Path<String>,
+    body: web::Json<DocumentTypeBody>,
+) -> Result<HttpResponse, AppError> {
+    service
+        .set_document_type_enabled(&actor, &document_type, body.enabled)
+        .await?;
+    Ok(HttpResponse::NoContent().finish())
+}
+
 fn html(status: StatusCode, body: String) -> HttpResponse {
     HttpResponse::build(status)
         .content_type("text/html; charset=utf-8")
@@ -173,5 +227,8 @@ fn see_other(location: &str) -> HttpResponse {
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(calendar_page)
         .service(create_event_form)
-        .service(delete_event_form);
+        .service(delete_event_form)
+        .service(get_settings)
+        .service(put_settings)
+        .service(put_document_type);
 }

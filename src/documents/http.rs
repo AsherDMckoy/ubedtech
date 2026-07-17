@@ -70,10 +70,16 @@ struct StudentRequestView {
     requested_at: String,
 }
 
+struct AvailableType {
+    value: String,
+    label: &'static str,
+}
+
 #[derive(Template)]
 #[template(path = "pages/documents.html")]
 struct DocumentsPage<'a> {
     csrf_token: &'a str,
+    available_types: Vec<AvailableType>,
     requests: Vec<StudentRequestView>,
     notice: Option<&'a str>,
     error: Option<&'a str>,
@@ -173,8 +179,28 @@ async fn render_documents(
         })
         .collect();
 
+    // The form offers only what the institution has enabled; the service
+    // re-checks on submit, so this is presentation, not the gate.
+    let available_types = sqlx::query_scalar::<_, String>(
+        r#"
+        SELECT document_type FROM institution_document_type
+        WHERE institution_id = $1 AND enabled
+        ORDER BY document_type
+        "#,
+    )
+    .bind(actor.institution_id)
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|value| AvailableType {
+        label: document_type_label(&value),
+        value,
+    })
+    .collect();
+
     Ok(DocumentsPage {
         csrf_token: &current.csrf_token,
+        available_types,
         requests,
         notice,
         error,

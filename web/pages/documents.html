@@ -10,13 +10,17 @@
   {% endif %}
 
   <h2>Request a document</h2>
+  {% if available_types.is_empty() %}
+    <p>Document requests are not available at your institution right now.</p>
+  {% else %}
   <form method="post" action="/ui/documents">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <p>
       <label for="document_type">Document</label>
       <select id="document_type" name="document_type">
-        <option value="official_transcript">Official transcript</option>
-        <option value="enrollment_letter">Proof of enrollment</option>
+        {% for kind in available_types %}
+          <option value="{{ kind.value }}">{{ kind.label }}</option>
+        {% endfor %}
       </select>
     </p>
     <p>
@@ -33,6 +37,7 @@
     </p>
     <button type="submit">Submit request</button>
   </form>
+  {% endif %}
 
   <h2>Your requests</h2>
   {% if requests.is_empty() %}

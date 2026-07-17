@@ -156,6 +156,168 @@ async fn events_are_admin_only_validated_scoped_and_audited(pool: PgPool) {
     );
 }
 
+#[sqlx::test(migrations = "./migrations")]
+async fn settings_and_document_types_are_admin_only_validated_and_audited(pool: PgPool) {
+    let fx = seed_admin_fixture(&pool).await;
+    let service = service(&pool);
+
+    // Reads and writes are all institution-admin only.
+    assert!(matches!(
+        service.settings(&fx.student).await,
+        Err(AppError::Forbidden)
+    ));
+    assert!(matches!(
+        service.update_settings(&fx.student, "X", "UTC").await,
+        Err(AppError::Forbidden)
+    ));
+    assert!(matches!(
+        service
+            .set_document_type_enabled(&fx.student, "signed_document", false)
+            .await,
+        Err(AppError::Forbidden)
+    ));
+
+    // Validation: blank name, timezone PostgreSQL does not know.
+    assert!(matches!(
+        service.update_settings(&fx.admin, "  ", "UTC").await,
+        Err(AppError::Validation(_))
+    ));
+    assert!(matches!(
+        service
+            .update_settings(&fx.admin, "Admin U", "Mars/Olympus_Mons")
+            .await,
+        Err(AppError::Validation(_))
+    ));
+
+    // A real update lands, is visible, and is audited.
+    service
+        .update_settings(&fx.admin, "University of Belize", "America/Belize")
+        .await
+        .unwrap();
+    let settings = service.settings(&fx.admin).await.unwrap();
+    assert_eq!(settings.name, "University of Belize");
+    assert_eq!(settings.timezone, "America/Belize");
+
+    // The 0015 trigger seeded every institution with all types enabled.
+    let types = service.document_type_settings(&fx.admin).await.unwrap();
+    assert_eq!(types.len(), 3);
+    assert!(types.iter().all(|t| t.enabled));
+
+    // Unknown type is rejected; a real toggle lands and is audited.
+    assert!(matches!(
+        service
+            .set_document_type_enabled(&fx.admin, "diploma", false)
+            .await,
+        Err(AppError::Validation(_))
+    ));
+    service
+        .set_document_type_enabled(&fx.admin, "signed_document", false)
+        .await
+        .unwrap();
+    let types = service.document_type_settings(&fx.admin).await.unwrap();
+    assert!(
+        types
+            .iter()
+            .any(|t| t.document_type == "signed_document" && !t.enabled)
+    );
+
+    let audits: Vec<String> = sqlx::query_scalar(
+        "SELECT action FROM audit_event WHERE institution_id = $1 \
+         AND resource_type = 'institution' ORDER BY occurred_at",
+    )
+    .bind(fx.admin.institution_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        audits,
+        vec![
+            "institution.settings_updated",
+            "institution.document_type_configured"
+        ]
+    );
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn disabling_a_document_type_blocks_new_requests_fail_closed(pool: PgPool) {
+    let fx = seed_admin_fixture(&pool).await;
+    let service = service(&pool);
+
+    // Give the student a profile so document requests are possible at all.
+    let student_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO student_profile (id, institution_id, user_id, student_number, program_code) \
+         VALUES ($1, $2, $3, $4, 'CS')",
+    )
+    .bind(student_id)
+    .bind(fx.student.institution_id)
+    .bind(fx.student.user_id)
+    .bind(format!("N-{}", &student_id.to_string()[..8]))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let student = Actor {
+        student_id: Some(student_id),
+        ..fx.student.clone()
+    };
+    let documents = crate::documents::DocumentService::new(
+        pool.clone(),
+        crate::audit::AuditWriter,
+        crate::records::TranscriptSnapshotService,
+    );
+    let request = |document_type: &str| crate::documents::RequestDocumentCommand {
+        document_type: document_type.into(),
+        purpose: None,
+        delivery_method: "download".into(),
+    };
+
+    // Enabled (the default): the request goes through.
+    documents
+        .request_for_self(&student, request("enrollment_letter"))
+        .await
+        .unwrap();
+
+    // Disabled by the admin: the same request is refused...
+    service
+        .set_document_type_enabled(&fx.admin, "enrollment_letter", false)
+        .await
+        .unwrap();
+    let refused = documents
+        .request_for_self(&student, request("enrollment_letter"))
+        .await;
+    assert!(
+        matches!(refused, Err(AppError::Validation(_))),
+        "{refused:?}"
+    );
+
+    // ...and a missing configuration row fails closed the same way.
+    sqlx::query(
+        "DELETE FROM institution_document_type \
+         WHERE institution_id = $1 AND document_type = 'official_transcript'",
+    )
+    .bind(fx.admin.institution_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let refused = documents
+        .request_for_self(&student, request("official_transcript"))
+        .await;
+    assert!(
+        matches!(refused, Err(AppError::Validation(_))),
+        "{refused:?}"
+    );
+
+    // The existing request is untouched by the configuration change.
+    let pending: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM document_request WHERE institution_id = $1 AND status = 'pending'",
+    )
+    .bind(fx.admin.institution_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(pending, 1);
+}
+
 mod ui {
     use super::{AdminFixture, seed_admin_fixture};
     use actix_web::http::StatusCode;

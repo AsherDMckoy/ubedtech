@@ -164,6 +164,154 @@ impl InstitutionService {
     }
 }
 
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct InstitutionSettings {
+    pub name: String,
+    pub timezone: String,
+}
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct DocumentTypeSetting {
+    pub document_type: String,
+    pub enabled: bool,
+}
+
+impl InstitutionService {
+    pub async fn settings(&self, actor: &Actor) -> Result<InstitutionSettings, AppError> {
+        require_institution_admin(actor)?;
+
+        Ok(sqlx::query_as::<_, InstitutionSettings>(
+            "SELECT name, timezone FROM institution WHERE id = $1",
+        )
+        .bind(actor.institution_id)
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
+    pub async fn document_type_settings(
+        &self,
+        actor: &Actor,
+    ) -> Result<Vec<DocumentTypeSetting>, AppError> {
+        require_institution_admin(actor)?;
+
+        Ok(sqlx::query_as::<_, DocumentTypeSetting>(
+            r#"
+            SELECT document_type, enabled
+            FROM institution_document_type
+            WHERE institution_id = $1
+            ORDER BY document_type
+            "#,
+        )
+        .bind(actor.institution_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    pub async fn update_settings(
+        &self,
+        actor: &Actor,
+        name: &str,
+        timezone: &str,
+    ) -> Result<(), AppError> {
+        require_institution_admin(actor)?;
+
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::Validation("a name is required".into()));
+        }
+        if name.len() > 200 {
+            return Err(AppError::Validation("name is too long".into()));
+        }
+
+        let mut tx = self.pool.begin().await?;
+
+        // The institution timezone governs deadline display and policy
+        // interpretation, so it must be a zone PostgreSQL itself accepts —
+        // the database is the authority that will render it.
+        let timezone = timezone.trim();
+        let known: bool =
+            sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM pg_timezone_names WHERE name = $1)")
+                .bind(timezone)
+                .fetch_one(&mut *tx)
+                .await?;
+        if !known {
+            return Err(AppError::Validation("unknown timezone".into()));
+        }
+
+        sqlx::query("UPDATE institution SET name = $2, timezone = $3 WHERE id = $1")
+            .bind(actor.institution_id)
+            .bind(name)
+            .bind(timezone)
+            .execute(&mut *tx)
+            .await?;
+
+        self.audit
+            .write(
+                &mut tx,
+                actor.institution_id,
+                actor.user_id,
+                "institution.settings_updated",
+                "institution",
+                actor.institution_id,
+                &serde_json::json!({ "name": name, "timezone": timezone }),
+            )
+            .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub async fn set_document_type_enabled(
+        &self,
+        actor: &Actor,
+        document_type: &str,
+        enabled: bool,
+    ) -> Result<(), AppError> {
+        require_institution_admin(actor)?;
+
+        match document_type {
+            "official_transcript" | "enrollment_letter" | "signed_document" => {}
+            _ => return Err(AppError::Validation("unknown document type".into())),
+        }
+
+        let mut tx = self.pool.begin().await?;
+
+        let changed = sqlx::query(
+            r#"
+            UPDATE institution_document_type
+               SET enabled = $3, updated_at = now()
+             WHERE institution_id = $1 AND document_type = $2
+            "#,
+        )
+        .bind(actor.institution_id)
+        .bind(document_type)
+        .bind(enabled)
+        .execute(&mut *tx)
+        .await?;
+        if changed.rows_affected() != 1 {
+            // Migration 0015's trigger guarantees one row per known type.
+            return Err(AppError::Integrity(
+                "institution is missing its document-type configuration row",
+            ));
+        }
+
+        self.audit
+            .write(
+                &mut tx,
+                actor.institution_id,
+                actor.user_id,
+                "institution.document_type_configured",
+                "institution",
+                actor.institution_id,
+                &serde_json::json!({ "document_type": document_type, "enabled": enabled }),
+            )
+            .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+}
+
 fn require_institution_admin(actor: &Actor) -> Result<(), AppError> {
     if actor.has_role(Role::InstitutionAdmin) {
         Ok(())
