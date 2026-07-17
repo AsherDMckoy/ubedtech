@@ -136,6 +136,11 @@ pub fn spawn_readiness_prober(
 /// only in production because development runs plain HTTP.
 pub fn security_headers(environment: Environment) -> DefaultHeaders {
     let headers = DefaultHeaders::new()
+        // Default for every dynamic response: authenticated pages carry
+        // grades and documents, and no shared cache may keep them.
+        // DefaultHeaders does not overwrite, so the fingerprinted assets
+        // keep their public/immutable lifetime (Phase 5 debt item 5.2).
+        .add(("Cache-Control", "private, no-store"))
         .add(("X-Content-Type-Options", "nosniff"))
         .add(("X-Frame-Options", "DENY"))
         .add(("Referrer-Policy", "strict-origin-when-cross-origin"))
@@ -234,6 +239,11 @@ mod tests {
 
         assert_eq!(headers.get("X-Content-Type-Options").unwrap(), "nosniff");
         assert_eq!(headers.get("X-Frame-Options").unwrap(), "DENY");
+        assert_eq!(
+            headers.get("Cache-Control").unwrap(),
+            "private, no-store",
+            "dynamic responses must not be cacheable by shared caches"
+        );
         assert_eq!(
             headers.get("Referrer-Policy").unwrap(),
             "strict-origin-when-cross-origin"

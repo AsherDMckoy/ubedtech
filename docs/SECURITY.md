@@ -1,9 +1,56 @@
 # Security
 
-Status: through Phase 6 (admin & licensing). Authentication, sessions,
-CSRF, license enforcement (hosted + self-hosted signed import), and
-institution administration are live and test-backed. This file records
-what is enforced, how, and what is deliberately deferred.
+Status: through Phase 8 (final hardening). Authentication, sessions, CSRF,
+license enforcement (hosted + self-hosted signed import), and institution
+administration are live and test-backed. This file records what is
+enforced, how, and what is deliberately deferred.
+
+## Phase 8 threat review (2026-07-17) — CLAUDE.md §2, item by item
+
+Reviewed by inspection + grep sweep against the baseline; every claim
+below is either test-backed (named test) or grep-verified this session.
+
+| Baseline item | Status |
+|---|---|
+| No JWTs; opaque server-side tokens, hash-only at rest | ✓ (`raw_token_is_never_stored`) |
+| HttpOnly / Secure-in-prod / explicit SameSite | ✓ (cookie tests) |
+| Rotation on auth + privilege change; idle/absolute expiry; revocation | ✓ (session lifecycle tests) |
+| Argon2id, configurable; throttling not a lockout DoS | ✓ (fixed per-IP window, self-expiring) |
+| CSRF middleware on every browser mutation | ✓ (`csrf_*` tests; login sole exemption) |
+| Authorization in services, not templates | ✓ (PERMISSIONS.md, every row test-backed; `institution_admin_does_not_bypass_domain_rules`) |
+| institution_id in queries AND unique constraints | ✓ (grep of migrations: the only non-scoped uniques are genuinely global — `institution.code`, `role.code`, contract ref, token hash — or keyed by an already-scoped FK) |
+| Parameterized SQL only | ✓ (grep: zero dynamic SQL outside test fixtures) |
+| No raw errors/secrets in responses or logs; PII redaction | ✓ (`database_errors_never_reach_the_client`, observability tests) |
+| No dev bypass in release | ✓ (grep: only the session middleware populates `Actor`) |
+| Audit in the same transaction | ✓ (asserted across enrollment/grades/documents/institution/licensing tests) |
+
+**Findings fixed this session (were gaps, now closed):**
+
+1. **Artifact reads confined to the storage root.** `FilesystemDocumentStore::read`
+   trusted `storage_path` from the database verbatim; a tampered row (or a
+   future migration bug) could have pointed it at any file on disk — the
+   checksum re-verification would not help against an attacker who can
+   write both columns. Reads now canonicalize and refuse any path outside
+   the store's root. Proof: `storage::tests::reads_are_confined_to_the_
+   storage_root` (absolute and `../` traversal both refused).
+2. **`Cache-Control: private, no-store` on every dynamic response**
+   (closes the Phase 5 debt item 5.2). Set as a default header, so
+   authenticated pages carrying grades/documents can never be stored by a
+   shared cache; the fingerprinted assets keep their `public, immutable`
+   lifetime because defaults never overwrite. Proofs: header test +
+   `assets_serve_fingerprinted_with_an_immutable_cache_lifetime` (now runs
+   under the same middleware).
+3. **Body-size limits are now test-backed**, not just configured:
+   a 128 KiB login body answers 413 before any handler logic
+   (`oversized_request_bodies_are_refused`).
+
+**Reviewed and accepted (no change):** single-tenant license gate reads a
+lock-free snapshot (no DB on the 402 path); `SameSite=Lax` + CSRF token
+covers cross-site POSTs; login throttle keyed on socket peer address (see
+the reverse-proxy note below); signed-license verification parses only
+signature-verified bytes; document download names a fixed filename and
+never echoes storage paths. Dependency policy is enforced in CI from this
+phase (`deny.toml`: advisories, yanked crates, license allowlist).
 
 ## Sessions
 

@@ -71,6 +71,10 @@ macro_rules! test_app {
                     max_age_secs: 43200,
                 }))
                 .app_data(web::Data::new(crate::app::Readiness::new(true)))
+                // Same body bounds as main.rs, so limits are testable here.
+                .app_data(web::JsonConfig::default().limit(64 * 1024))
+                .app_data(web::FormConfig::default().limit(64 * 1024))
+                .app_data(web::PayloadConfig::new(256 * 1024))
                 // Same order as main.rs.
                 .wrap(actix_web::middleware::from_fn(
                     crate::identity_access::csrf::csrf_middleware,
@@ -778,4 +782,29 @@ mod import {
             actix_test::call_service(&keyless, import_request!(cookie, csrf, &good_file)).await;
         assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
+}
+
+/// Abuse guard: request bodies are bounded (main.rs sets 64 KiB JSON/form),
+/// and an oversized body is refused before any handler logic runs.
+#[sqlx::test(migrations = "./migrations")]
+async fn oversized_request_bodies_are_refused(pool: PgPool) {
+    let fixture = seed(&pool, "active").await;
+    let gate = LicenseGate::new(snapshot(fixture.institution_id, LicenseStatus::Active));
+    let app = test_app!(&pool, gate);
+
+    let huge = format!(
+        r#"{{"username":"u","password":"{}"}}"#,
+        "x".repeat(128 * 1024)
+    );
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri("/api/v1/session/login")
+            .peer_addr("127.0.0.1:9999".parse().unwrap())
+            .insert_header((actix_web::http::header::CONTENT_TYPE, "application/json"))
+            .set_payload(huge)
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
 }

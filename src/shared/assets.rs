@@ -130,7 +130,17 @@ mod tests {
 
     #[actix_web::test]
     async fn assets_serve_fingerprinted_with_an_immutable_cache_lifetime() {
-        let app = actix_test::init_service(App::new().configure(routes)).await;
+        // Wrapped in the security headers like main.rs: the default
+        // `Cache-Control: private, no-store` must NOT displace the
+        // immutable lifetime the asset handlers set themselves.
+        let app = actix_test::init_service(
+            App::new()
+                .wrap(crate::app::security_headers(
+                    crate::config::Environment::Development,
+                ))
+                .configure(routes),
+        )
+        .await;
 
         for (href, content_type, body) in [
             (css_href(), "text/css; charset=utf-8", CSS),
