@@ -250,6 +250,19 @@ holidays + admin calendar page), and the explicit admin-no-bypass proof.
 
 ---
 
+## Phase 7.5 — Frontend hardening (the session prompt's "Phase 7")
+
+**STATUS: COMPLETE (2026-07-16).** The design system now actually exists:
+`base.html` had linked assets that were never created. Delivered: design
+system stylesheet + fingerprinted/immutable/gzipped asset serving +
+30-line submit-once script (ADR-11: no framework, PRG stays), nav fixed,
+dead templates deleted, document-request idempotency keys (migration
+0016 — the last unguarded form), structural a11y audit on all eleven
+critical pages inside the UI flow tests, WCAG contrast + size-budget +
+no-image/no-external-URL tests, `docs/FRONTEND_DESIGN_SYSTEM.md` with the
+manual accessibility checklist, `docs/PERFORMANCE.md` frontend budgets.
+This supersedes 8.3 below (done without Alpine, per ADR-11).
+
 ## Phase 8 — Hardening, permissions matrix, performance
 
 Depends on: everything prior.
@@ -258,14 +271,15 @@ Depends on: everything prior.
     cell (deny-by-default asserted for every role that should not pass).
 8.2 `[ ]` **Abuse/input-limit tests**: body-size limits, content-type
     validation, oversized purpose/note fields, malformed UUIDs.
-8.3 `[ ]` **Static asset pipeline**: pinned local Alpine CSP build +
-    Alpine AJAX in `web/assets/`, hashed filenames, immutable cache
-    headers; CSP verified against the real pages.
+8.3 `[x]` **Static asset pipeline** — delivered in Phase 7.5, without
+    Alpine (ADR-11): hashed filenames, immutable cache headers, budgets
+    and CSP compliance verified against the real pages by tests.
 8.4 `[ ]` **Benchmark suites A/B/C** in `load/` per the design doc's
     benchmark contract, with the required metadata reported; separate
     local-gate, read-path, and transactional numbers.
 8.5 `[ ]` **Ops docs**: `OPERATIONS.md`, `BACKUP_AND_RESTORE.md` (incl. a
-    tested restore), `PERFORMANCE.md`, `SECURITY.md` finalization.
+    tested restore), `PERFORMANCE.md` (benchmark results — frontend
+    budgets already recorded), `SECURITY.md` finalization.
 
 ---
 

@@ -25,7 +25,21 @@ harness — an infrastructure flake, not a code failure). Run
 `cargo test --all-targets --all-features -- --test-threads=4` locally;
 CI's service container copes with the default.
 
-## Current suite (119 tests as of Phase 6)
+## Current suite (126 tests as of Phase 7)
+
+Phase 7 (frontend hardening) added 7 and strengthened the existing UI flow
+tests: every critical page they fetch now passes the structural
+accessibility audit (`shared::assets::assert_page_a11y` — landmarks, one
+h1, labels, table captions/scopes, no inline style/handlers). New tests:
+asset serving (fingerprint + immutable cache), gzip compression, badge
+color stability, CSS/JS size budgets, template scan (no images, no
+external URLs, every page extends base), WCAG contrast of the design
+tokens, and document-request idempotency (concurrent + sequential same-key
+submissions return the original; the UI test double-submits the rendered
+form). The manual accessibility checklist automation can't replace is in
+`docs/FRONTEND_DESIGN_SYSTEM.md`.
+
+## Phase 6 (119 tests)
 
 Phase 6 added 10: `institution` (events/holidays admin-only + scoped +
 audited, settings + document-type config validation and auditing, the

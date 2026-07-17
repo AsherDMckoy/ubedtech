@@ -409,3 +409,25 @@ deferred 3.4):
 - Test count: 109 → 119.
 
 Phase 7 (frontend/UX hardening) not started, per session scope.
+
+## Phase 7 outcome — frontend hardening (2026-07-16)
+
+- **The chrome now actually exists.** base.html had linked /assets/app.css
+  and two Alpine scripts that were never created — every page rendered
+  unstyled. Now: one design-system stylesheet (~5.5 KiB) and one 30-line
+  submit-once script, embedded, fingerprinted, immutable-cached, gzipped,
+  license-exempt (ADR-11: no framework, PRG stays the interaction model).
+  Nav links now point at routes that exist; dead templates deleted
+  (fragments/, unreachable transcript print view that violated our CSP).
+- **Duplicate submission closed everywhere:** document requests were the
+  last unguarded state-changing form — migration 0016 gives them
+  enrollment-style server-minted idempotency keys, raced and proven.
+- **Accessibility, automated where honest:** structural audit
+  (assert_page_a11y) on all eleven critical pages inside the UI flow
+  tests; WCAG contrast computed from the real tokens; budgets (CSS/JS
+  size, no images, no external URLs, no inline style/handlers) as tests.
+  The audit caught two real defects on first run (caption-less tables).
+  What automation can't catch is a documented manual checklist in
+  docs/FRONTEND_DESIGN_SYSTEM.md.
+- Test count: 119 → 126. Phase 8 (hardening/permissions/performance
+  benchmarks) not started, per session scope.

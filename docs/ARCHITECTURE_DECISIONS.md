@@ -172,3 +172,28 @@ repository, and CLAUDE.md §6 requires docs to be committed with code.
   locked_deployment` and `…::bad_or_misdirected_license_files_are_rejected`
   (tampered bytes, foreign key, wrong deployment, expired window, wrong
   institution, unknown format — all rejected with nothing written).
+
+## ADR-11: no frontend framework — PRG pages, one stylesheet, 30 lines of JS
+
+- **Original:** the design docs planned vendored Alpine.js (CSP build) +
+  Alpine AJAX for fragment swaps; `base.html` shipped `<script>` tags for
+  files that never existed, so every page actually ran unstyled plain HTML
+  with console errors.
+- **Replacement:** server-rendered pages with POST-redirect-GET as the
+  interaction model; one design-system stylesheet and one 30-line
+  first-party script (submit-once + `aria-busy`), both embedded in the
+  binary and served fingerprinted/immutable. No third-party code at all.
+- **Why:** every journey already works and is tested with JavaScript off;
+  pages are a few KiB against an immutably-cached stylesheet, so fragment
+  swaps have nothing measurable to save; and a vendored framework is a
+  standing supply-chain, CSP, and upgrade liability that two `x-target`
+  attributes do not repay. The CSP stays at `script-src 'self'` with no
+  inline anything.
+- **Consequences:** interactions repaint the page (imperceptible at these
+  sizes); any future need for in-page updates (live seat counts, a
+  dashboard) reopens this ADR with a profile in hand. The `#notifications`
+  x-sync region was removed with the dead script tags.
+- **Proof:** the UI flow tests exercise every journey without executing a
+  script; `templates_carry_no_images_or_csp_violations` pins the
+  no-external-code rule; `assets_*` tests pin fingerprinting, caching, and
+  compression.

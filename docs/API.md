@@ -100,7 +100,7 @@ Pages (plain forms): `GET /ui/instructor`, `GET /ui/instructor/sections/{id}`
 | Method & path | Who | Behavior |
 |---|---|---|
 | `GET /ui/documents` | student | request form + own requests with statuses (pending/approved/generating/ready/rejected/failed) and download links when ready |
-| `POST /ui/documents` | student | form `{document_type, purpose?, delivery_method}` → PRG; validation inline (422) |
+| `POST /ui/documents` | student | form `{document_type, purpose?, delivery_method, idempotency_key}` (key server-minted into the form) → PRG; resubmitting the same key returns the original request; validation inline (422) |
 | `GET /ui/documents/{id}/download` | owning student; document_officer (own institution) | ready + current artifact only, else 404; sha256 re-verified against the recorded checksum; `Content-Disposition: attachment; filename="document.pdf"`; `Cache-Control: private, no-store` |
 | `GET /ui/admin/documents` | document_officer | pending queue |
 | `POST /ui/admin/documents/{id}/approve` | document_officer | reason REQUIRED; commits approval + immutable snapshot + generation job in one transaction → PRG; blank reason / already-decided render inline (422/404) |
