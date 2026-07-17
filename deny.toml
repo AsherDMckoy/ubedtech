@@ -1,0 +1,40 @@
+# cargo-deny configuration: dependency advisories and license policy.
+# Run in CI (dependency-review job); locally: `cargo deny check`.
+# The allowlist was built from the actual tree (`cargo metadata`, Phase 8):
+# everything is permissive except the two called out below.
+
+[graph]
+all-features = true
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+confidence-threshold = 0.8
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "Unlicense",
+    "Unicode-3.0",
+    # Weak file-level copyleft; used unmodified (azul-* under printpdf).
+    # Modifying a vendored MPL file would trigger its source obligations.
+    "MPL-2.0",
+    # webpki-roots certificate data.
+    "CDLA-Permissive-2.0",
+]
+
+[bans]
+# Duplicate versions are a size/hygiene concern, not a correctness one.
+multiple-versions = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

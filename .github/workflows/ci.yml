@@ -12,6 +12,17 @@ env:
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ubedtech_test
 
 jobs:
+  # Dependency advisories + license policy (deny.toml). Fails the build on
+  # a known vulnerability, a yanked crate, or a license outside the
+  # allowlist.
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories licenses sources
+
   quality-gates:
     runs-on: ubuntu-latest
 
