@@ -39,6 +39,7 @@ macro_rules! test_app {
     ($pool:expr, $gate:expr) => {
         actix_test::init_service(
             actix_web::App::new()
+                .app_data(web::Data::new($pool.clone()))
                 .app_data(web::Data::new(SessionService::new(
                     $pool.clone(),
                     1800,
@@ -292,7 +293,7 @@ async fn platform_admin_flips_the_license_end_to_end(pool: PgPool) {
             .to_request(),
     )
     .await;
-    assert_eq!(suspend.status(), StatusCode::OK);
+    assert_eq!(suspend.status(), StatusCode::SEE_OTHER);
 
     // Locked: the same protected route now answers 402.
     let during = actix_test::call_service(
@@ -343,7 +344,7 @@ async fn platform_admin_flips_the_license_end_to_end(pool: PgPool) {
             .to_request(),
     )
     .await;
-    assert_eq!(reactivate.status(), StatusCode::OK);
+    assert_eq!(reactivate.status(), StatusCode::SEE_OTHER);
 
     let after = actix_test::call_service(
         &app,
@@ -354,6 +355,141 @@ async fn platform_admin_flips_the_license_end_to_end(pool: PgPool) {
     )
     .await;
     assert_eq!(after.status(), StatusCode::OK);
+}
+
+/// The Phase 6 acceptance test: disabling an institution's license denies
+/// ordinary access institution-wide, the health/recovery/license-management
+/// surface stays reachable, and no individual account is suspended or
+/// logged out as a side effect — the lock is the license, not the users.
+#[sqlx::test(migrations = "./migrations")]
+async fn a_disabled_license_locks_the_institution_but_suspends_nobody(pool: PgPool) {
+    let fixture = seed(&pool, "active").await;
+    seed_user_with_role(
+        &pool,
+        fixture.institution_id,
+        "plat.admin",
+        "pw-admin",
+        "platform_licensing_admin",
+    )
+    .await;
+    seed_user_with_role(
+        &pool,
+        fixture.institution_id,
+        "some.student",
+        "pw-student",
+        "student",
+    )
+    .await;
+    let gate = LicenseGate::new(snapshot(fixture.institution_id, LicenseStatus::Active));
+    let app = test_app!(&pool, gate);
+
+    let (admin_cookie, admin_csrf) = login_session!(&app, "plat.admin", "pw-admin");
+    let (student_cookie, _student_csrf) = login_session!(&app, "some.student", "pw-student");
+
+    // While active the student reaches protected routes, and the panel
+    // renders for the platform admin (and only for them).
+    let before = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/probe/protected")
+            .cookie(student_cookie.clone())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(before.status(), StatusCode::OK);
+    let panel_as_student = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/ui/platform/license")
+            .cookie(student_cookie.clone())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(panel_as_student.status(), StatusCode::FORBIDDEN);
+
+    // The platform admin disables the license through the panel form.
+    let suspend = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri(&format!(
+                "/ui/platform/institutions/{}/license",
+                fixture.institution_id
+            ))
+            .cookie(admin_cookie.clone())
+            .insert_header((
+                actix_web::http::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            ))
+            .set_payload(format!(
+                "status=suspended&reason=contract+lapsed&csrf_token={admin_csrf}"
+            ))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(suspend.status(), StatusCode::SEE_OTHER);
+
+    // Institution-wide denial: the student's still-valid session now gets
+    // 402 (not 401 — they are not logged out, the institution is locked).
+    let during = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/probe/protected")
+            .cookie(student_cookie.clone())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(during.status(), StatusCode::PAYMENT_REQUIRED);
+
+    // Health, recovery, and license management all stay reachable.
+    for path in ["/health/live", "/health/ready", "/institution-locked"] {
+        let response =
+            actix_test::call_service(&app, actix_test::TestRequest::get().uri(path).to_request())
+                .await;
+        assert_eq!(response.status(), StatusCode::OK, "{path} while locked");
+    }
+    let panel = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/ui/platform/license")
+            .cookie(admin_cookie.clone())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(panel.status(), StatusCode::OK);
+    let body = String::from_utf8(actix_test::read_body(panel).await.to_vec()).unwrap();
+    assert!(body.contains("suspended"));
+    assert!(body.contains("contract lapsed"));
+
+    // No account was suspended and no session revoked as a side effect.
+    let suspended_users: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM user_account WHERE status <> 'active'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(suspended_users, 0);
+    let revoked_sessions: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM user_session WHERE revoked_at IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(revoked_sessions, 0);
+}
+
+/// A license is inactive AT the exact `valid_until` instant (`now <
+/// valid_until`), and before `valid_from` — the boundary test from the plan.
+#[test]
+fn the_validity_window_is_half_open() {
+    let institution_id = Uuid::new_v4();
+    let mut snapshot = snapshot(institution_id, LicenseStatus::Active);
+
+    snapshot.valid_until = Utc::now();
+    let gate = LicenseGate::new(snapshot.clone());
+    assert!(gate.require_deployment_active().is_err());
+
+    snapshot.valid_until = Utc::now() + Duration::days(1);
+    snapshot.valid_from = Utc::now() + Duration::seconds(5);
+    let gate = LicenseGate::new(snapshot);
+    assert!(gate.require_deployment_active().is_err());
 }
 
 #[sqlx::test(migrations = "./migrations")]

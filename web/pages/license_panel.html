@@ -1,0 +1,57 @@
+{% extends "pages/base.html" %}
+{% block title %}License management{% endblock %}
+{% block content %}
+  <h1>License management</h1>
+  {% if let Some(notice) = notice %}
+    <p role="status">{{ notice }}</p>
+  {% endif %}
+  {% if let Some(error) = error %}
+    <p role="alert">{{ error }}</p>
+  {% endif %}
+
+  <section id="license-panel">
+    <h2>Current license</h2>
+    <dl>
+      <dt>Status</dt><dd>{{ status }}</dd>
+      <dt>Valid from</dt><dd>{{ valid_from }}</dd>
+      <dt>Valid until</dt><dd>{{ valid_until }}</dd>
+      <dt>Version</dt><dd>{{ version }}</dd>
+    </dl>
+
+    <form method="post" action="/ui/platform/institutions/{{ institution_id }}/license">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>New status
+        <select name="status">
+          <option value="active">Active</option>
+          <option value="suspended">Suspended</option>
+          <option value="expired">Expired</option>
+        </select>
+      </label>
+      <label>Reason
+        <input name="reason" required maxlength="500">
+      </label>
+      <button type="submit">Change license status</button>
+    </form>
+  </section>
+
+  <h2>Recent changes</h2>
+  {% if changes.is_empty() %}
+    <p>No license changes recorded.</p>
+  {% else %}
+    <table>
+      <thead>
+        <tr><th>When</th><th>Change</th><th>Reason</th><th>By</th></tr>
+      </thead>
+      <tbody>
+        {% for change in changes %}
+          <tr>
+            <td>{{ change.changed_at }}</td>
+            <td>{{ change.old_status }} → {{ change.new_status }}</td>
+            <td>{{ change.reason }}</td>
+            <td>{{ change.changed_by }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endblock %}
