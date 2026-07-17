@@ -119,8 +119,9 @@ and 6 are closed.
     a_full_section`, `every_section_gets_a_capacity_row_from_the_trigger`.
 3.4 `[x]` **Institution calendar/events** — delivered with Phase 7 (the
     "Phase 6" session prompt); see 3.4 under Phase 7 below.
-3.5 `[~]` **Meetings done** (day/time/room validation); instructor
-    assignment deferred with 3.4.
+3.5 `[x]` **Meetings done** (day/time/room validation); instructor
+    assignment delivered in the records phase
+    (`instructor_assignment_is_validated_scoped_and_idempotent`).
 4.1 `[x]` **Deadline policy resolved (item 5)** — the phase prompt resolved
     it differently from this plan's earlier sketch: ONE shared
     `add_drop_closes_at` column governs adds and drops (migration 0009
@@ -168,8 +169,8 @@ student pages.
     (`grade_entry_window_binds_instructors_not_the_officer`).
 5.2 `[~]` **Student read models** — published/amended-only proven at the
     query level and over HTTP pages; institution scoping in every query.
-    Remaining: `Cache-Control: private, no-store` headers on student views
-    (Phase 8 hardening).
+    The `Cache-Control: private, no-store` debt was closed in Phase 8
+    (default header on every dynamic response, test-backed).
 5.3 `[ ]` **Unofficial transcript print view** — deferred; `/ui/history` is
     the student academic-history view, the watermarked print view remains.
 5.4 `[~]` **Snapshot invariants** — immutability now database-enforced
@@ -267,19 +268,26 @@ This supersedes 8.3 below (done without Alpine, per ADR-11).
 
 Depends on: everything prior.
 
-8.1 `[ ]` **`docs/PERMISSIONS.md` role × operation matrix** with a test per
-    cell (deny-by-default asserted for every role that should not pass).
-8.2 `[ ]` **Abuse/input-limit tests**: body-size limits, content-type
-    validation, oversized purpose/note fields, malformed UUIDs.
+8.1 `[x]` **`docs/PERMISSIONS.md` role × operation matrix** — completed
+    across Phases 2–6; Phase 8 closed the debt section: every HTTP
+    operation has a matrix row with proving tests, none remain untested.
+8.2 `[~]` **Abuse/input-limit tests** — body-size limit now test-backed
+    (`oversized_request_bodies_are_refused`, 413); oversized text fields
+    covered by per-field validation tests since their phases; malformed
+    UUIDs answer 400 from the extractors (untested convention — remaining
+    debt, low risk).
 8.3 `[x]` **Static asset pipeline** — delivered in Phase 7.5, without
     Alpine (ADR-11): hashed filenames, immutable cache headers, budgets
     and CSP compliance verified against the real pages by tests.
-8.4 `[ ]` **Benchmark suites A/B/C** in `load/` per the design doc's
-    benchmark contract, with the required metadata reported; separate
-    local-gate, read-path, and transactional numbers.
-8.5 `[ ]` **Ops docs**: `OPERATIONS.md`, `BACKUP_AND_RESTORE.md` (incl. a
-    tested restore), `PERFORMANCE.md` (benchmark results — frontend
-    budgets already recorded), `SECURITY.md` finalization.
+8.4 `[x]` **Benchmark suites A/B/C** in `load/` — run 2026-07-17 with
+    full metadata in PERFORMANCE.md (in-process 636k req/s; read path
+    3.9k req/s; durable writes 106 req/s, fsync-bound by the workstation).
+    Query plans inspected; migration 0017 fixed the one real find
+    (unindexed section_meeting.section_id).
+8.5 `[x]` **Ops docs** — BACKUP_AND_RESTORE.md with a performed dump +
+    restore + boot rehearsal; PERFORMANCE.md benchmarks; SECURITY.md
+    threat review (two fixes landed); dependency/license policy in CI
+    (deny.toml).
 
 ---
 

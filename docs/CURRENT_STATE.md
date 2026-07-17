@@ -431,3 +431,25 @@ Phase 7 (frontend/UX hardening) not started, per session scope.
   docs/FRONTEND_DESIGN_SYSTEM.md.
 - Test count: 119 → 126. Phase 8 (hardening/permissions/performance
   benchmarks) not started, per session scope.
+
+## Phase 8 outcome — final hardening (2026-07-17)
+
+- **Threat review** (SECURITY.md): full §2 baseline table; two real fixes —
+  artifact reads confined to the storage root (tampered-row path traversal
+  closed) and `Cache-Control: private, no-store` on all dynamic responses
+  (Phase 5 debt 5.2 closed); body limits now test-backed (413).
+- **Dependency/license CI**: deny.toml + cargo-deny job (advisories,
+  yanked, license allowlist built from the actual tree).
+- **Benchmarks** (PERFORMANCE.md, load/): A 636k req/s p99 387µs;
+  B 3.9k req/s p99 35.6ms (single warm read ~3.3ms); C 106 req/s —
+  fsync-bound by the workstation (raw commit 68ms), app delta <5ms.
+  First class-C run accidentally proved idempotency under concurrent load.
+- **Query plans**: all hot enrollment/document queries on index scans;
+  migration 0017 adds the missing section_meeting(section_id) index found
+  by inspection.
+- **Backup/restore rehearsal** (BACKUP_AND_RESTORE.md): dump, restore,
+  boot, verify — all green, with a post-restore integrity check recorded.
+- **PERMISSIONS matrix debt: none** — every HTTP operation has a
+  test-backed row.
+- Test count: 126 → 128. All four critical journeys green end-to-end over
+  HTTP (enrollment ui, records ui, documents ui, licensing lock tests).

@@ -96,8 +96,10 @@ download — all denied, nothing written). Disabling a license suspends no
 account and revokes no session: `a_disabled_license_locks_the_institution_
 but_suspends_nobody`.
 
-## Implemented but not yet test-backed (must not be trusted; matrix debt)
+## Matrix debt
 
-These checks exist in code but have no per-role deny tests yet. They get
-rows when their phases add the tests (Phase 8):
+None. As of Phase 8 every operation exposed over HTTP appears in a matrix
+above with its proving tests; there are no authorization checks that exist
+in code but lack a deny test. New operations must land with their row and
+tests in the same commit (CLAUDE.md §5).
 

@@ -30,7 +30,16 @@ harness — an infrastructure flake, not a code failure). Run
 `cargo test --all-targets --all-features -- --test-threads=4` locally;
 CI's service container copes with the default.
 
-## Current suite (126 tests as of Phase 7)
+## Current suite (128 tests as of Phase 8)
+
+Phase 8 added: `storage::tests::reads_are_confined_to_the_storage_root`
+(absolute + traversal paths refused) and
+`oversized_request_bodies_are_refused` (413 at the 64 KiB bound), plus the
+no-store default asserted in the header test and the immutable-asset test
+now running under the same middleware. Load benchmarks live in `load/`
+(not part of `cargo test`; see PERFORMANCE.md).
+
+## Phase 7 (126 tests)
 
 Phase 7 (frontend hardening) added 7 and strengthened the existing UI flow
 tests: every critical page they fetch now passes the structural
