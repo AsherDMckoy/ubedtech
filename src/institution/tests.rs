@@ -269,6 +269,7 @@ async fn disabling_a_document_type_blocks_new_requests_fail_closed(pool: PgPool)
         document_type: document_type.into(),
         purpose: None,
         delivery_method: "download".into(),
+        idempotency_key: Uuid::new_v4(),
     };
 
     // Enabled (the default): the request goes through.

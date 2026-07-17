@@ -20,12 +20,15 @@ pub struct RequestDocumentCommand {
     pub document_type: String,
     pub purpose: Option<String>,
     pub delivery_method: String,
+    /// Server-minted, carried by the form; resubmitting the same key
+    /// returns the original request instead of filing a second one.
+    pub idempotency_key: Uuid,
 }
 
 #[derive(Debug, Serialize)]
 pub struct DocumentRequestReceipt {
     pub request_id: Uuid,
-    pub status: &'static str,
+    pub status: String,
 }
 
 impl DocumentService {
@@ -50,6 +53,12 @@ impl DocumentService {
 
         validate_request(&command)?;
 
+        // Idempotent resubmission: the same key returns the original
+        // request, whatever state it has reached since.
+        if let Some(receipt) = self.existing_request(actor, student_id, &command).await? {
+            return Ok(receipt);
+        }
+
         let request_id = Uuid::new_v4();
         let mut tx = self.pool.begin().await?;
 
@@ -71,13 +80,13 @@ impl DocumentService {
             ));
         }
 
-        sqlx::query(
+        let inserted = sqlx::query(
             r#"
             INSERT INTO document_request (
                 id, institution_id, student_id, document_type,
-                status, purpose, delivery_method
+                status, purpose, delivery_method, idempotency_key
             )
-            VALUES ($1, $2, $3, $4, 'pending', $5, $6)
+            VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7)
             "#,
         )
         .bind(request_id)
@@ -86,8 +95,23 @@ impl DocumentService {
         .bind(&command.document_type)
         .bind(command.purpose.as_deref())
         .bind(&command.delivery_method)
+        .bind(command.idempotency_key)
         .execute(&mut *tx)
-        .await?;
+        .await;
+
+        if let Err(error) = inserted {
+            // A concurrent resubmission of the same key beat us to the
+            // insert: the unique constraint holds the invariant, we return
+            // the original request it protected.
+            if is_unique_violation(&error) {
+                drop(tx);
+                return self
+                    .existing_request(actor, student_id, &command)
+                    .await?
+                    .ok_or(AppError::Internal);
+            }
+            return Err(error.into());
+        }
 
         self.audit
             .write(
@@ -105,8 +129,29 @@ impl DocumentService {
 
         Ok(DocumentRequestReceipt {
             request_id,
-            status: "pending",
+            status: "pending".into(),
         })
+    }
+
+    async fn existing_request(
+        &self,
+        actor: &Actor,
+        student_id: Uuid,
+        command: &RequestDocumentCommand,
+    ) -> Result<Option<DocumentRequestReceipt>, AppError> {
+        let row: Option<(Uuid, String)> = sqlx::query_as(
+            r#"
+            SELECT id, status FROM document_request
+            WHERE institution_id = $1 AND student_id = $2 AND idempotency_key = $3
+            "#,
+        )
+        .bind(actor.institution_id)
+        .bind(student_id)
+        .bind(command.idempotency_key)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(|(request_id, status)| DocumentRequestReceipt { request_id, status }))
     }
 
     /// Approval requires a reason just like rejection: issuing an official
@@ -335,6 +380,13 @@ impl DocumentService {
 struct PendingRequest {
     student_id: Uuid,
     document_type: String,
+}
+
+fn is_unique_violation(error: &sqlx::Error) -> bool {
+    error
+        .as_database_error()
+        .and_then(|db| db.code())
+        .is_some_and(|code| code == "23505")
 }
 
 fn validate_request(command: &RequestDocumentCommand) -> Result<(), AppError> {

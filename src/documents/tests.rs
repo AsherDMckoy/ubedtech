@@ -91,6 +91,7 @@ pub(super) async fn approved_request(pool: &PgPool, fx: &DocFixture) -> (Uuid, U
                 document_type: "official_transcript".into(),
                 purpose: Some("scholarship".into()),
                 delivery_method: "download".into(),
+                idempotency_key: Uuid::new_v4(),
             },
         )
         .await
@@ -280,6 +281,7 @@ async fn failed_renders_retry_with_recorded_reasons_then_stop(pool: PgPool) {
                 document_type: "signed_document".into(),
                 purpose: None,
                 delivery_method: "pickup".into(),
+                idempotency_key: Uuid::new_v4(),
             },
         )
         .await
@@ -439,6 +441,7 @@ async fn approval_and_rejection_are_reasoned_scoped_and_atomic(pool: PgPool) {
                 document_type: "official_transcript".into(),
                 purpose: Some(purpose.into()),
                 delivery_method: "download".into(),
+                idempotency_key: Uuid::new_v4(),
             },
         )
     };
@@ -693,21 +696,36 @@ mod ui {
         let body = String::from_utf8(actix_test::read_body(page).await.to_vec()).unwrap();
         assert!(body.contains("No document requests yet."));
         let student_csrf = extract_input(&body, "csrf_token");
-        let response = actix_test::call_service(
-            &app,
+        // The rendered form carries a server-minted idempotency key.
+        let form_key = extract_input(&body, "idempotency_key");
+        let submit = || {
             actix_test::TestRequest::post()
                 .uri("/ui/documents")
                 .cookie(student_cookie.clone())
                 .set_form(serde_json::json!({
                     "csrf_token": student_csrf,
+                    "idempotency_key": form_key,
                     "document_type": "official_transcript",
                     "purpose": "visa application",
                     "delivery_method": "download",
                 }))
-                .to_request(),
-        )
-        .await;
+                .to_request()
+        };
+        let response = actix_test::call_service(&app, submit()).await;
         assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+        // Resubmitting the same rendered form (double click, retry) does
+        // not file a second request.
+        let response = actix_test::call_service(&app, submit()).await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM document_request")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "duplicate submission must not create a second request"
+        );
 
         // Students cannot open the officer queue.
         let response = actix_test::call_service(
@@ -827,4 +845,54 @@ async fn two_workers_cannot_claim_the_same_job(pool: PgPool) {
             .await
             .unwrap();
     assert_eq!(artifacts, 1);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn duplicate_document_requests_with_one_key_return_the_original(pool: PgPool) {
+    let fx = seed_doc_fixture(&pool).await;
+    let service = doc_service(&pool);
+    let key = Uuid::new_v4();
+    let command = || RequestDocumentCommand {
+        document_type: "official_transcript".into(),
+        purpose: None,
+        delivery_method: "download".into(),
+        idempotency_key: key,
+    };
+
+    // Two concurrent submissions of the same key: one row, one id.
+    let (first, second) = tokio::join!(
+        service.request_for_self(&fx.student, command()),
+        service.request_for_self(&fx.student, command()),
+    );
+    let first = first.unwrap();
+    let second = second.unwrap();
+    assert_eq!(first.request_id, second.request_id);
+
+    // A later resubmission still returns the original, with its current
+    // status rather than a fake fresh "pending".
+    let again = service
+        .request_for_self(&fx.student, command())
+        .await
+        .unwrap();
+    assert_eq!(again.request_id, first.request_id);
+    assert_eq!(again.status, "pending");
+
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM document_request")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1);
+
+    // A different key is a genuinely new request.
+    let other = service
+        .request_for_self(
+            &fx.student,
+            RequestDocumentCommand {
+                idempotency_key: Uuid::new_v4(),
+                ..command()
+            },
+        )
+        .await
+        .unwrap();
+    assert_ne!(other.request_id, first.request_id);
 }

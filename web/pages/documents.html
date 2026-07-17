@@ -15,6 +15,7 @@
   {% else %}
   <form method="post" action="/ui/documents">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
     <p>
       <label for="document_type">Document</label>
       <select id="document_type" name="document_type">

@@ -79,6 +79,9 @@ struct AvailableType {
 #[template(path = "pages/documents.html")]
 struct DocumentsPage<'a> {
     csrf_token: &'a str,
+    /// Minted per render; resubmitting the same rendered form (double
+    /// click, retry) returns the original request instead of a duplicate.
+    idempotency_key: Uuid,
     available_types: Vec<AvailableType>,
     requests: Vec<StudentRequestView>,
     notice: Option<&'a str>,
@@ -110,6 +113,7 @@ pub struct RequestDocumentForm {
     document_type: String,
     purpose: Option<String>,
     delivery_method: String,
+    idempotency_key: Uuid,
     csrf_token: String,
 }
 
@@ -133,6 +137,7 @@ pub async fn request_form(
                     .clone()
                     .filter(|value| !value.trim().is_empty()),
                 delivery_method: form.delivery_method.clone(),
+                idempotency_key: form.idempotency_key,
             },
         )
         .await;
@@ -200,6 +205,7 @@ async fn render_documents(
 
     Ok(DocumentsPage {
         csrf_token: &current.csrf_token,
+        idempotency_key: Uuid::new_v4(),
         available_types,
         requests,
         notice,
