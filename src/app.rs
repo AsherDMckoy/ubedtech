@@ -27,7 +27,7 @@ pub fn recovery_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/health/live", web::get().to(health_live));
     cfg.route("/health/ready", web::get().to(health_ready));
     cfg.route("/license/status", web::get().to(license_status));
-    cfg.route("/license/import", web::post().to(import_license));
+    // POST /license/import lives in licensing::http (self-hosted recovery).
     cfg.route("/institution-locked", web::get().to(locked_page));
     cfg.configure(crate::identity_access::http::routes);
     cfg.configure(crate::licensing::http::routes);
@@ -61,15 +61,6 @@ async fn license_status(gate: web::Data<crate::licensing::LicenseGate>) -> HttpR
         "valid_from": snapshot.valid_from,
         "valid_until": snapshot.valid_until,
         "version": snapshot.version,
-    }))
-}
-
-/// Signed-license import is the self-hosted recovery path, scheduled for
-/// Phase 7.1. Until then this answers an honest 501 — never a fake success.
-async fn import_license() -> HttpResponse {
-    HttpResponse::NotImplemented().json(serde_json::json!({
-        "code": "not_implemented",
-        "message": "signed license import is not available in this build",
     }))
 }
 

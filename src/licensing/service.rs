@@ -123,6 +123,120 @@ impl LicenseService {
     }
 }
 
+impl LicenseService {
+    /// Self-hosted recovery path: apply a platform-signed license file.
+    /// The signature is the platform's authority; the authenticated admin
+    /// (institution or platform) is who we attribute the import to. The
+    /// license row update, the change record, and the audit event commit in
+    /// one transaction; the gate snapshot swaps only after commit.
+    pub async fn import_signed(
+        &self,
+        actor: &Actor,
+        key: Option<&ed25519_dalek::VerifyingKey>,
+        file: &crate::licensing::signed_license::SignedLicenseFile,
+    ) -> Result<LicenseSnapshot, AppError> {
+        if !actor.has_role(Role::InstitutionAdmin) && !actor.has_role(Role::PlatformLicensingAdmin)
+        {
+            return Err(AppError::Forbidden);
+        }
+        let Some(key) = key else {
+            return Err(AppError::Validation(
+                "this deployment does not accept signed license imports".into(),
+            ));
+        };
+
+        let mut tx = self.pool.begin().await?;
+
+        let old = sqlx::query_as::<_, LicenseRow>(
+            r#"
+            SELECT
+                institution_id, deployment_id, status,
+                valid_from, valid_until, feature_set, version
+            FROM institution_license
+            WHERE institution_id = $1
+            FOR UPDATE
+            "#,
+        )
+        .bind(actor.institution_id)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+        let claims =
+            crate::licensing::signed_license::verify_signed_license(file, key, old.deployment_id)?;
+        if claims.institution_id != old.institution_id {
+            return Err(AppError::Validation(
+                "license is for a different institution".into(),
+            ));
+        }
+
+        let updated = sqlx::query_as::<_, LicenseRow>(
+            r#"
+            UPDATE institution_license
+               SET status = 'active',
+                   valid_from = $2,
+                   valid_until = $3,
+                   feature_set = $4,
+                   version = version + 1,
+                   updated_at = now()
+             WHERE institution_id = $1
+            RETURNING
+                institution_id, deployment_id, status,
+                valid_from, valid_until, feature_set, version
+            "#,
+        )
+        .bind(old.institution_id)
+        .bind(claims.valid_from)
+        .bind(claims.valid_until)
+        .bind(&claims.feature_set)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        let reason = format!("signed license import (serial {})", claims.license_serial);
+        sqlx::query(
+            r#"
+            INSERT INTO license_change (
+                id, institution_id, old_status, new_status,
+                changed_by_user_id, reason
+            )
+            VALUES ($1, $2, $3, 'active', $4, $5)
+            "#,
+        )
+        .bind(Uuid::new_v4())
+        .bind(old.institution_id)
+        .bind(&old.status)
+        .bind(actor.user_id)
+        .bind(&reason)
+        .execute(&mut *tx)
+        .await?;
+
+        self.audit
+            .write(
+                &mut tx,
+                old.institution_id,
+                actor.user_id,
+                "license.imported",
+                "institution_license",
+                old.institution_id,
+                &serde_json::json!({
+                    "license_serial": claims.license_serial,
+                    "valid_from": claims.valid_from,
+                    "valid_until": claims.valid_until,
+                    "old_status": old.status,
+                }),
+            )
+            .await?;
+
+        tx.commit().await?;
+
+        let snapshot = LicenseSnapshot::try_from(updated)?;
+        if self.gate.snapshot().institution_id == snapshot.institution_id {
+            self.gate.replace(snapshot.clone());
+        }
+        Ok(snapshot)
+    }
+}
+
 #[derive(sqlx::FromRow)]
 struct LicenseRow {
     institution_id: Uuid,

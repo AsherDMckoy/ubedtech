@@ -52,6 +52,11 @@ pub struct AppConfig {
     /// by a dead worker and is reaped back to the queue (CLAUDE.md §1
     /// item 3). Must comfortably exceed the longest legitimate render.
     pub job_stale_secs: u64,
+    /// Ed25519 public key (64 hex characters) for verifying signed license
+    /// imports on self-hosted deployments. Unset = imports refused. The
+    /// matching PRIVATE key must never be configured or stored on a
+    /// deployment (docs/SECURITY.md).
+    pub license_public_key: Option<[u8; 32]>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -158,6 +163,23 @@ impl AppConfig {
         let job_stale_secs =
             parse_or_default(&get, "APP_JOB_STALE_SECS", "300", parse_positive_u64)?;
 
+        let license_public_key = match get("APP_LICENSE_PUBLIC_KEY") {
+            None => None,
+            Some(raw) => {
+                // Never echo the value; a typo'd secret pasted into the
+                // wrong variable must not end up in logs.
+                let decoded = hex::decode(raw.trim()).map_err(|_| ConfigError::Invalid {
+                    key: "APP_LICENSE_PUBLIC_KEY",
+                    reason: "must be hex".to_owned(),
+                })?;
+                let bytes: [u8; 32] = decoded.try_into().map_err(|_| ConfigError::Invalid {
+                    key: "APP_LICENSE_PUBLIC_KEY",
+                    reason: "must be exactly 32 bytes (64 hex characters)".to_owned(),
+                })?;
+                Some(bytes)
+            }
+        };
+
         if session_idle_secs > session_absolute_secs {
             return Err(ConfigError::Invalid {
                 key: "APP_SESSION_IDLE_SECS",
@@ -187,6 +209,7 @@ impl AppConfig {
             login_max_failures,
             login_throttle_window_secs,
             job_stale_secs,
+            license_public_key,
         })
     }
 }
@@ -254,6 +277,35 @@ mod tests {
         assert_eq!(config.session_absolute_secs, 43200);
         assert_eq!(config.login_max_failures, 10);
         assert_eq!(config.login_throttle_window_secs, 900);
+        assert_eq!(config.license_public_key, None);
+    }
+
+    #[test]
+    fn license_public_key_parses_and_rejects_bad_input() {
+        let config = AppConfig::from_source(source(&[
+            ("DATABASE_URL", "postgresql://h/db"),
+            ("APP_LICENSE_PUBLIC_KEY", &"ab".repeat(32)),
+        ]))
+        .unwrap();
+        assert_eq!(config.license_public_key, Some([0xab; 32]));
+
+        for bad in ["not-hex", "abcd", &"ab".repeat(33)] {
+            let err = AppConfig::from_source(source(&[
+                ("DATABASE_URL", "postgresql://h/db"),
+                ("APP_LICENSE_PUBLIC_KEY", bad),
+            ]))
+            .unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    ConfigError::Invalid {
+                        key: "APP_LICENSE_PUBLIC_KEY",
+                        ..
+                    }
+                ),
+                "{bad} should be rejected"
+            );
+        }
     }
 
     #[test]

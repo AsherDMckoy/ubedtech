@@ -146,3 +146,29 @@ repository, and CLAUDE.md §6 requires docs to be committed with code.
 - **Proof:** `enrollment::tests::ui::login_catalog_register_and_drop_work_
   as_plain_forms` (token rendered at GET, accepted at POST), existing CSRF
   rejection tests unchanged.
+
+## ADR-10: signed license files carry the signed bytes verbatim (format v1)
+
+- **Original:** the design docs' unwired `signed_license.rs` sketch signed
+  `serde_json::to_vec(&claims)` and verified by RE-serializing the parsed
+  claims, betting that signer and verifier serialize identically.
+- **Replacement:** format v1, frozen before any customer holds a file: a
+  JSON envelope `{ format: 1, claims_json, signature_hex }` where
+  `claims_json` is the exact UTF-8 JSON text the platform signed and the
+  Ed25519 signature covers those raw bytes. The verifier checks the
+  signature FIRST and only then parses `claims_json`; a `format` version
+  field makes any future change explicit instead of silently ambiguous.
+- **Why:** re-serialization equality is fragile — JSON map ordering,
+  timestamp precision, and float formatting all vary across serializers
+  and versions, and a verification break here bricks a customer's
+  deployment. Signing the carried bytes removes the entire failure class
+  and is the standard envelope shape (JWS does the same).
+- **Consequences:** license files are a few bytes larger (claims appear as
+  an embedded string). The claims schema can evolve additively without a
+  format bump; renames/removals require `format: 2` and a verifier that
+  accepts both during migration. No compatibility impact: `/license/import`
+  answered 501 until now, so no v0 files exist.
+- **Proof:** `licensing::tests::import::a_signed_license_import_unlocks_a_
+  locked_deployment` and `…::bad_or_misdirected_license_files_are_rejected`
+  (tampered bytes, foreign key, wrong deployment, expired window, wrong
+  institution, unknown format — all rejected with nothing written).

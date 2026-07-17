@@ -1,3 +1,17 @@
+//! Self-hosted signed licenses (format v1, frozen — ADR-10).
+//!
+//! A license file is a JSON envelope: `format` (must be 1), `claims_json`
+//! (the exact UTF-8 JSON text of the claims that was signed), and
+//! `signature_hex` (Ed25519 over the raw `claims_json` bytes). Signing the
+//! carried bytes — rather than a re-serialization of parsed claims — means
+//! verification can never break on serialization differences between the
+//! signing tool and this crate.
+//!
+//! The private signing key exists only on the platform operator's side and
+//! is never present in a university deployment; deployments hold only the
+//! public key (`APP_LICENSE_PUBLIC_KEY`). See docs/SECURITY.md for the
+//! format, signing procedure, and key-rotation guidance.
+
 use crate::shared::error::AppError;
 use chrono::{DateTime, Utc};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
@@ -5,7 +19,6 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize)]
-#[allow(dead_code)] // consumed by the Phase 7.1 self-hosted license import path
 pub struct LicenseClaims {
     pub institution_id: Uuid,
     pub deployment_id: Uuid,
@@ -16,36 +29,57 @@ pub struct LicenseClaims {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[allow(dead_code)] // consumed by the Phase 7.1 self-hosted license import path
 pub struct SignedLicenseFile {
-    pub claims: LicenseClaims,
+    pub format: u32,
+    pub claims_json: String,
     pub signature_hex: String,
 }
 
-#[allow(dead_code)] // wired into the Phase 7.1 license import endpoint
-pub fn verify_signed_license<'a>(
-    file: &'a SignedLicenseFile,
+/// The deployment's license-verification public key, from configuration.
+/// `None` means this deployment (typically hosted) does not accept signed
+/// license imports at all.
+#[derive(Clone)]
+pub struct ImportVerifyingKey(pub Option<VerifyingKey>);
+
+/// Verify a signed license file and return its claims. Every failure is a
+/// `Validation` error with a fixed message — the import endpoint is already
+/// behind authentication, and no input is ever echoed back.
+pub fn verify_signed_license(
+    file: &SignedLicenseFile,
     public_key: &VerifyingKey,
     expected_deployment_id: Uuid,
-) -> Result<&'a LicenseClaims, AppError> {
-    let canonical = serde_json::to_vec(&file.claims).map_err(|_| AppError::Internal)?;
+) -> Result<LicenseClaims, AppError> {
+    if file.format != 1 {
+        return Err(AppError::Validation(
+            "unsupported license file format".into(),
+        ));
+    }
+
     let signature_bytes = hex::decode(&file.signature_hex)
         .map_err(|_| AppError::Validation("invalid license signature encoding".into()))?;
     let signature = Signature::from_slice(&signature_bytes)
         .map_err(|_| AppError::Validation("invalid license signature".into()))?;
 
     public_key
-        .verify(&canonical, &signature)
-        .map_err(|_| AppError::InstitutionLocked)?;
+        .verify(file.claims_json.as_bytes(), &signature)
+        .map_err(|_| AppError::Validation("license signature verification failed".into()))?;
 
-    if file.claims.deployment_id != expected_deployment_id {
-        return Err(AppError::InstitutionLocked);
+    // Only signature-verified bytes are ever parsed as claims.
+    let claims: LicenseClaims = serde_json::from_str(&file.claims_json)
+        .map_err(|_| AppError::Validation("malformed license claims".into()))?;
+
+    if claims.deployment_id != expected_deployment_id {
+        return Err(AppError::Validation(
+            "license is for a different deployment".into(),
+        ));
     }
 
     let now = Utc::now();
-    if now < file.claims.valid_from || now >= file.claims.valid_until {
-        return Err(AppError::InstitutionLocked);
+    if now < claims.valid_from || now >= claims.valid_until {
+        return Err(AppError::Validation(
+            "license is outside its validity window".into(),
+        ));
     }
 
-    Ok(&file.claims)
+    Ok(claims)
 }

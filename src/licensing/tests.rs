@@ -37,8 +37,12 @@ async fn protected_probe(_actor: Actor) -> HttpResponse {
 
 macro_rules! test_app {
     ($pool:expr, $gate:expr) => {
+        test_app!($pool, $gate, crate::licensing::ImportVerifyingKey(None))
+    };
+    ($pool:expr, $gate:expr, $import_key:expr) => {
         actix_test::init_service(
             actix_web::App::new()
+                .app_data(web::Data::new($import_key))
                 .app_data(web::Data::new($pool.clone()))
                 .app_data(web::Data::new(SessionService::new(
                     $pool.clone(),
@@ -234,14 +238,19 @@ async fn locked_institution_answers_402_and_recovery_stays_reachable(pool: PgPoo
     let body: serde_json::Value = actix_test::read_body_json(status).await;
     assert_eq!(body["status"], "suspended");
 
+    // Import is reachable while locked but never anonymous: without a
+    // session it answers 401, not 402.
     let import = actix_test::call_service(
         &app,
         actix_test::TestRequest::post()
             .uri("/license/import")
+            .set_json(serde_json::json!({
+                "format": 1, "claims_json": "{}", "signature_hex": ""
+            }))
             .to_request(),
     )
     .await;
-    assert_eq!(import.status(), StatusCode::NOT_IMPLEMENTED);
+    assert_eq!(import.status(), StatusCode::UNAUTHORIZED);
 
     // And crucially: login still works while locked, so an operator can get in.
     let (_cookie, _csrf) = login_session!(&app, "plat.admin", "pw-admin");
@@ -537,4 +546,235 @@ async fn non_platform_roles_cannot_touch_the_license(pool: PgPool) {
     )
     .await;
     assert_eq!(still_ok.status(), StatusCode::OK);
+}
+
+/// Signed-license import (self-hosted recovery). The signing key exists
+/// ONLY inside this test module — a release binary contains verification
+/// code and a public key slot, never signing capability.
+mod import {
+    use super::*;
+    use crate::licensing::ImportVerifyingKey;
+    use crate::licensing::signed_license::LicenseClaims;
+    use ed25519_dalek::{Signer, SigningKey};
+
+    fn claims(institution_id: Uuid, deployment_id: Uuid) -> LicenseClaims {
+        LicenseClaims {
+            institution_id,
+            deployment_id,
+            license_serial: Uuid::new_v4(),
+            valid_from: Utc::now() - Duration::days(1),
+            valid_until: Utc::now() + Duration::days(365),
+            feature_set: serde_json::json!({}),
+        }
+    }
+
+    fn signed_file(key: &SigningKey, claims: &LicenseClaims) -> serde_json::Value {
+        let claims_json = serde_json::to_string(claims).unwrap();
+        let signature = key.sign(claims_json.as_bytes());
+        serde_json::json!({
+            "format": 1,
+            "claims_json": claims_json,
+            "signature_hex": hex::encode(signature.to_bytes()),
+        })
+    }
+
+    async fn deployment_id_of(pool: &PgPool, institution_id: Uuid) -> Uuid {
+        sqlx::query_scalar(
+            "SELECT deployment_id FROM institution_license WHERE institution_id = $1",
+        )
+        .bind(institution_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    macro_rules! import_request {
+        ($cookie:expr, $csrf:expr, $file:expr) => {
+            actix_test::TestRequest::post()
+                .uri("/license/import")
+                .cookie($cookie.clone())
+                .insert_header((crate::identity_access::csrf::CSRF_HEADER, $csrf.as_str()))
+                .set_json($file)
+                .to_request()
+        };
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn a_signed_license_import_unlocks_a_locked_deployment(pool: PgPool) {
+        let fixture = seed(&pool, "suspended").await;
+        let admin_id = seed_user_with_role(
+            &pool,
+            fixture.institution_id,
+            "inst.admin",
+            "pw-admin",
+            "institution_admin",
+        )
+        .await;
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let gate = LicenseGate::new(snapshot(fixture.institution_id, LicenseStatus::Suspended));
+        let app = test_app!(
+            &pool,
+            gate,
+            ImportVerifyingKey(Some(signing_key.verifying_key()))
+        );
+
+        let (cookie, csrf) = login_session!(&app, "inst.admin", "pw-admin");
+
+        // Locked before the import.
+        let before = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/probe/protected")
+                .cookie(cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(before.status(), StatusCode::PAYMENT_REQUIRED);
+
+        let deployment_id = deployment_id_of(&pool, fixture.institution_id).await;
+        let file = signed_file(&signing_key, &claims(fixture.institution_id, deployment_id));
+        let imported = actix_test::call_service(&app, import_request!(cookie, csrf, &file)).await;
+        assert_eq!(imported.status(), StatusCode::OK);
+        let body: serde_json::Value = actix_test::read_body_json(imported).await;
+        assert_eq!(body["status"], "active");
+        assert_eq!(body["version"], 2);
+
+        // The gate swapped after commit: the deployment is open again.
+        let after = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/probe/protected")
+                .cookie(cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(after.status(), StatusCode::OK);
+
+        // Durable state, change record, and audit all landed together.
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM institution_license WHERE institution_id = $1")
+                .bind(fixture.institution_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(status, "active");
+        let change_reason: String =
+            sqlx::query_scalar("SELECT reason FROM license_change WHERE institution_id = $1")
+                .bind(fixture.institution_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(change_reason.starts_with("signed license import"));
+        let audits: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_event WHERE institution_id = $1 \
+             AND action = 'license.imported' AND actor_user_id = $2",
+        )
+        .bind(fixture.institution_id)
+        .bind(admin_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(audits, 1);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn bad_or_misdirected_license_files_are_rejected(pool: PgPool) {
+        let fixture = seed(&pool, "suspended").await;
+        seed_user_with_role(
+            &pool,
+            fixture.institution_id,
+            "inst.admin",
+            "pw-admin",
+            "institution_admin",
+        )
+        .await;
+        seed_user_with_role(
+            &pool,
+            fixture.institution_id,
+            "some.student",
+            "pw-student",
+            "student",
+        )
+        .await;
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let wrong_key = SigningKey::from_bytes(&[9u8; 32]);
+        let gate = LicenseGate::new(snapshot(fixture.institution_id, LicenseStatus::Suspended));
+        let app = test_app!(
+            &pool,
+            gate.clone(),
+            ImportVerifyingKey(Some(signing_key.verifying_key()))
+        );
+
+        let (admin_cookie, admin_csrf) = login_session!(&app, "inst.admin", "pw-admin");
+        let (student_cookie, student_csrf) = login_session!(&app, "some.student", "pw-student");
+        let deployment_id = deployment_id_of(&pool, fixture.institution_id).await;
+        let good_claims = claims(fixture.institution_id, deployment_id);
+        let good_file = signed_file(&signing_key, &good_claims);
+
+        // A student cannot import even a perfectly valid file.
+        let as_student = actix_test::call_service(
+            &app,
+            import_request!(student_cookie, student_csrf, &good_file),
+        )
+        .await;
+        assert_eq!(as_student.status(), StatusCode::FORBIDDEN);
+
+        // Tampered claims, a foreign signature, a wrong deployment, an
+        // expired window, a misdirected institution, an unknown format.
+        let mut tampered = good_file.clone();
+        tampered["claims_json"] = serde_json::Value::String(
+            good_file["claims_json"]
+                .as_str()
+                .unwrap()
+                .replace("2026", "2027"),
+        );
+        let foreign_signature = signed_file(&wrong_key, &good_claims);
+        let wrong_deployment = signed_file(
+            &signing_key,
+            &claims(fixture.institution_id, Uuid::new_v4()),
+        );
+        let mut expired_claims = claims(fixture.institution_id, deployment_id);
+        expired_claims.valid_from = Utc::now() - Duration::days(730);
+        expired_claims.valid_until = Utc::now() - Duration::days(365);
+        let expired = signed_file(&signing_key, &expired_claims);
+        let misdirected = signed_file(&signing_key, &claims(Uuid::new_v4(), deployment_id));
+        let mut unknown_format = good_file.clone();
+        unknown_format["format"] = serde_json::json!(2);
+
+        for (label, file) in [
+            ("tampered", &tampered),
+            ("foreign signature", &foreign_signature),
+            ("wrong deployment", &wrong_deployment),
+            ("expired", &expired),
+            ("misdirected institution", &misdirected),
+            ("unknown format", &unknown_format),
+        ] {
+            let response =
+                actix_test::call_service(&app, import_request!(admin_cookie, admin_csrf, file))
+                    .await;
+            assert_eq!(
+                response.status(),
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "{label} must be rejected"
+            );
+        }
+
+        // Nothing was accepted: still locked, no change records.
+        assert!(gate.require_deployment_active().is_err());
+        let changes: i64 = sqlx::query_scalar("SELECT count(*) FROM license_change")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(changes, 0);
+
+        // And a deployment with no configured key refuses even a valid file.
+        let keyless = test_app!(
+            &pool,
+            LicenseGate::new(snapshot(fixture.institution_id, LicenseStatus::Suspended))
+        );
+        let (cookie, csrf) = login_session!(&keyless, "inst.admin", "pw-admin");
+        let refused =
+            actix_test::call_service(&keyless, import_request!(cookie, csrf, &good_file)).await;
+        assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
 }

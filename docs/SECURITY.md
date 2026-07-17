@@ -1,7 +1,8 @@
 # Security
 
-Status: Phase 2 (identity & access) implemented. Authentication, sessions,
-CSRF, and license enforcement are live and test-backed. This file records
+Status: through Phase 6 (admin & licensing). Authentication, sessions,
+CSRF, license enforcement (hosted + self-hosted signed import), and
+institution administration are live and test-backed. This file records
 what is enforced, how, and what is deliberately deferred.
 
 ## Sessions
@@ -94,6 +95,68 @@ admin can sign in and unlock a locked deployment. Proofs: `licensing::
 middleware` unit tests both directions, `locked_institution_answers_402_and_
 recovery_stays_reachable`, `platform_admin_flips_the_license_end_to_end`.
 
+## Self-hosted signed licensing
+
+Self-hosted deployments accept license updates only as **platform-signed
+files** imported through `POST /license/import` (license-exempt so a locked
+deployment can recover; session + admin role required so the audit trail
+has a real actor; the Ed25519 signature is the actual authority).
+
+**File format v1 (frozen — ADR-10).** A JSON envelope:
+
+```json
+{
+  "format": 1,
+  "claims_json": "<exact UTF-8 JSON text of the claims>",
+  "signature_hex": "<Ed25519 signature over the raw claims_json bytes>"
+}
+```
+
+`claims_json` parses to: `institution_id`, `deployment_id`,
+`license_serial`, `valid_from`, `valid_until` (RFC 3339), `feature_set`.
+The signature covers the **byte-exact `claims_json` string**, never a
+re-serialization, so verification cannot break on serializer differences.
+Verification checks, in order: format version, signature (against
+`APP_LICENSE_PUBLIC_KEY`), deployment id (must match the license row's
+`deployment_id`), validity window (half-open: `valid_from <= now <
+valid_until`), and institution id. Only signature-verified bytes are ever
+parsed as claims. Every failure is a fixed-message 422; nothing from the
+file is echoed. Proofs: `import::a_signed_license_import_unlocks_a_locked_
+deployment`, `import::bad_or_misdirected_license_files_are_rejected`.
+
+**The private signing key never exists on a university deployment.** The
+deployment is configured with the PUBLIC key only (`APP_LICENSE_PUBLIC_KEY`,
+64 hex chars; unset ⇒ imports refused, the hosted default). The signing key
+lives with the platform operator — offline or in an HSM/secrets manager —
+and license files are produced platform-side:
+
+1. Generate once, platform-side: an Ed25519 keypair
+   (e.g. `openssl genpkey -algorithm ed25519`). Store the private key
+   offline; give deployments only the 32-byte public key as hex.
+2. To issue: serialize the claims as JSON, sign the exact bytes with the
+   private key, emit the envelope above. (The test suite's `import` module
+   is the reference implementation of both sides; the binary itself
+   contains no signing code — verified by inspection, `SigningKey` appears
+   only under `#[cfg(test)]`.)
+
+**Key rotation.** One active key per deployment, rotated by coordinated
+reissue:
+
+1. Generate a new keypair platform-side; keep the old private key until
+   rotation completes everywhere.
+2. For each deployment: issue a fresh license signed with the NEW key,
+   deliver it together with the new public key; the operator updates
+   `APP_LICENSE_PUBLIC_KEY`, restarts (config is read at startup), then
+   imports the new file.
+3. Retire (destroy or archive offline) the old private key once all
+   deployments run the new public key. A compromised signing key is
+   handled the same way, urgently: rotate the public key first — every
+   file signed by the stolen key is then rejected — and reissue.
+
+Rotation needs no code change and no downtime beyond the restart; imports
+verified with the old key keep working until the public key is swapped,
+because verification is against the configured key, not a bundled one.
+
 ## Authorization
 
 - Decisions live in services and policy modules (`identity_access/policy.rs`,
@@ -146,8 +209,6 @@ contains passwords, hashes, or token material.
 - **Password reset by email / self-service recovery** — requires the email
   boundary (a real replaceable trait per CLAUDE.md §0); until then reset is
   admin-mediated.
-- **Signed license import** (`/license/import` answers an honest 501) —
-  Phase 7.1, needs the frozen file format first.
 - **Per-role deny tests for enrollment/grades/documents operations** —
   listed as matrix debt in `docs/PERMISSIONS.md`, owed by Phases 4–6/8.
 - **MFA, session listing/self-service revocation UI** — not in scope for

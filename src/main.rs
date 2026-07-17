@@ -93,6 +93,12 @@ async fn main() -> std::io::Result<()> {
     let institution_admin =
         crate::institution::InstitutionService::new(pool.clone(), audit.clone());
     let licensing = LicenseService::new(pool.clone(), license_gate.clone(), audit);
+    // Self-hosted deployments verify imported license files against this
+    // public key; the private signing key never exists on a deployment.
+    let import_key = crate::licensing::ImportVerifyingKey(config.license_public_key.map(|bytes| {
+        ed25519_dalek::VerifyingKey::from_bytes(&bytes)
+            .expect("APP_LICENSE_PUBLIC_KEY is not a valid Ed25519 public key")
+    }));
 
     let worker = DocumentWorker::new(
         pool.clone(),
@@ -125,6 +131,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(document_store.clone()))
             .app_data(web::Data::new(TranscriptSnapshotService))
             .app_data(web::Data::new(licensing.clone()))
+            .app_data(web::Data::new(import_key.clone()))
             .app_data(web::Data::new(license_gate.clone()))
             .app_data(web::Data::new(readiness.clone()))
             .app_data(web::Data::new(sessions.clone()))

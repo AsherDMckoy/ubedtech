@@ -15,7 +15,28 @@ use serde::Deserialize;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::licensing::{LicenseGate, LicenseService, LicenseStatus};
+use crate::licensing::signed_license::SignedLicenseFile;
+use crate::licensing::{ImportVerifyingKey, LicenseGate, LicenseService, LicenseStatus};
+
+/// Self-hosted recovery: import a platform-signed license file. License-
+/// exempt (reachable while locked) but not anonymous — an institution or
+/// platform admin signs in first (login is also exempt), so the audit trail
+/// has a real actor. The signature check is the actual authority.
+#[post("/license/import")]
+pub async fn import_license(
+    actor: Actor,
+    service: web::Data<LicenseService>,
+    key: web::Data<ImportVerifyingKey>,
+    body: web::Json<SignedLicenseFile>,
+) -> Result<HttpResponse, AppError> {
+    let snapshot = service.import_signed(&actor, key.0.as_ref(), &body).await?;
+    Ok(HttpResponse::Ok().json(serde_json::json!({
+        "status": snapshot.status,
+        "valid_from": snapshot.valid_from,
+        "valid_until": snapshot.valid_until,
+        "version": snapshot.version,
+    })))
+}
 
 struct ChangeView {
     changed_at: String,
@@ -186,5 +207,7 @@ fn see_other(location: &str) -> HttpResponse {
 }
 
 pub fn routes(cfg: &mut web::ServiceConfig) {
-    cfg.service(license_panel_page).service(change_license_form);
+    cfg.service(license_panel_page)
+        .service(change_license_form)
+        .service(import_license);
 }
