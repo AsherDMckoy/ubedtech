@@ -930,6 +930,9 @@ mod ui {
         .await;
         let status = response.status();
         let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        if status == StatusCode::OK {
+            crate::shared::assets::assert_page_a11y(&body);
+        }
         (status, body)
     }
 

@@ -567,6 +567,7 @@ mod ui {
         .await;
         assert_eq!(page.status(), StatusCode::OK);
         let body = String::from_utf8(actix_test::read_body(page).await.to_vec()).unwrap();
+        crate::shared::assets::assert_page_a11y(&body);
         assert!(body.contains("No events yet."));
         let csrf = extract_input(&body, "csrf_token");
 
@@ -614,6 +615,7 @@ mod ui {
         )
         .await;
         let body = String::from_utf8(actix_test::read_body(page).await.to_vec()).unwrap();
+        crate::shared::assets::assert_page_a11y(&body);
         assert!(body.contains("Garifuna Settlement Day"));
 
         let event_id: Uuid = sqlx::query_scalar("SELECT id FROM institution_event LIMIT 1")

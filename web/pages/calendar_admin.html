@@ -33,8 +33,15 @@
     <p>No events yet.</p>
   {% else %}
     <table>
+      <caption>Events and holidays, soonest first</caption>
       <thead>
-        <tr><th>Title</th><th>Type</th><th>Starts</th><th>Ends</th><th></th></tr>
+        <tr>
+          <th scope="col">Title</th>
+          <th scope="col">Type</th>
+          <th scope="col">Starts</th>
+          <th scope="col">Ends</th>
+          <th scope="col"></th>
+        </tr>
       </thead>
       <tbody>
         {% for event in events %}

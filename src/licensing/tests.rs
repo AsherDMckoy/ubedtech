@@ -466,6 +466,7 @@ async fn a_disabled_license_locks_the_institution_but_suspends_nobody(pool: PgPo
     .await;
     assert_eq!(panel.status(), StatusCode::OK);
     let body = String::from_utf8(actix_test::read_body(panel).await.to_vec()).unwrap();
+    crate::shared::assets::assert_page_a11y(&body);
     assert!(body.contains("suspended"));
     assert!(body.contains("contract lapsed"));
 

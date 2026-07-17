@@ -40,8 +40,14 @@
     <p>No license changes recorded.</p>
   {% else %}
     <table>
+      <caption>License changes, newest first</caption>
       <thead>
-        <tr><th>When</th><th>Change</th><th>Reason</th><th>By</th></tr>
+        <tr>
+          <th scope="col">When</th>
+          <th scope="col">Change</th>
+          <th scope="col">Reason</th>
+          <th scope="col">By</th>
+        </tr>
       </thead>
       <tbody>
         {% for change in changes %}

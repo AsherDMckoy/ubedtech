@@ -1360,7 +1360,9 @@ mod ui {
         )
         .await;
         assert_eq!(response.status(), StatusCode::OK, "GET {uri}");
-        String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap()
+        let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        crate::shared::assets::assert_page_a11y(&body);
+        body
     }
 
     /// POST a registration form; returns (status, body-as-text).
@@ -1410,6 +1412,7 @@ mod ui {
         .await;
         assert_eq!(response.status(), StatusCode::OK);
         let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        crate::shared::assets::assert_page_a11y(&body);
         assert!(body.contains("form method=\"post\" action=\"/ui/login\""));
 
         // A wrong password re-renders the page with the error inline (401).

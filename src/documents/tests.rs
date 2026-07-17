@@ -694,6 +694,7 @@ mod ui {
         .await;
         assert_eq!(page.status(), StatusCode::OK);
         let body = String::from_utf8(actix_test::read_body(page).await.to_vec()).unwrap();
+        crate::shared::assets::assert_page_a11y(&body);
         assert!(body.contains("No document requests yet."));
         let student_csrf = extract_input(&body, "csrf_token");
         // The rendered form carries a server-minted idempotency key.
@@ -748,6 +749,7 @@ mod ui {
         )
         .await;
         let queue_body = String::from_utf8(actix_test::read_body(queue).await.to_vec()).unwrap();
+        crate::shared::assets::assert_page_a11y(&queue_body);
         assert!(queue_body.contains("Official transcript"));
         assert!(queue_body.contains("visa application"));
         let officer_csrf = extract_input(&queue_body, "csrf_token");
