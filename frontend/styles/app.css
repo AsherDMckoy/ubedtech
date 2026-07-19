@@ -1,0 +1,6 @@
+/* Entry point — the pipeline bundles these imports into one fingerprinted
+   stylesheet. Order matters: tokens first, base element styles, then the
+   design-system components that reference both. */
+@import "./tokens.css";
+@import "./base.css";
+@import "./components.css";

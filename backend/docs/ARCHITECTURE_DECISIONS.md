@@ -197,3 +197,39 @@ repository, and CLAUDE.md §6 requires docs to be committed with code.
   script; `templates_carry_no_images_or_csp_violations` pins the
   no-external-code rule; `assets_*` tests pin fingerprinting, caching, and
   compression.
+
+## ADR-12: frontend/ ownership split, repo root, committed dist/ (supersedes ADR-11)
+
+- **Original:** ADR-11 dropped Alpine and kept one embedded stylesheet +
+  30-line script inside `backend/web/`. The repository root was `backend/`,
+  so `CLAUDE.md`, `FRONTEND.md`, the design docs, and anything outside the
+  crate were untracked.
+- **Replacement:** the repository root is the project root. `frontend/`
+  owns everything a designer touches: Askama templates
+  (`frontend/templates/`, pointed at by `backend/askama.toml`), the token
+  sheet and component CSS (`frontend/styles/`), first-party JS
+  (`frontend/js/`), and the asset pipeline (Node, pinned via lockfile +
+  `engines` + `.nvmrc`; esbuild bundles Alpine's CSP build + the CSS and
+  content-fingerprints outputs into `frontend/dist/`). `backend/` owns
+  serving: it loads the fingerprinted files from `dist/` at startup and
+  serves them under `/assets/` with the immutable cache lifetime, plus all
+  routing, rendering data, and security middleware.
+- **Why:** FRONTEND.md fixes the stack (Alpine CSP build + Alpine AJAX
+  enhancement over working HTML forms), and the phase brief requires the
+  shared `frontend/` layout; ADR-11's "two x-target attributes don't repay
+  a framework" holds only while no in-page interactivity is required —
+  the design references (instant local search, dialogs, menus) require it.
+  The prohibition ADR-11 protected — nothing works only with JS — remains
+  in force via FRONTEND.md §5 and the JS-off flow tests.
+- **Consequences:** `frontend/dist/` is committed, so `cargo build`/`cargo
+  test` never invoke Node (a fresh checkout builds with Rust alone); CI
+  verifies dist matches the sources by rebuilding and diffing. Asset
+  fingerprints are computed by esbuild at build time, not by the backend at
+  startup; the backend serves whatever fingerprinted names dist contains.
+  JS payload grows from ~1 KiB to the Alpine CSP build (~61 KiB min,
+  ~19 KiB gzipped, immutably cached) — the performance budget in
+  docs/PERFORMANCE.md moves accordingly.
+- **Proof:** `assets_*` tests pin fingerprinted serving, immutable caching,
+  and compression against the real dist files; the CI dist-diff step proves
+  committed assets match the sources; the UI flow tests still never
+  execute a script.
