@@ -1,3 +1,101 @@
-/* Design tokens — extracted from docs/design-references (slice 3). */
+/* Design tokens — the single source of truth (FRONTEND.md §9), extracted
+   from the shared :root block of the three reference screens in
+   docs/design-references/. Everything downstream references these; no
+   component may introduce its own color, duration, or easing.
+
+   Deviations from the references, both for WCAG AA (verified by
+   `design_tokens_meet_wcag_contrast`):
+   - --text-muted (light) darkened #8a8983 → #6f6e6b (was 3.2:1 on
+     --surface-0; hint text is still text).
+   - --action/--action-ink added for the primary button. The references
+     reuse --text-accent as the button background, which becomes a light
+     blue in dark mode and drops white label text to 2.1:1. The action
+     pair stays a fixed dark blue in both themes. */
+
 :root {
+  /* surfaces: page < panel < card */
+  --surface-0: #f6f5f1;
+  --surface-1: #faf9f6;
+  --surface-2: #ffffff;
+
+  /* text */
+  --text-primary: #1f1f1d;
+  --text-secondary: #5f5e5a;
+  --text-muted: #6f6e6b;
+
+  /* borders */
+  --border: rgba(31, 31, 29, 0.12);
+  --border-strong: rgba(31, 31, 29, 0.22);
+
+  /* color roles: accent (blue), success (green), warning (amber),
+     danger (red) — each a text/bg/border triple */
+  --text-accent: #185fa5;
+  --bg-accent: #e6f1fb;
+  --border-accent: #378add;
+  --text-success: #0f6e56;
+  --bg-success: #e1f5ee;
+  --border-success: #1d9e75;
+  --text-warning: #854f0b;
+  --bg-warning: #faeeda;
+  --border-warning: #ba7517;
+  --text-danger: #a32d2d;
+  --bg-danger: #fcebeb;
+  --border-danger: #e24b4a;
+
+  /* the primary action button pair — fixed across themes */
+  --action: #185fa5;
+  --action-ink: #ffffff;
+
+  /* radius */
+  --radius: 8px;
+  --radius-card: 12px;
+
+  /* spacing scale — every gap/padding/margin steps on this */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 40px;
+
+  /* motion — the only two durations (FRONTEND.md §2): fast for
+     hover/focus/menu, base for dialog/drawer/sheet. One enter curve,
+     one exit curve. Nothing on a critical path exceeds ~200ms. */
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --ease-enter: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  /* type */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface-0: #1a1a18;
+    --surface-1: #232320;
+    --surface-2: #2c2c29;
+
+    --text-primary: #f2f1ec;
+    --text-secondary: #b4b2a9;
+    --text-muted: #8a8983;
+
+    --border: rgba(242, 241, 236, 0.14);
+    --border-strong: rgba(242, 241, 236, 0.26);
+
+    --text-accent: #85b7eb;
+    --bg-accent: #0c447c;
+    --border-accent: #378add;
+    --text-success: #5dcaa5;
+    --bg-success: #085041;
+    --border-success: #1d9e75;
+    --text-warning: #fac775;
+    --bg-warning: #633806;
+    --border-warning: #ba7517;
+    --text-danger: #f09595;
+    --bg-danger: #791f1f;
+    --border-danger: #e24b4a;
+  }
 }
