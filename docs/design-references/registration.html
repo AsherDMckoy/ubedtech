@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Registration · Fall 2026</title>
+<!--
+  Registration screen — reference implementation for FRONTEND.md.
+  Demonstrates: read-path search (instant, local) vs write-path register/drop
+  (waits for server truth, no optimistic success), the four row states, the
+  fragment-swap + full-submit floor, reduced-motion, WCAG AA.
+
+  In production this is an Askama template. Row markup is a fragment
+  (`_section_row.html`) the server re-renders and returns; Alpine AJAX swaps
+  one <tr> in place. With JS off, each form is a normal POST that reloads the
+  page with the updated row. The Alpine here is illustrative of the wiring —
+  the server response is the source of truth for every row's state.
+-->
+<style>
+  :root {
+    /* surfaces */
+    --surface-0:#f6f5f1; --surface-1:#faf9f6; --surface-2:#ffffff;
+    /* text */
+    --text-primary:#1f1f1d; --text-secondary:#5f5e5a; --text-muted:#8a8983;
+    /* borders */
+    --border:rgba(31,31,29,.12); --border-strong:rgba(31,31,29,.22);
+    /* role: accent (blue), success (green), warning (amber), danger (red) */
+    --text-accent:#185fa5; --bg-accent:#e6f1fb; --border-accent:#378add;
+    --text-success:#0f6e56; --bg-success:#e1f5ee; --border-success:#1d9e75;
+    --text-warning:#854f0b; --bg-warning:#faeeda; --border-warning:#ba7517;
+    --text-danger:#a32d2d; --bg-danger:#fcebeb; --border-danger:#e24b4a;
+    /* layout */
+    --radius:8px; --radius-card:12px;
+    /* motion — the only two durations, one curve each (FRONTEND.md §2) */
+    --dur-fast:120ms; --dur-base:180ms;
+    --ease-out:cubic-bezier(.2,.8,.2,1);
+    --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root[data-theme="light"]{
+      --surface-0:#1a1a18; --surface-1:#232320; --surface-2:#2c2c29;
+      --text-primary:#f2f1ec; --text-secondary:#b4b2a9; --text-muted:#8a8983;
+      --border:rgba(242,241,236,.14); --border-strong:rgba(242,241,236,.26);
+      --text-accent:#85b7eb; --bg-accent:#0c447c; --border-accent:#378add;
+      --text-success:#5dcaa5; --bg-success:#085041; --border-success:#1d9e75;
+      --text-warning:#fac775; --bg-warning:#633806; --border-warning:#ba7517;
+      --text-danger:#f09595; --bg-danger:#791f1f; --border-danger:#e24b4a;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--font-sans);background:var(--surface-0);
+    color:var(--text-primary);font-size:16px;line-height:1.6;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:920px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
+  a{color:var(--text-accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  h1{font-size:22px;font-weight:500;margin:0}
+  .sub{font-size:13px;color:var(--text-secondary);margin:2px 0 0}
+
+  /* skip link — keyboard/a11y */
+  .skip{position:absolute;left:-999px;top:0;background:var(--surface-2);
+    padding:8px 14px;border-radius:var(--radius);border:.5px solid var(--border-strong)}
+  .skip:focus{left:8px;top:8px;z-index:10}
+
+  /* top bar */
+  .bar{display:flex;align-items:center;justify-content:space-between;
+    gap:12px;margin-bottom:1.25rem}
+  .avatar{width:36px;height:36px;border-radius:50%;background:var(--bg-accent);
+    color:var(--text-accent);display:flex;align-items:center;justify-content:center;
+    font-weight:500;font-size:13px;flex-shrink:0}
+
+  /* controls */
+  button,.btn{font:inherit;font-size:14px;height:36px;padding:0 14px;
+    border-radius:var(--radius);border:.5px solid var(--border-strong);
+    background:transparent;color:var(--text-primary);cursor:pointer;
+    display:inline-flex;align-items:center;gap:6px;
+    transition:background var(--dur-fast) var(--ease-out),
+      border-color var(--dur-fast) var(--ease-out)}
+  button:hover,.btn:hover{background:var(--surface-1)}
+  button:active,.btn:active{transform:scale(.98)}
+  button:focus-visible,.btn:focus-visible,input:focus-visible{
+    outline:none;box-shadow:0 0 0 2px var(--surface-0),0 0 0 4px var(--border-accent)}
+  button[disabled]{cursor:default;opacity:.55}
+  button[disabled]:hover{background:transparent}
+  .btn-primary{background:var(--text-accent);border-color:var(--text-accent);color:#fff}
+  .btn-primary:hover{background:var(--text-accent);filter:brightness(1.08)}
+  input[type=search]{width:100%;height:40px;padding:0 12px 0 36px;font:inherit;
+    font-size:15px;border-radius:var(--radius);border:.5px solid var(--border-strong);
+    background:var(--surface-2);color:var(--text-primary)}
+
+  .searchbox{position:relative;margin-bottom:.5rem}
+  .searchbox .ic{position:absolute;left:11px;top:50%;transform:translateY(-50%);
+    color:var(--text-muted);pointer-events:none;font-size:16px}
+  .meta{display:flex;justify-content:space-between;align-items:center;
+    font-size:13px;color:var(--text-secondary);margin:.5rem 2px 1rem}
+
+  /* table */
+  .card{background:var(--surface-2);border:.5px solid var(--border);
+    border-radius:var(--radius-card);overflow:hidden}
+  table{width:100%;border-collapse:collapse}
+  caption{position:absolute;left:-999px}
+  tbody tr{border-top:.5px solid var(--border)}
+  td{padding:12px 14px;vertical-align:middle}
+  .c-course{font-size:14px;font-weight:500;margin:0}
+  .c-detail{font-size:12px;color:var(--text-secondary);margin:2px 0 0}
+  .c-seats{text-align:right;white-space:nowrap;font-size:13px}
+  .c-seats .n{font-weight:500;display:block}
+  .c-seats .d{font-size:11px;color:var(--text-muted)}
+  .c-action{text-align:right;white-space:nowrap;width:1%}
+
+  /* accent stripe on enrolled rows, no rounded single-side border per rules */
+  tr.is-enrolled td:first-child{box-shadow:inset 3px 0 0 var(--border-success)}
+  tr.is-enrolled{background:var(--bg-success)}
+  tr.is-enrolled .c-course{color:var(--text-success)}
+  tr.is-enrolled .c-detail{color:var(--text-success);opacity:.85}
+
+  /* status pill */
+  .pill{display:inline-flex;align-items:center;gap:5px;font-size:13px;
+    font-weight:500;color:var(--text-success)}
+
+  /* reason line on a blocked row */
+  .reason{font-size:12px;color:var(--text-danger);margin:2px 0 0;
+    display:flex;align-items:center;gap:4px}
+  .seats-full{color:var(--text-danger)}
+  .seats-open{color:var(--text-success)}
+  .seats-low{color:var(--text-warning)}
+
+  .foot{font-size:12px;color:var(--text-muted);text-align:center;margin:1.25rem 0 0}
+
+  /* the ONLY content that "enters": a just-changed row briefly flags itself.
+     This is allowed — it's feedback on a user-triggered mutation, on an element
+     already on screen (FRONTEND.md §2), not content animating in on load. */
+  @keyframes flag{from{background:var(--bg-accent)}to{}}
+  tr.just-changed{animation:flag var(--dur-base) var(--ease-out)}
+
+  @media (prefers-reduced-motion:reduce){
+    *{animation:none!important;transition:none!important}
+    button:active,.btn:active{transform:none}
+  }
+  @media (max-width:640px){
+    .c-detail{white-space:normal}
+    td{padding:10px 12px}
+    .hide-sm{display:none}
+  }
+  /* mid-stream/JS-off: forms show inline, JS collapses them to buttons */
+  .noscript-note{display:none}
+</style>
+</head>
+<body>
+<a href="#main" class="skip">Skip to sections</a>
+<div class="wrap">
+
+  <div class="bar">
+    <div>
+      <h1>Registration</h1>
+      <p class="sub">Fall 2026 · add/drop closes Sep 12 · 12 credits enrolled</p>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <a class="btn hide-sm" href="/schedule">View schedule</a>
+      <div class="avatar" aria-hidden="true">DR</div>
+    </div>
+  </div>
+
+  <main id="main"
+        x-data="registration()"
+        aria-label="Course registration">
+
+    <!-- READ PATH: instant local filter, no round trip (FRONTEND.md §4).
+         Progressive enhancement: with JS off this is a GET form that reloads
+         with server-filtered results. -->
+    <form class="searchbox" role="search" method="get" action="/registration"
+          @submit.prevent>
+      <span class="ic" aria-hidden="true">⌕</span>
+      <label for="q" class="skip">Search sections</label>
+      <input id="q" name="q" type="search"
+             placeholder="Search CMPS, calculus, Alvarez…"
+             autocomplete="off"
+             x-model="q" @input="filter()">
+    </form>
+    <p class="meta">
+      <span x-text="visibleLabel()">Showing all 4 sections</span>
+      <span class="hide-sm">Search filters instantly · registering waits for the server</span>
+    </p>
+
+    <div class="card">
+      <table>
+        <caption>Available sections for Fall 2026</caption>
+        <tbody>
+
+          <!-- STATE 1: available -->
+          <tr data-search="cmps 3141 software engineering nunez">
+            <td>
+              <p class="c-course">CMPS 3141 · Software engineering</p>
+              <p class="c-detail">Sec 01 · Mon/Wed 10:30 · Rm 220 · Prof. Nunez</p>
+            </td>
+            <td class="c-seats">
+              <span class="n seats-open">18 open</span>
+              <span class="d">of 30</span>
+            </td>
+            <td class="c-action">
+              <!-- WRITE PATH: real POST. Alpine AJAX swaps the returned <tr>.
+                   No optimistic "Enrolled" — the button goes to a Checking…
+                   state and the SERVER decides the outcome (FRONTEND.md §3). -->
+              <form method="post" action="/registration/enroll"
+                    @submit.prevent="enroll($event,'CMPS 3141')">
+                <input type="hidden" name="section_id" value="3141-01">
+                <input type="hidden" name="_csrf" value="TOKEN">
+                <input type="hidden" name="idempotency_key" value="uuid-a">
+                <button type="submit"
+                        :disabled="busy==='3141-01'"
+                        x-text="busy==='3141-01' ? 'Checking…' : 'Register'">Register</button>
+              </form>
+            </td>
+          </tr>
+
+          <!-- STATE 2: enrolled -->
+          <tr class="is-enrolled" data-search="cmps 2131 data structures alvarez">
+            <td>
+              <p class="c-course">CMPS 2131 · Data structures</p>
+              <p class="c-detail">Sec 01 · Mon/Wed 9:00 · Rm 214 · Prof. Alvarez</p>
+            </td>
+            <td class="c-seats">
+              <span class="pill"><span aria-hidden="true">✓</span>Enrolled</span>
+            </td>
+            <td class="c-action">
+              <form method="post" action="/registration/drop"
+                    @submit.prevent="openDrop('CMPS 2131 · Data structures','2131-01')">
+                <input type="hidden" name="section_id" value="2131-01">
+                <input type="hidden" name="_csrf" value="TOKEN">
+                <button type="submit">Drop</button>
+              </form>
+            </td>
+          </tr>
+
+          <!-- STATE 3: blocked — prerequisite AND full; reason names itself -->
+          <tr data-search="phys 2101 mechanics">
+            <td>
+              <p class="c-course">PHYS 2101 · Mechanics</p>
+              <p class="c-detail">Sec 01 · Tue/Thu 8:00 · Rm 130 · Prof. Reyes</p>
+              <p class="reason"><span aria-hidden="true">🔒</span>Requires MATH 2110 · not yet completed</p>
+            </td>
+            <td class="c-seats">
+              <span class="n seats-full">Full</span>
+              <span class="d">of 40</span>
+            </td>
+            <td class="c-action">
+              <button type="button" disabled
+                      aria-label="Cannot register for PHYS 2101: prerequisite not met and section full">Register</button>
+            </td>
+          </tr>
+
+          <!-- STATE 4: available but low seats — warning color, still open -->
+          <tr data-search="math 3201 linear algebra chen">
+            <td>
+              <p class="c-course">MATH 3201 · Linear algebra</p>
+              <p class="c-detail">Sec 02 · Tue/Thu 13:00 · Rm 115 · Prof. Chen</p>
+            </td>
+            <td class="c-seats">
+              <span class="n seats-low">3 open</span>
+              <span class="d">of 25</span>
+            </td>
+            <td class="c-action">
+              <form method="post" action="/registration/enroll"
+                    @submit.prevent="enroll($event,'MATH 3201')">
+                <input type="hidden" name="section_id" value="3201-02">
+                <input type="hidden" name="_csrf" value="TOKEN">
+                <input type="hidden" name="idempotency_key" value="uuid-b">
+                <button type="submit"
+                        :disabled="busy==='3201-02'"
+                        x-text="busy==='3201-02' ? 'Checking…' : 'Register'">Register</button>
+              </form>
+            </td>
+          </tr>
+
+          <!-- empty state, shown by filter when nothing matches -->
+          <tr x-show="empty" style="display:none">
+            <td colspan="3" style="text-align:center;padding:2rem;color:var(--text-secondary)">
+              No sections match “<span x-text="q"></span>”. Try a course code or instructor.
+            </td>
+          </tr>
+
+        </tbody>
+      </table>
+    </div>
+
+    <p class="foot">
+      Registering reserves your seat only when the server confirms it —
+      you'll never see “Enrolled” before it's real.
+    </p>
+
+    <!-- DIALOG: animated surface #2. Drop is destructive → confirm.
+         Faux-viewport wrapper (no position:fixed) so it works inline;
+         in production this is a <dialog> element. -->
+    <div x-show="drop.open" x-transition.opacity.duration.180ms
+         style="position:fixed;inset:0;background:rgba(0,0,0,.45);
+                display:flex;align-items:center;justify-content:center;z-index:50;padding:1rem"
+         @click.self="drop.open=false" @keydown.escape.window="drop.open=false"
+         role="dialog" aria-modal="true" aria-labelledby="drop-title" style="display:none">
+      <div x-transition:enter="dlg-enter" x-transition:enter-start="dlg-from"
+           style="background:var(--surface-2);border-radius:var(--radius-card);
+                  border:.5px solid var(--border);max-width:400px;width:100%;padding:1.25rem">
+        <h2 id="drop-title" style="font-size:18px;font-weight:500;margin:0 0 6px">Drop this section?</h2>
+        <p style="font-size:14px;color:var(--text-secondary);margin:0 0 1.25rem"
+           x-text="'You'll lose your seat in ' + drop.name + '. You can re-register while add/drop is open, if seats remain.'"></p>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button type="button" @click="drop.open=false">Keep it</button>
+          <button type="button" class="btn-primary"
+                  :disabled="drop.busy"
+                  @click="confirmDrop()"
+                  x-text="drop.busy ? 'Dropping…' : 'Drop section'">Drop section</button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Alpine CSP build: no inline expressions evaluated as new Function();
+     logic lives in this component object, satisfying the strict CSP.
+     (FRONTEND.md §7 / CLAUDE.md §2 CSP-with-no-unsafe-eval.) -->
+<script>
+  function registration(){
+    return {
+      q:'', empty:false, total:4, visible:4,
+      busy:null,
+      drop:{open:false,name:'',id:'',busy:false},
+
+      filter(){
+        const needle=this.q.trim().toLowerCase();
+        let shown=0;
+        this.$root.querySelectorAll('tbody tr[data-search]').forEach(tr=>{
+          const hit=!needle||tr.dataset.search.includes(needle);
+          tr.style.display=hit?'':'none';
+          if(hit)shown++;
+        });
+        this.visible=shown; this.empty=shown===0;
+      },
+      visibleLabel(){
+        return this.empty
+          ? 'No matching sections'
+          : (this.q ? `Showing ${this.visible} of ${this.total}` : `Showing all ${this.total} sections`);
+      },
+
+      // WRITE PATH. Real network call; server response drives the row.
+      // Simulated here; in production this is Alpine AJAX (x-target on the form)
+      // and the server returns the re-rendered <tr> in its true state.
+      enroll(e,name){
+        const id=e.target.section_id.value;
+        this.busy=id;                          // Checking… — honest, not optimistic
+        setTimeout(()=>{                        // stands in for the POST
+          this.busy=null;
+          const tr=e.target.closest('tr');
+          // Server said: enrolled. Swap the row to its confirmed state.
+          tr.classList.add('is-enrolled','just-changed');
+          tr.querySelector('.c-seats').innerHTML=
+            '<span class="pill"><span aria-hidden="true">✓</span>Enrolled</span>';
+          const act=tr.querySelector('.c-action');
+          act.innerHTML=
+            '<form method="post" action="/registration/drop"><button type="button">Drop</button></form>';
+          act.querySelector('button').addEventListener('click',()=>this.openDrop(name+' section',id));
+          this.announce(name+' — enrolled');
+        },700);
+      },
+
+      openDrop(name,id){ this.drop={open:true,name:name,id:id,busy:false}; },
+      confirmDrop(){
+        this.drop.busy=true;
+        setTimeout(()=>{                        // stands in for the POST
+          this.drop.busy=false; this.drop.open=false;
+          this.announce(this.drop.name+' — dropped');
+          // server returns the row in its available state; swap it here.
+        },600);
+      },
+
+      announce(msg){
+        let el=document.getElementById('sr-live');
+        if(!el){el=document.createElement('div');el.id='sr-live';
+          el.setAttribute('aria-live','polite');el.className='skip';
+          document.body.appendChild(el);}
+        el.textContent=msg;
+      }
+    }
+  }
+</script>
+</body>
+</html>

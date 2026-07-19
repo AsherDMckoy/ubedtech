@@ -1,5 +1,2 @@
-/target
-.env
-.env.*
-!.env.example
-/var
+node_modules/
+.claude/

@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grade entry · CMPS 2131 · Fall 2026</title>
+<!--
+  Instructor grade-entry roster — the instructor's workhorse screen.
+  Medium density: focused data entry, not 40-row scanning.
+
+  Exercises the rules unique to this role (FRONTEND.md + CLAUDE.md):
+   - DRAFT vs PUBLISHED is visually unmistakable. A student never sees a draft;
+     the query enforces it, and this UI makes the instructor's own view of the
+     boundary obvious so they never publish by accident.
+   - NO optimistic success on Save or Publish (§3). Both show an honest
+     in-progress state, then the real server outcome. Publishing is guarded by
+     a confirm dialog because students see published grades immediately.
+   - Grade-entry WINDOW gating: outside the window, inputs are disabled with a
+     plain explanation, not hidden.
+   - Published rows are READ-ONLY here; corrections go through the attributed
+     correction workflow, not silent re-editing.
+   - Section switcher = dropdown menu (animated surface #1).
+   - Instructor sees only assigned sections — the switcher lists only theirs.
+   - Works with JS off: entry is a real form POST; the row-level state comes
+     from the server.
+-->
+<style>
+  :root{
+    --surface-0:#f6f5f1; --surface-1:#faf9f6; --surface-2:#ffffff;
+    --text-primary:#1f1f1d; --text-secondary:#5f5e5a; --text-muted:#8a8983;
+    --border:rgba(31,31,29,.12); --border-strong:rgba(31,31,29,.22);
+    --text-accent:#185fa5; --bg-accent:#e6f1fb; --border-accent:#378add;
+    --text-success:#0f6e56; --bg-success:#e1f5ee; --border-success:#1d9e75;
+    --text-warning:#854f0b; --bg-warning:#faeeda; --border-warning:#ba7517;
+    --text-danger:#a32d2d; --bg-danger:#fcebeb; --border-danger:#e24b4a;
+    --radius:8px; --radius-card:12px;
+    --dur-fast:120ms; --dur-base:180ms; --ease-out:cubic-bezier(.2,.8,.2,1);
+    --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root[data-theme="light"]{
+      --surface-0:#1a1a18; --surface-1:#232320; --surface-2:#2c2c29;
+      --text-primary:#f2f1ec; --text-secondary:#b4b2a9; --text-muted:#8a8983;
+      --border:rgba(242,241,236,.14); --border-strong:rgba(242,241,236,.26);
+      --text-accent:#85b7eb; --bg-accent:#0c447c; --border-accent:#378add;
+      --text-success:#5dcaa5; --bg-success:#085041; --border-success:#1d9e75;
+      --text-warning:#fac775; --bg-warning:#633806; --border-warning:#ba7517;
+      --text-danger:#f09595; --bg-danger:#791f1f; --border-danger:#e24b4a;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--font-sans);background:var(--surface-0);
+    color:var(--text-primary);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:840px;margin:0 auto;padding:1.5rem 1.25rem 4rem}
+  a{color:var(--text-accent);text-decoration:none} a:hover{text-decoration:underline}
+  .skip{position:absolute;left:-999px;top:0}
+  .skip:focus{left:8px;top:8px;background:var(--surface-2);padding:8px 14px;border-radius:var(--radius);border:.5px solid var(--border-strong);z-index:10}
+
+  button,.btn{font:inherit;font-size:14px;height:36px;padding:0 14px;border-radius:var(--radius);
+    border:.5px solid var(--border-strong);background:transparent;color:var(--text-primary);cursor:pointer;
+    display:inline-flex;align-items:center;gap:6px;transition:background var(--dur-fast) var(--ease-out)}
+  button:hover,.btn:hover{background:var(--surface-1)}
+  button:active{transform:scale(.98)}
+  button[disabled]{opacity:.55;cursor:default} button[disabled]:hover{background:transparent}
+  button:focus-visible,.btn:focus-visible,select:focus-visible,input:focus-visible{
+    outline:none;box-shadow:0 0 0 2px var(--surface-0),0 0 0 4px var(--border-accent)}
+  .btn-primary{background:var(--text-accent);border-color:var(--text-accent);color:#fff}
+  .btn-primary:hover{filter:brightness(1.08)}
+
+  /* breadcrumb + section context header */
+  .crumb{font-size:13px;color:var(--text-secondary);margin:0 0 .75rem}
+  .ctx{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:1rem}
+  h1{font-size:20px;font-weight:500;margin:0}
+  .ctx .d{font-size:13px;color:var(--text-secondary);margin:3px 0 0}
+
+  /* section switcher menu — animated surface #1 */
+  .switch{position:relative}
+  .menu{position:absolute;right:0;top:calc(100% + 6px);min-width:240px;background:var(--surface-2);
+    border:.5px solid var(--border-strong);border-radius:var(--radius);padding:5px;z-index:30;
+    box-shadow:0 8px 24px rgba(0,0,0,.12)}
+  .menu button{width:100%;justify-content:flex-start;height:34px;border:none;font-size:13px;border-radius:6px}
+  .menu button:hover{background:var(--surface-1)}
+  .menu .cur{color:var(--text-accent);font-weight:500}
+  .menu .m-sub{font-size:11px;color:var(--text-muted);padding:6px 10px 4px}
+
+  /* window status banner */
+  .win{display:flex;gap:10px;align-items:center;border-radius:var(--radius);padding:10px 14px;margin-bottom:1.25rem;font-size:13px}
+  .win.open{background:var(--bg-success);color:var(--text-success)}
+  .win.closed{background:var(--surface-1);color:var(--text-secondary)}
+  .win .lead{font-weight:500}
+
+  /* progress line: how much of the roster is done */
+  .prog{display:flex;gap:16px;font-size:13px;color:var(--text-secondary);margin:0 2px 1rem}
+  .prog b{color:var(--text-primary);font-weight:500}
+
+  /* roster table */
+  .card{background:var(--surface-2);border:.5px solid var(--border);border-radius:var(--radius-card);overflow:hidden}
+  table{width:100%;border-collapse:collapse}
+  caption{position:absolute;left:-999px}
+  thead th{text-align:left;font-weight:500;font-size:12px;color:var(--text-secondary);padding:9px 14px;border-bottom:.5px solid var(--border)}
+  thead th.r{text-align:right}
+  tbody td{padding:10px 14px;border-top:.5px solid var(--border);vertical-align:middle}
+  .s-name{font-size:14px;font-weight:500;margin:0}
+  .s-id{font-size:12px;color:var(--text-muted);font-family:var(--font-mono)}
+  .col-grade{width:130px}
+  .col-status{width:120px}
+  .col-hist{width:1%;white-space:nowrap;text-align:right}
+
+  select.grade{font:inherit;font-size:14px;height:34px;width:100%;padding:0 8px;border-radius:6px;
+    border:.5px solid var(--border-strong);background:var(--surface-1);color:var(--text-primary)}
+  select.grade.dirty{border-color:var(--border-warning);background:var(--bg-warning)}
+  select.grade:disabled{opacity:1;background:transparent;border-color:transparent;
+    color:var(--text-primary);font-weight:500;-webkit-appearance:none;appearance:none;padding-left:0}
+
+  /* PUBLISHED rows read-only, clearly locked-in */
+  tr.published{background:var(--bg-success)}
+  tr.published .s-name{color:var(--text-success)}
+  .grade-final{font-size:15px;font-weight:600;font-family:var(--font-mono);color:var(--text-success)}
+
+  .badge{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;padding:2px 9px;border-radius:20px;white-space:nowrap}
+  .b-none{background:var(--surface-1);color:var(--text-muted)}
+  .b-draft{background:var(--bg-warning);color:var(--text-warning)}
+  .b-pub{background:var(--bg-success);color:var(--text-success)}
+  .err{color:var(--text-danger);font-size:12px;margin:3px 0 0}
+
+  /* sticky action bar */
+  .actions{position:sticky;bottom:0;margin-top:1rem;background:var(--surface-2);
+    border:.5px solid var(--border);border-radius:var(--radius-card);padding:.85rem 1rem;
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
+    box-shadow:0 -4px 16px rgba(0,0,0,.04)}
+  .actions .note{font-size:12px;color:var(--text-secondary);flex:1}
+  .actions .grp{display:flex;gap:8px}
+
+  /* dialog — animated surface #2 */
+  .scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:50;padding:1rem}
+  .dlg{background:var(--surface-2);border-radius:var(--radius-card);border:.5px solid var(--border);max-width:440px;width:100%;padding:1.25rem}
+  .dlg h2{font-size:18px;font-weight:500;margin:0 0 6px}
+  .dlg p{font-size:14px;color:var(--text-secondary);margin:0 0 1rem}
+  .dlg .warnbox{background:var(--bg-warning);color:var(--text-warning);border-radius:var(--radius);padding:10px 12px;font-size:13px;margin:0 0 1.25rem}
+  .dlg .row{display:flex;gap:8px;justify-content:flex-end}
+  .dlg-enter{transition:transform var(--dur-base) var(--ease-out),opacity var(--dur-base) var(--ease-out)}
+  .dlg-from{transform:translateY(8px) scale(.98);opacity:0}
+
+  .foot{font-size:12px;color:var(--text-muted);text-align:center;margin:1.25rem 0 0}
+
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}button:active{transform:none}.dlg-from{transform:none}}
+  @media (max-width:640px){
+    .col-status{display:none}
+    .actions{flex-direction:column;align-items:stretch}
+    .actions .grp{justify-content:stretch} .actions .grp button{flex:1;justify-content:center}
+  }
+</style>
+</head>
+<body>
+<a href="#roster" class="skip">Skip to roster</a>
+<div class="wrap" x-data="gradebook()">
+
+  <p class="crumb"><a href="/instructor">My sections</a> · Fall 2026</p>
+
+  <div class="ctx">
+    <div>
+      <h1>CMPS 2131 · Data structures</h1>
+      <p class="d">Section 01 · Mon/Wed 9:00 · Rm 214 · 40 students</p>
+    </div>
+
+    <!-- section switcher: only THIS instructor's assigned sections -->
+    <div class="switch" @keydown.escape="menu=false" @click.outside="menu=false">
+      <button @click="menu=!menu" :aria-expanded="menu" aria-haspopup="menu">
+        Switch section <span aria-hidden="true">▾</span>
+      </button>
+      <div class="menu" role="menu" x-show="menu"
+           x-transition:enter="dlg-enter" x-transition:enter-start="dlg-from"
+           style="display:none">
+        <p class="m-sub">Your sections · Fall 2026</p>
+        <button role="menuitem" class="cur"><span aria-hidden="true">•</span> CMPS 2131 · Data structures</button>
+        <button role="menuitem">CMPS 3141 · Software engineering</button>
+        <button role="menuitem">CMPS 4110 · Compilers</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- grade-entry window: open here; when closed, inputs disable + this explains why -->
+  <div class="win open" role="status">
+    <span class="lead">Grade entry open</span>
+    <span>· Midterm window closes Oct 21, 5:00 PM. Published grades are visible to students immediately.</span>
+  </div>
+
+  <div class="prog" aria-label="Roster progress">
+    <span><b x-text="counts().pub">2</b> published</span>
+    <span><b x-text="counts().draft">1</b> draft</span>
+    <span><b x-text="counts().none">2</b> not entered</span>
+  </div>
+
+  <main id="roster" class="card">
+    <table>
+      <caption>Grade roster for CMPS 2131 Section 01</caption>
+      <thead>
+        <tr>
+          <th>Student</th>
+          <th class="col-grade">Grade</th>
+          <th class="col-status">Status</th>
+          <th class="col-hist"></th>
+        </tr>
+      </thead>
+      <tbody>
+
+        <!-- NOT ENTERED -->
+        <tr>
+          <td><p class="s-name">Ahmad, Layla</p><span class="s-id">2024-00871</span></td>
+          <td class="col-grade">
+            <label class="skip" for="g1">Grade for Layla Ahmad</label>
+            <select class="grade" id="g1" @change="mark($event)">
+              <option value="">—</option>
+              <option>A</option><option>A-</option><option>B+</option><option>B</option><option>B-</option>
+              <option>C+</option><option>C</option><option>C-</option><option>D</option><option>F</option>
+            </select>
+          </td>
+          <td class="col-status"><span class="badge b-none">Not entered</span></td>
+          <td class="col-hist"></td>
+        </tr>
+
+        <!-- DRAFT — entered, not published: amber, editable, student can't see it -->
+        <tr>
+          <td><p class="s-name">Bennett, Marcus</p><span class="s-id">2023-01144</span></td>
+          <td class="col-grade">
+            <label class="skip" for="g2">Grade for Marcus Bennett</label>
+            <select class="grade dirty" id="g2" @change="mark($event)">
+              <option value="">—</option>
+              <option selected>B+</option><option>A</option><option>A-</option><option>B</option><option>B-</option>
+              <option>C+</option><option>C</option><option>C-</option><option>D</option><option>F</option>
+            </select>
+          </td>
+          <td class="col-status"><span class="badge b-draft">Draft</span></td>
+          <td class="col-hist"><a href="#" @click.prevent>History</a></td>
+        </tr>
+
+        <!-- PUBLISHED — locked read-only; corrections go through the attributed workflow -->
+        <tr class="published">
+          <td><p class="s-name">Chen, Wei</p><span class="s-id">2024-00233</span></td>
+          <td class="col-grade"><span class="grade-final">A</span></td>
+          <td class="col-status"><span class="badge b-pub"><span aria-hidden="true">✓</span>Published</span></td>
+          <td class="col-hist"><a href="#" @click.prevent>History</a></td>
+        </tr>
+        <tr class="published">
+          <td><p class="s-name">Diaz, Sofia</p><span class="s-id">2023-00912</span></td>
+          <td class="col-grade"><span class="grade-final">A-</span></td>
+          <td class="col-status"><span class="badge b-pub"><span aria-hidden="true">✓</span>Published</span></td>
+          <td class="col-hist"><a href="#" @click.prevent>History</a></td>
+        </tr>
+
+        <!-- INVALID entry example — inline, associated error -->
+        <tr>
+          <td><p class="s-name">Osei, Kwame</p><span class="s-id">2024-00590</span></td>
+          <td class="col-grade">
+            <label class="skip" for="g5">Grade for Kwame Osei</label>
+            <select class="grade" id="g5" aria-describedby="g5-err" @change="mark($event)">
+              <option value="">—</option>
+              <option>A</option><option>A-</option><option>B+</option><option>B</option><option>B-</option>
+              <option>C+</option><option>C</option><option>C-</option><option>D</option><option>F</option>
+              <option value="I" selected>I (incomplete)</option>
+            </select>
+            <p class="err" id="g5-err">Incomplete needs a filed extension on record before it can be published.</p>
+          </td>
+          <td class="col-status"><span class="badge b-none">Blocked</span></td>
+          <td class="col-hist"></td>
+        </tr>
+
+      </tbody>
+    </table>
+  </main>
+
+  <!-- sticky actions. Save = drafts persist (write path, waits). Publish =
+       students see it, guarded by dialog + honest wait, no optimistic success. -->
+  <div class="actions">
+    <p class="note" x-show="dirty" style="display:none">You have unsaved draft changes.</p>
+    <p class="note" x-show="!dirty">All drafts saved. Publishing makes grades visible to students.</p>
+    <div class="grp">
+      <button :disabled="!dirty || busy"
+              @click="saveDrafts()"
+              x-text="busy==='save' ? 'Saving…' : 'Save drafts'">Save drafts</button>
+      <button class="btn-primary"
+              :disabled="counts().draft===0 || busy"
+              @click="dialog=true"
+              x-text="'Publish '+counts().draft+' draft'+(counts().draft===1?'':'s')">Publish drafts</button>
+    </div>
+  </div>
+
+  <p class="foot">Grades save as drafts only you can see. Publishing is the moment students see them — it waits for the server to confirm, and never shows as done before it is.</p>
+
+  <!-- publish confirm dialog -->
+  <template x-if="dialog">
+    <div class="scrim" @click.self="dialog=false" @keydown.escape.window="dialog=false"
+         role="dialog" aria-modal="true" aria-labelledby="pub-title">
+      <div class="dlg" x-transition:enter="dlg-enter" x-transition:enter-start="dlg-from">
+        <h2 id="pub-title">Publish grades to students?</h2>
+        <p x-text="counts().draft+' draft grade'+(counts().draft===1?'':'s')+' will become visible to those students right away. Already-published grades are unchanged.'"></p>
+        <div class="warnbox">Published grades can only be changed afterward through a recorded correction, with your name attached.</div>
+        <div class="row">
+          <button @click="dialog=false">Not yet</button>
+          <button class="btn-primary" :disabled="busy==='publish'"
+                  @click="publish()"
+                  x-text="busy==='publish' ? 'Publishing…' : 'Publish now'">Publish now</button>
+        </div>
+      </div>
+    </div>
+  </template>
+
+</div>
+
+<script>
+  function gradebook(){
+    return {
+      menu:false, dialog:false, dirty:false, busy:null,
+      // live counts drive the buttons + progress line
+      counts(){
+        const rows=[...document.querySelectorAll('#roster tbody tr')];
+        let pub=0,draft=0,none=0;
+        rows.forEach(tr=>{
+          if(tr.classList.contains('published')) pub++;
+          else if(tr.querySelector('.grade.dirty')) draft++;
+          else none++;
+        });
+        return {pub,draft,none};
+      },
+      // a changed select becomes a "dirty" draft — local UI state only, not saved
+      mark(e){
+        const sel=e.target;
+        if(sel.value){ sel.classList.add('dirty');
+          const badge=sel.closest('tr').querySelector('.badge');
+          if(badge){badge.className='badge b-draft';badge.textContent='Draft';}
+        }
+        this.dirty=true;
+      },
+      // WRITE PATH: persist drafts. Honest "Saving…", then server outcome.
+      saveDrafts(){
+        this.busy='save';
+        setTimeout(()=>{ this.busy=null; this.dirty=false; this.announce('Drafts saved'); },600);
+      },
+      // WRITE PATH: publish. No optimistic flip — the rows become "Published"
+      // only after the server confirms. Simulated here with setTimeout; in
+      // production this is a form POST whose response re-renders the rows.
+      publish(){
+        this.busy='publish';
+        setTimeout(()=>{
+          document.querySelectorAll('#roster tbody tr').forEach(tr=>{
+            const sel=tr.querySelector('.grade.dirty');
+            if(sel){
+              const val=sel.value; const td=sel.closest('td');
+              td.innerHTML='<span class="grade-final">'+val+'</span>';
+              tr.classList.add('published');
+              const b=tr.querySelector('.badge');
+              b.className='badge b-pub';b.innerHTML='<span aria-hidden="true">✓</span>Published';
+            }
+          });
+          this.busy=null; this.dialog=false; this.dirty=false;
+          this.announce('Grades published to students');
+        },800);
+      },
+      announce(msg){
+        let el=document.getElementById('sr-live');
+        if(!el){el=document.createElement('div');el.id='sr-live';el.setAttribute('aria-live','polite');
+          el.className='skip';document.body.appendChild(el);}
+        el.textContent=msg;
+      }
+    }
+  }
+</script>
+</body>
+</html>

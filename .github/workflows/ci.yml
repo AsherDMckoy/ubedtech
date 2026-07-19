@@ -22,9 +22,14 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check advisories licenses sources
+          manifest-path: backend/Cargo.toml
 
   quality-gates:
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
 
     services:
       postgres:
@@ -51,6 +56,8 @@ jobs:
 
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
 
       # The four quality gates from CLAUDE.md section 6, in order. A red gate
       # fails the build; there is no allow-failure anywhere.

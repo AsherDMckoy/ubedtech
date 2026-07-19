@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Registrar · Fall 2026</title>
+<!--
+  Registrar dashboard — the DENSITY contrast to the student view (FRONTEND.md §6).
+  Same token sheet, same motion budget, but a scanning surface: compact rows,
+  high information density, keyboard-first, the registrar's real job (terms,
+  windows, sections, and problems needing attention) up front. No calm hero,
+  no wasted space — every region answers a question an expert asks at a glance.
+  Shares the identical :root token block with registration.html.
+-->
+<style>
+  :root{
+    --surface-0:#f6f5f1; --surface-1:#faf9f6; --surface-2:#ffffff;
+    --text-primary:#1f1f1d; --text-secondary:#5f5e5a; --text-muted:#8a8983;
+    --border:rgba(31,31,29,.12); --border-strong:rgba(31,31,29,.22);
+    --text-accent:#185fa5; --bg-accent:#e6f1fb; --border-accent:#378add;
+    --text-success:#0f6e56; --bg-success:#e1f5ee; --border-success:#1d9e75;
+    --text-warning:#854f0b; --bg-warning:#faeeda; --border-warning:#ba7517;
+    --text-danger:#a32d2d; --bg-danger:#fcebeb; --border-danger:#e24b4a;
+    --radius:8px; --radius-card:12px;
+    --dur-fast:120ms; --dur-base:180ms; --ease-out:cubic-bezier(.2,.8,.2,1);
+    --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root[data-theme="light"]{
+      --surface-0:#1a1a18; --surface-1:#232320; --surface-2:#2c2c29;
+      --text-primary:#f2f1ec; --text-secondary:#b4b2a9; --text-muted:#8a8983;
+      --border:rgba(242,241,236,.14); --border-strong:rgba(242,241,236,.26);
+      --text-accent:#85b7eb; --bg-accent:#0c447c; --border-accent:#378add;
+      --text-success:#5dcaa5; --bg-success:#085041; --border-success:#1d9e75;
+      --text-warning:#fac775; --bg-warning:#633806; --border-warning:#ba7517;
+      --text-danger:#f09595; --bg-danger:#791f1f; --border-danger:#e24b4a;
+    }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:var(--font-sans);background:var(--surface-0);
+    color:var(--text-primary);font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+  a{color:var(--text-accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .skip{position:absolute;left:-999px;top:0}
+  .skip:focus{left:8px;top:8px;background:var(--surface-2);padding:8px 14px;
+    border-radius:var(--radius);border:.5px solid var(--border-strong);z-index:10}
+
+  /* app shell: persistent rail + content — expert tool, not a landing page */
+  .shell{display:grid;grid-template-columns:200px 1fr;min-height:100vh}
+  .rail{background:var(--surface-1);border-right:.5px solid var(--border);
+    padding:1rem .75rem;display:flex;flex-direction:column;gap:2px}
+  .brand{font-size:14px;font-weight:500;padding:6px 10px 12px;color:var(--text-secondary)}
+  .navlink{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:var(--radius);
+    font-size:14px;color:var(--text-secondary);cursor:pointer;
+    transition:background var(--dur-fast) var(--ease-out)}
+  .navlink:hover{background:var(--surface-2);text-decoration:none;color:var(--text-primary)}
+  .navlink.active{background:var(--bg-accent);color:var(--text-accent);font-weight:500}
+  .navlink .ic{width:16px;text-align:center;flex-shrink:0}
+  .rail-foot{margin-top:auto;padding:8px 10px;font-size:12px;color:var(--text-muted)}
+
+  .main{padding:1.25rem 1.5rem 3rem;min-width:0}
+  .head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:1rem}
+  h1{font-size:20px;font-weight:500;margin:0}
+  .head .sub{font-size:13px;color:var(--text-secondary);margin:2px 0 0}
+  .head-actions{display:flex;gap:8px}
+
+  button,.btn{font:inherit;font-size:13px;height:32px;padding:0 12px;border-radius:var(--radius);
+    border:.5px solid var(--border-strong);background:transparent;color:var(--text-primary);
+    cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+    transition:background var(--dur-fast) var(--ease-out)}
+  button:hover,.btn:hover{background:var(--surface-1)}
+  button:active{transform:scale(.98)}
+  button:focus-visible,.btn:focus-visible,input:focus-visible,.navlink:focus-visible{
+    outline:none;box-shadow:0 0 0 2px var(--surface-0),0 0 0 4px var(--border-accent)}
+  .btn-primary{background:var(--text-accent);border-color:var(--text-accent);color:#fff}
+
+  /* status strip: 4 metric tiles — the term at a glance */
+  .strip{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:1.25rem}
+  .tile{background:var(--surface-1);border-radius:var(--radius);padding:.75rem .9rem}
+  .tile .k{font-size:12px;color:var(--text-secondary);margin:0 0 4px;display:flex;align-items:center;gap:5px}
+  .tile .v{font-size:22px;font-weight:500;margin:0;line-height:1.1}
+  .tile .h{font-size:12px;color:var(--text-muted);margin:3px 0 0}
+  .tile.warn{background:var(--bg-warning)} .tile.warn .k,.tile.warn .v,.tile.warn .h{color:var(--text-warning)}
+
+  /* two-column: attention queue + window status */
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1.25rem}
+  .panel{background:var(--surface-2);border:.5px solid var(--border);border-radius:var(--radius-card);padding:0}
+  .panel h2{font-size:15px;font-weight:500;margin:0;padding:.85rem 1rem;border-bottom:.5px solid var(--border);
+    display:flex;align-items:center;justify-content:space-between}
+  .panel h2 .count{font-size:12px;color:var(--text-warning);background:var(--bg-warning);
+    padding:2px 8px;border-radius:20px;font-weight:500}
+  .queue{list-style:none;margin:0;padding:0}
+  .queue li{display:flex;align-items:center;gap:10px;padding:.7rem 1rem;border-top:.5px solid var(--border)}
+  .queue li:first-child{border-top:none}
+  .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+  .dot.d-danger{background:var(--border-danger)} .dot.d-warn{background:var(--border-warning)}
+  .queue .q-main{flex:1;min-width:0}
+  .queue .q-t{font-size:13px;font-weight:500;margin:0}
+  .queue .q-d{font-size:12px;color:var(--text-secondary);margin:1px 0 0}
+  .queue .q-act{font-size:13px;white-space:nowrap}
+
+  .win{list-style:none;margin:0;padding:0}
+  .win li{display:flex;align-items:center;justify-content:space-between;gap:10px;
+    padding:.7rem 1rem;border-top:.5px solid var(--border)}
+  .win li:first-child{border-top:none}
+  .win .w-t{font-size:13px;margin:0}
+  .win .w-d{font-size:12px;color:var(--text-muted);margin:1px 0 0}
+  .badge{font-size:12px;font-weight:500;padding:2px 9px;border-radius:20px;white-space:nowrap}
+  .b-open{background:var(--bg-success);color:var(--text-success)}
+  .b-soon{background:var(--bg-warning);color:var(--text-warning)}
+  .b-closed{background:var(--surface-1);color:var(--text-muted)}
+
+  /* dense sections table — the scanning workhorse */
+  .tablecard{background:var(--surface-2);border:.5px solid var(--border);border-radius:var(--radius-card);overflow:hidden}
+  .tabletop{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:.75rem 1rem;border-bottom:.5px solid var(--border)}
+  .tabletop h2{font-size:15px;font-weight:500;margin:0}
+  .filter{position:relative}
+  .filter input{height:30px;font:inherit;font-size:13px;padding:0 10px 0 30px;width:200px;
+    border-radius:var(--radius);border:.5px solid var(--border-strong);background:var(--surface-1);color:var(--text-primary)}
+  .filter .ic{position:absolute;left:9px;top:50%;transform:translateY(-50%);color:var(--text-muted);font-size:14px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  thead th{text-align:left;font-weight:500;font-size:12px;color:var(--text-secondary);
+    padding:8px 12px;border-bottom:.5px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none}
+  thead th:hover{color:var(--text-primary)}
+  thead th.num{text-align:right}
+  tbody td{padding:8px 12px;border-top:.5px solid var(--border);white-space:nowrap}
+  tbody tr:hover{background:var(--surface-1)}
+  td.num{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--font-mono);font-size:12px}
+  .code{font-weight:500}
+  .fillbar{display:inline-flex;align-items:center;gap:7px;justify-content:flex-end}
+  .track{width:52px;height:5px;border-radius:3px;background:var(--surface-0);overflow:hidden;border:.5px solid var(--border)}
+  .fill{height:100%;border-radius:3px}
+  .fill.ok{background:var(--border-success)} .fill.low{background:var(--border-warning)} .fill.full{background:var(--border-danger)}
+  .rowbtn{height:26px;padding:0 9px;font-size:12px}
+
+  .foot{font-size:12px;color:var(--text-muted);margin:1rem 0 0}
+
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}button:active{transform:none}}
+  @media (max-width:860px){
+    .shell{grid-template-columns:1fr}
+    .rail{flex-direction:row;overflow-x:auto;border-right:none;border-bottom:.5px solid var(--border)}
+    .rail-foot,.brand{display:none}
+    .strip{grid-template-columns:repeat(2,1fr)}
+    .cols{grid-template-columns:1fr}
+    .filter input{width:140px}
+    .hide-sm{display:none}
+  }
+</style>
+</head>
+<body>
+<a href="#main" class="skip">Skip to content</a>
+<div class="shell">
+
+  <!-- persistent nav rail: this is a tool someone lives in all day -->
+  <nav class="rail" aria-label="Registrar navigation">
+    <div class="brand">UB Registrar</div>
+    <a class="navlink active" aria-current="page"><span class="ic" aria-hidden="true">▦</span>Overview</a>
+    <a class="navlink"><span class="ic" aria-hidden="true">◷</span>Terms &amp; windows</a>
+    <a class="navlink"><span class="ic" aria-hidden="true">▤</span>Sections</a>
+    <a class="navlink"><span class="ic" aria-hidden="true">✎</span>Courses</a>
+    <a class="navlink"><span class="ic" aria-hidden="true">⚑</span>Holds</a>
+    <a class="navlink"><span class="ic" aria-hidden="true">⇄</span>Overrides</a>
+    <a class="navlink"><span class="ic" aria-hidden="true">◈</span>Audit log</a>
+    <div class="rail-foot">Signed in as M. Santos<br>Registrar</div>
+  </nav>
+
+  <main class="main" id="main" x-data="registrar()">
+    <div class="head">
+      <div>
+        <h1>Fall 2026 overview</h1>
+        <p class="sub">Registration open · add/drop closes Sep 12 · 4,182 students registered</p>
+      </div>
+      <div class="head-actions">
+        <button class="hide-sm">Export</button>
+        <button class="btn-primary"><span aria-hidden="true">+</span> New section</button>
+      </div>
+    </div>
+
+    <!-- at-a-glance: the four numbers a registrar checks first thing -->
+    <section class="strip" aria-label="Term summary">
+      <div class="tile">
+        <p class="k">Sections</p>
+        <p class="v">312</p>
+        <p class="h">across 47 courses</p>
+      </div>
+      <div class="tile">
+        <p class="k">Seats filled</p>
+        <p class="v">86%</p>
+        <p class="h">9,910 of 11,520</p>
+      </div>
+      <div class="tile warn">
+        <p class="k"><span aria-hidden="true">⚑</span> Needs attention</p>
+        <p class="v">7</p>
+        <p class="h">full waitlists, conflicts</p>
+      </div>
+      <div class="tile">
+        <p class="k">Active holds</p>
+        <p class="v">238</p>
+        <p class="h">203 advising · 35 financial</p>
+      </div>
+    </section>
+
+    <div class="cols">
+      <!-- attention queue: the registrar's actual worklist -->
+      <section class="panel" aria-label="Needs attention">
+        <h2>Needs attention <span class="count">7</span></h2>
+        <ul class="queue">
+          <li>
+            <span class="dot d-danger" aria-hidden="true"></span>
+            <div class="q-main">
+              <p class="q-t">CMPS 2131 · Data structures</p>
+              <p class="q-d">All sections full · 34 on waitlist</p>
+            </div>
+            <a class="q-act" href="#">Add section</a>
+          </li>
+          <li>
+            <span class="dot d-danger" aria-hidden="true"></span>
+            <div class="q-main">
+              <p class="q-t">MATH 2110 · Calculus II</p>
+              <p class="q-d">Room double-booked · Rm 108, Tue 13:00</p>
+            </div>
+            <a class="q-act" href="#">Resolve</a>
+          </li>
+          <li>
+            <span class="dot d-warn" aria-hidden="true"></span>
+            <div class="q-main">
+              <p class="q-t">ENGL 1101 · Composition</p>
+              <p class="q-d">No instructor assigned · 3 sections</p>
+            </div>
+            <a class="q-act" href="#">Assign</a>
+          </li>
+          <li>
+            <span class="dot d-warn" aria-hidden="true"></span>
+            <div class="q-main">
+              <p class="q-t">12 override requests</p>
+              <p class="q-d">Pending registrar approval</p>
+            </div>
+            <a class="q-act" href="#">Review</a>
+          </li>
+        </ul>
+      </section>
+
+      <!-- window status: what's open, what's closing, what's done -->
+      <section class="panel" aria-label="Registration windows">
+        <h2>Windows</h2>
+        <ul class="win">
+          <li>
+            <div><p class="w-t">Add/drop · all students</p><p class="w-d">Aug 25 – Sep 12</p></div>
+            <span class="badge b-open">Open · 6 days left</span>
+          </li>
+          <li>
+            <div><p class="w-t">Late registration</p><p class="w-d">Sep 13 – Sep 15</p></div>
+            <span class="badge b-soon">Opens in 6 days</span>
+          </li>
+          <li>
+            <div><p class="w-t">Grade entry · midterm</p><p class="w-d">Oct 14 – Oct 21</p></div>
+            <span class="badge b-closed">Not yet open</span>
+          </li>
+          <li>
+            <div><p class="w-t">Priority registration</p><p class="w-d">Aug 18 – Aug 24</p></div>
+            <span class="badge b-closed">Closed</span>
+          </li>
+        </ul>
+      </section>
+    </div>
+
+    <!-- the dense workhorse: sections table, sortable + instant filter -->
+    <section class="tablecard" aria-label="Sections">
+      <div class="tabletop">
+        <h2>Sections</h2>
+        <div class="filter" role="search">
+          <span class="ic" aria-hidden="true">⌕</span>
+          <label for="tf" class="skip">Filter sections</label>
+          <input id="tf" type="search" placeholder="Filter…" x-model="q" @input="filter()" autocomplete="off">
+        </div>
+      </div>
+      <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr>
+            <th @click="sort('code')">Course</th>
+            <th class="hide-sm">Sec</th>
+            <th class="hide-sm">Meets</th>
+            <th class="hide-sm">Instructor</th>
+            <th class="num">Enrolled</th>
+            <th class="num" @click="sort('fill')">Fill</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr data-s="cmps 3141 software engineering nunez">
+            <td><span class="code">CMPS 3141</span> · Software eng.</td>
+            <td class="hide-sm">01</td><td class="hide-sm">Mon/Wed 10:30</td><td class="hide-sm">Nunez</td>
+            <td class="num">12 / 30</td>
+            <td class="num"><span class="fillbar">40%<span class="track"><span class="fill ok" style="width:40%"></span></span></span></td>
+            <td><button class="rowbtn">Edit</button></td>
+          </tr>
+          <tr data-s="cmps 2131 data structures alvarez">
+            <td><span class="code">CMPS 2131</span> · Data structures</td>
+            <td class="hide-sm">01</td><td class="hide-sm">Mon/Wed 9:00</td><td class="hide-sm">Alvarez</td>
+            <td class="num">40 / 40</td>
+            <td class="num"><span class="fillbar">100%<span class="track"><span class="fill full" style="width:100%"></span></span></span></td>
+            <td><button class="rowbtn">Edit</button></td>
+          </tr>
+          <tr data-s="math 3201 linear algebra chen">
+            <td><span class="code">MATH 3201</span> · Linear algebra</td>
+            <td class="hide-sm">02</td><td class="hide-sm">Tue/Thu 13:00</td><td class="hide-sm">Chen</td>
+            <td class="num">22 / 25</td>
+            <td class="num"><span class="fillbar">88%<span class="track"><span class="fill low" style="width:88%"></span></span></span></td>
+            <td><button class="rowbtn">Edit</button></td>
+          </tr>
+          <tr data-s="phys 2101 mechanics reyes">
+            <td><span class="code">PHYS 2101</span> · Mechanics</td>
+            <td class="hide-sm">01</td><td class="hide-sm">Tue/Thu 8:00</td><td class="hide-sm">Reyes</td>
+            <td class="num">40 / 40</td>
+            <td class="num"><span class="fillbar">100%<span class="track"><span class="fill full" style="width:100%"></span></span></span></td>
+            <td><button class="rowbtn">Edit</button></td>
+          </tr>
+          <tr data-s="engl 1101 composition staff">
+            <td><span class="code">ENGL 1101</span> · Composition</td>
+            <td class="hide-sm">03</td><td class="hide-sm">Mon/Wed 11:00</td><td class="hide-sm" style="color:var(--text-danger)">Unassigned</td>
+            <td class="num">18 / 35</td>
+            <td class="num"><span class="fillbar">51%<span class="track"><span class="fill ok" style="width:51%"></span></span></span></td>
+            <td><button class="rowbtn">Edit</button></td>
+          </tr>
+          <tr x-show="empty" style="display:none"><td colspan="7" style="text-align:center;padding:1.5rem;color:var(--text-secondary)">No sections match your filter.</td></tr>
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <p class="foot">Sorted views and filters run in-page. Every edit opens a form that commits on the server — no change is shown as saved before it is.</p>
+  </main>
+</div>
+
+<script>
+  function registrar(){
+    return {
+      q:'', empty:false,
+      filter(){
+        const n=this.q.trim().toLowerCase(); let shown=0;
+        this.$root.querySelectorAll('tbody tr[data-s]').forEach(tr=>{
+          const hit=!n||tr.dataset.s.includes(n);
+          tr.style.display=hit?'':'none'; if(hit)shown++;
+        });
+        this.empty=shown===0;
+      },
+      sort(key){
+        const body=this.$root.querySelector('tbody');
+        const rows=[...body.querySelectorAll('tr[data-s]')];
+        rows.sort((a,b)=>{
+          if(key==='code') return a.dataset.s.localeCompare(b.dataset.s);
+          const f=t=>parseInt(t.querySelector('.fillbar').textContent)||0;
+          return f(b)-f(a);
+        });
+        rows.forEach(r=>body.insertBefore(r,body.querySelector('[x-show]')));
+      }
+    }
+  }
+</script>
+</body>
+</html>
