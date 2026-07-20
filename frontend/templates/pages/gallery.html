@@ -1,0 +1,147 @@
+{% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
+{% block title %}Design system gallery{% endblock %}
+{% block content %}
+  <div class="wrap">
+    <h1>Design system gallery</h1>
+    <p>
+      Every primitive, rendered once — the accessibility harness audits this
+      page, and new screens copy from it. Not routed in the application;
+      rendered by <code>backend render-pages</code>.
+    </p>
+
+    <h2>Buttons</h2>
+    <div class="card">
+      <form method="post" action="/nowhere">
+        <button type="button">Default</button>
+        {% call ui::busy_button("Register", "Checking…", true) %}{% endcall %}
+        <button type="button" disabled aria-label="Cannot register: section full">Register</button>
+      </form>
+    </div>
+
+    <h2>Form controls</h2>
+    <div class="card">
+      {% call ui::field("g-name", "name", "Preferred name", "text", "", "", "Shown on your class rosters") %}{% endcall %}
+      {% call ui::field("g-email", "email", "Email address", "email", "not-an-address", "Enter an address like name@ub.edu.bz", "") %}{% endcall %}
+      {% call ui::search("g-search", "q", "Search sections", "Search CMPS, calculus, Alvarez…", "") %}{% endcall %}
+      <div class="field">
+        <label for="g-grade">Grade</label>
+        <select id="g-grade" name="grade">
+          <option value="">—</option>
+          <option>A</option>
+          <option>B+</option>
+        </select>
+      </div>
+    </div>
+
+    <h2>Alerts</h2>
+    {% call ui::alert("accent", "Add/drop closes Sep 12 at 5:00 PM.") %}{% endcall %}
+    {% call ui::alert("success", "Your registration for CMPS 2131 is confirmed.") %}{% endcall %}
+    {% call ui::alert("warning", "3 seats remain in MATH 3201.") %}{% endcall %}
+    {% call ui::alert("danger", "This section requires MATH 2110, which is not on your record.") %}{% endcall %}
+
+    <h2>Status badges</h2>
+    <p>
+      {% call ui::badge("enrolled") %}{% endcall %}
+      {% call ui::badge("pending") %}{% endcall %}
+      {% call ui::badge("draft") %}{% endcall %}
+      {% call ui::badge("amended") %}{% endcall %}
+      {% call ui::badge("rejected") %}{% endcall %}
+    </p>
+
+    <h2>Card</h2>
+    <div class="card">
+      <h2>Fall 2026</h2>
+      <p>12 credits enrolled · add/drop closes Sep 12</p>
+    </div>
+
+    <h2>Data table, calm</h2>
+    <div class="card card-flush table-wrap">
+      <table>
+        <caption>Available sections for Fall 2026</caption>
+        <thead>
+          <tr>
+            <th scope="col">Course</th>
+            <th scope="col" class="num">Seats</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>CMPS 3141 · Software engineering</td>
+            <td class="num">18 / 30</td>
+            <td>{% call ui::badge("enrolled") %}{% endcall %}</td>
+          </tr>
+          <tr>
+            <td>MATH 3201 · Linear algebra</td>
+            <td class="num">3 / 25</td>
+            <td>{% call ui::badge("pending") %}{% endcall %}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Data table, dense</h2>
+    <div class="card card-flush table-wrap">
+      <table class="table-dense">
+        <caption>Sections, registrar view</caption>
+        <thead>
+          <tr>
+            <th scope="col">Course</th>
+            <th scope="col">Sec</th>
+            <th scope="col">Instructor</th>
+            <th scope="col" class="num">Enrolled</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>CMPS 2131</td>
+            <td>01</td>
+            <td>Alvarez</td>
+            <td class="num">40 / 40</td>
+          </tr>
+          <tr>
+            <td>ENGL 1101</td>
+            <td>03</td>
+            <td>Unassigned</td>
+            <td class="num">18 / 35</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Dropdown menu</h2>
+    <details class="menu">
+      <summary>Switch section</summary>
+      <div class="menu-panel">
+        <a href="/nowhere" aria-current="true">CMPS 2131 · Data structures</a>
+        <a href="/nowhere">CMPS 3141 · Software engineering</a>
+      </div>
+    </details>
+
+    <h2>Dialog</h2>
+    <button type="button" data-dialog-open="g-dialog">Drop section</button>
+    <dialog id="g-dialog" aria-labelledby="g-dialog-title">
+      <h2 id="g-dialog-title">Drop this section?</h2>
+      <p>
+        You'll lose your seat in CMPS 2131. You can re-register while
+        add/drop is open, if seats remain.
+      </p>
+      <div class="dialog-actions">
+        <button type="button" data-dialog-close>Keep it</button>
+        <form method="post" action="/nowhere">
+          {% call ui::busy_button("Drop section", "Dropping…", true) %}{% endcall %}
+        </form>
+      </div>
+    </dialog>
+
+    <h2>Loading state</h2>
+    {% call ui::loading("Generating your transcript") %}{% endcall %}
+
+    <h2>Error state</h2>
+    {% call ui::error_state("Your schedule could not be loaded.", "Refresh to try again, or come back in a few minutes.") %}{% endcall %}
+
+    <h2>Empty state</h2>
+    {% call ui::empty_state("No document requests yet.", "/ui/documents", "Request a transcript") %}{% endcall %}
+  </div>
+{% endblock %}

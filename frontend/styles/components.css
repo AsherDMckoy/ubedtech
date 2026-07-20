@@ -1,1 +1,582 @@
-/* Design-system primitives (slice 4). */
+/* Design-system primitives (FRONTEND.md §9): built once, reused by every
+   screen. A screen may not introduce a bespoke component when one of
+   these exists. Markup patterns and macros: frontend/templates/components/
+   and docs/FRONTEND_DESIGN_SYSTEM.md.
+
+   Exactly three animated surfaces exist (FRONTEND.md §2):
+   #1 dropdown menu (details.menu), #2 dialog (native <dialog>),
+   #3 mobile navigation sheet (details.nav-sheet). No fourth without an
+   ADR. Enter animations only — closing is the instant state change. */
+
+/* ---------- app shell: persistent rail (desktop) / top bar + nav sheet
+   (mobile). The shell is CSS-only; navigation works with JS off. */
+
+.shell {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  min-height: 100vh;
+}
+
+.shell-bare {
+  grid-template-columns: 1fr;
+}
+
+.rail {
+  background: var(--surface-1);
+  border-right: 0.5px solid var(--border);
+  padding: var(--space-4) var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.brand {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  padding: var(--space-1) var(--space-2) var(--space-3);
+}
+
+.navlink {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 7px var(--space-2);
+  border-radius: var(--radius);
+  font-size: 14px;
+  color: var(--text-secondary);
+  transition: background var(--dur-fast) var(--ease-enter);
+}
+
+.navlink:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.navlink[aria-current="page"] {
+  background: var(--bg-accent);
+  color: var(--text-accent);
+  font-weight: 500;
+}
+
+.rail-foot {
+  margin-top: auto;
+  padding: var(--space-2);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+main {
+  padding: var(--space-5);
+  min-width: 0;
+}
+
+/* Calm single-decision screens center a readable column; scanning screens
+   opt out with .main-wide (FRONTEND.md §6). */
+main > .wrap {
+  max-width: 920px;
+  margin: 0 auto;
+}
+
+.topbar {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .rail {
+    display: none;
+  }
+
+  .topbar {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-4);
+    background: var(--surface-1);
+    border-bottom: 0.5px solid var(--border);
+  }
+
+  .topbar .brand {
+    padding: 0;
+  }
+
+  main {
+    padding: var(--space-4);
+  }
+}
+
+/* Animated surface #3: the mobile navigation sheet. */
+.nav-sheet > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 14px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--space-3);
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius);
+}
+
+.nav-sheet > summary::-webkit-details-marker {
+  display: none;
+}
+
+.sheet-panel {
+  position: absolute;
+  left: var(--space-2);
+  right: var(--space-2);
+  top: calc(100% - var(--space-1));
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surface-2);
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--space-2);
+}
+
+.nav-sheet[open] > .sheet-panel {
+  animation: enter-down var(--dur-base) var(--ease-enter);
+}
+
+/* ---------- buttons: default, primary, disabled, in-progress. The
+   in-progress state is driven by the submit-once enhancement
+   (form[aria-busy], data-busy-label); with JS off the plain submit
+   round-trips and PRG repaints — no state is faked. */
+
+button,
+.btn {
+  font: inherit;
+  font-size: 14px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: var(--radius);
+  border: 0.5px solid var(--border-strong);
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background var(--dur-fast) var(--ease-enter);
+}
+
+button:hover,
+.btn:hover {
+  background: var(--surface-1);
+  text-decoration: none;
+}
+
+button:active,
+.btn:active {
+  transform: scale(0.98);
+}
+
+button[disabled] {
+  cursor: default;
+  opacity: 0.55;
+}
+
+button[disabled]:hover {
+  background: transparent;
+}
+
+.btn-primary {
+  background: var(--action);
+  border-color: var(--action);
+  color: var(--action-ink);
+}
+
+.btn-primary:hover {
+  background: var(--action);
+  filter: brightness(1.08);
+}
+
+form[aria-busy="true"] button {
+  cursor: progress;
+}
+
+/* ---------- form controls: input, search, select — always with an
+   associated label; errors are programmatically associated via
+   aria-describedby (see the field macro). */
+
+input,
+select,
+textarea {
+  font: inherit;
+  font-size: 15px;
+  width: 100%;
+  height: 40px;
+  padding: 0 var(--space-3);
+  border-radius: var(--radius);
+  border: 0.5px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+textarea {
+  height: auto;
+  min-height: 80px;
+  padding: var(--space-2) var(--space-3);
+}
+
+.field {
+  margin: 0 0 var(--space-4);
+}
+
+.field > label {
+  display: block;
+  font-size: 14px;
+  margin-bottom: var(--space-1);
+}
+
+.field-hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: var(--space-1) 0 0;
+}
+
+.field-error {
+  font-size: 13px;
+  color: var(--text-danger);
+  margin: var(--space-1) 0 0;
+}
+
+.field-invalid input,
+.field-invalid select,
+.field-invalid textarea {
+  border-color: var(--border-danger);
+}
+
+.searchbox {
+  position: relative;
+}
+
+.searchbox .searchbox-icon {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.searchbox input {
+  padding-left: 36px;
+}
+
+/* ---------- alert / banner: accent, success, warning, danger. The text
+   itself names what happened — color is never the sole signal. */
+
+.alert {
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 14px;
+  margin: 0 0 var(--space-4);
+}
+
+.alert-accent {
+  background: var(--bg-accent);
+  color: var(--text-accent);
+}
+
+.alert-success {
+  background: var(--bg-success);
+  color: var(--text-success);
+}
+
+.alert-warning {
+  background: var(--bg-warning);
+  color: var(--text-warning);
+}
+
+.alert-danger {
+  background: var(--bg-danger);
+  color: var(--text-danger);
+}
+
+/* Bare inline error paragraphs (login and older pages). */
+p[role="alert"] {
+  color: var(--text-danger);
+  font-size: 14px;
+}
+
+/* ---------- card */
+
+.card {
+  background: var(--surface-2);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: var(--space-4);
+}
+
+/* A card holding a full-bleed table. */
+.card-flush {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* ---------- data table: calm (default) and dense (scanning screens,
+   FRONTEND.md §6). Wrap in .table-wrap so narrow screens scroll the
+   table, not the page. */
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+caption {
+  position: absolute;
+  left: -999px;
+}
+
+thead th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 0.5px solid var(--border);
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: var(--space-3) var(--space-4);
+  border-top: 0.5px solid var(--border);
+  vertical-align: middle;
+}
+
+tbody tr:first-child td {
+  border-top: none;
+}
+
+.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+td.num {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+.table-dense {
+  font-size: 13px;
+}
+
+.table-dense thead th,
+.table-dense tbody td {
+  padding: var(--space-2) var(--space-3);
+  white-space: nowrap;
+}
+
+.table-dense tbody tr:hover {
+  background: var(--surface-1);
+}
+
+/* ---------- dialog: animated surface #2, on the native <dialog> element
+   (focus trap + Escape from the platform; opened by data-dialog-open). */
+
+dialog {
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-card);
+  max-width: 440px;
+  width: calc(100% - 2 * var(--space-4));
+  padding: var(--space-5);
+}
+
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.45);
+}
+
+dialog[open] {
+  animation: enter-up var(--dur-base) var(--ease-enter);
+}
+
+.dialog-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  margin-top: var(--space-5);
+}
+
+/* ---------- dropdown menu: animated surface #1, on <details> so it
+   works with JS off (open/close is native disclosure behavior). */
+
+details.menu {
+  position: relative;
+  display: inline-block;
+}
+
+details.menu > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 14px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 14px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius);
+  transition: background var(--dur-fast) var(--ease-enter);
+}
+
+details.menu > summary:hover {
+  background: var(--surface-1);
+}
+
+details.menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.menu > summary::after {
+  content: "▾";
+  color: var(--text-muted);
+}
+
+.menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 220px;
+  z-index: 30;
+  background: var(--surface-2);
+  border: 0.5px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: var(--space-1);
+  display: flex;
+  flex-direction: column;
+}
+
+details.menu[open] > .menu-panel {
+  animation: enter-down var(--dur-fast) var(--ease-enter);
+}
+
+.menu-panel a,
+.menu-panel button {
+  display: flex;
+  width: 100%;
+  justify-content: flex-start;
+  height: 34px;
+  align-items: center;
+  padding: 0 var(--space-2);
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.menu-panel a:hover,
+.menu-panel button:hover {
+  background: var(--surface-1);
+  text-decoration: none;
+}
+
+/* ---------- status badge (colors come from shared::assets::badge_class —
+   one status → one color everywhere). */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 9px;
+  border-radius: 20px;
+  white-space: nowrap;
+  background: var(--surface-1);
+  color: var(--text-secondary);
+}
+
+.badge-ok {
+  background: var(--bg-success);
+  color: var(--text-success);
+}
+
+.badge-info {
+  background: var(--bg-accent);
+  color: var(--text-accent);
+}
+
+.badge-warn {
+  background: var(--bg-warning);
+  color: var(--text-warning);
+}
+
+.badge-bad {
+  background: var(--bg-danger);
+  color: var(--text-danger);
+}
+
+/* ---------- loading / error / empty states. A spinner is only honest
+   when the wait is real (FRONTEND.md §2); under reduced motion it
+   freezes and the text carries the state. */
+
+.loading,
+.empty-state,
+.error-state {
+  padding: var(--space-6) var(--space-4);
+  text-align: center;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.error-state {
+  color: var(--text-danger);
+}
+
+.empty-state a {
+  display: inline-block;
+  margin-top: var(--space-2);
+}
+
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  vertical-align: -3px;
+  margin-right: var(--space-2);
+  border: 2px solid var(--border);
+  border-top-color: var(--text-accent);
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
+}
+
+/* ---------- shared keyframes (enter only; exit is instant) */
+
+@keyframes enter-down {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes enter-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}

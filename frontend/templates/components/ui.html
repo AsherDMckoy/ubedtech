@@ -1,0 +1,85 @@
+{#-
+  Design-system component macros (FRONTEND.md §9). Import with:
+    {% import "components/ui.html" as ui %}
+  Composite primitives that wrap arbitrary content (card, table, dialog,
+  menu, shell) are CSS markup patterns instead — documented with copyable
+  markup in docs/FRONTEND_DESIGN_SYSTEM.md and shown in pages/gallery.html.
+-#}
+
+{#- Primary navigation links, rendered once in the desktop rail and once
+    in the mobile sheet (only one is ever in the accessibility tree). -#}
+{% macro nav_links() %}
+  <a class="navlink" href="/ui/catalog">Catalog</a>
+  <a class="navlink" href="/ui/registration">Registration</a>
+  <a class="navlink" href="/ui/grades">Grades</a>
+  <a class="navlink" href="/ui/history">History</a>
+  <a class="navlink" href="/ui/documents">Documents</a>
+{% endmacro %}
+
+{#- Submit button with an honest in-progress label ("Checking…",
+    "Submitting…") swapped in by the submit-once enhancement. Never an
+    optimistic success label (FRONTEND.md §3). -#}
+{% macro busy_button(label, busy_label, primary) %}
+  <button type="submit" {% if primary %}class="btn-primary"{% endif %} data-busy-label="{{ busy_label }}">{{ label }}</button>
+{% endmacro %}
+
+{#- Labeled input with programmatically associated error/hint. Pass "" for
+    error/hint when absent; kind is the input type. -#}
+{% macro field(id, name, label, kind, value, error, hint) %}
+  <div class="field {% if !error.is_empty() %}field-invalid{% endif %}">
+    <label for="{{ id }}">{{ label }}</label>
+    <input id="{{ id }}" name="{{ name }}" type="{{ kind }}" value="{{ value }}"
+           {% if !error.is_empty() %}aria-describedby="{{ id }}-error" aria-invalid="true"{% else if !hint.is_empty() %}aria-describedby="{{ id }}-hint"{% endif %}>
+    {% if !error.is_empty() %}
+      <p class="field-error" id="{{ id }}-error">{{ error }}</p>
+    {% else if !hint.is_empty() %}
+      <p class="field-hint" id="{{ id }}-hint">{{ hint }}</p>
+    {% endif %}
+  </div>
+{% endmacro %}
+
+{#- Search input: read-path, instant and local when a screen enhances it
+    (FRONTEND.md §4); always a working GET form control without JS. -#}
+{% macro search(id, name, label, placeholder, value) %}
+  <div class="searchbox">
+    <span class="searchbox-icon" aria-hidden="true">⌕</span>
+    <label class="sr-only" for="{{ id }}">{{ label }}</label>
+    <input id="{{ id }}" name="{{ name }}" type="search"
+           placeholder="{{ placeholder }}" value="{{ value }}" autocomplete="off">
+  </div>
+{% endmacro %}
+
+{#- Alert/banner. kind: accent | success | warning | danger. Danger and
+    warning interrupt (role=alert); accent and success inform. -#}
+{% macro alert(kind, message) %}
+  <div class="alert alert-{{ kind }}" role="{% if kind == "danger" || kind == "warning" %}alert{% else %}status{% endif %}">{{ message }}</div>
+{% endmacro %}
+
+{#- Status badge: one status → one color, via the shared map. -#}
+{% macro badge(status) %}
+  <span class="badge {{ crate::shared::assets::badge_class(status) }}">{{ status }}</span>
+{% endmacro %}
+
+{#- Empty state: names the space and invites an action (FRONTEND.md §10).
+    Pass "" for href/action_label when there is no action. -#}
+{% macro empty_state(message, href, action_label) %}
+  <div class="empty-state">
+    <p>{{ message }}</p>
+    {% if !href.is_empty() %}<a href="{{ href }}">{{ action_label }}</a>{% endif %}
+  </div>
+{% endmacro %}
+
+{#- Error state: what happened, then what to do — no "Error:" prefix,
+    never a raw exception string. -#}
+{% macro error_state(message, next_step) %}
+  <div class="error-state" role="alert">
+    <p>{{ message }}</p>
+    <p>{{ next_step }}</p>
+  </div>
+{% endmacro %}
+
+{#- Loading state: only for real waits (server round trip, document
+    generation) — never for content already in the HTML. -#}
+{% macro loading(message) %}
+  <p class="loading" role="status"><span class="spinner" aria-hidden="true"></span>{{ message }}</p>
+{% endmacro %}
