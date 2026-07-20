@@ -40,6 +40,14 @@ async fn main() -> std::io::Result<()> {
         std::process::exit(1);
     });
 
+    // Fail at startup, not mid-request, when the frontend bundles are
+    // missing (ADR-12: dist/ is committed; APP_FRONTEND_DIST overrides).
+    tracing::info!(
+        css = crate::shared::assets::css_href(),
+        js = crate::shared::assets::js_href(),
+        "frontend assets loaded"
+    );
+
     let pool = db::connect_and_migrate(&config)
         .await
         .expect("database connection or migration failed");

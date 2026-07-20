@@ -1,32 +1,83 @@
-//! Static assets: one stylesheet, one small script, embedded in the binary
-//! and served under content-fingerprinted URLs with an immutable cache
-//! lifetime. No filesystem reads at request time, no build step — the
-//! fingerprint is derived from the embedded bytes at startup, so a changed
-//! file automatically gets a new URL and a year-long `Cache-Control` can
-//! never serve stale chrome.
+//! Static assets: the fingerprinted bundles the frontend pipeline writes
+//! into `frontend/dist/` (ADR-12), loaded into memory once at startup and
+//! served under their own content-hashed URLs with an immutable cache
+//! lifetime. `dist/` is committed, so building or testing the backend
+//! never invokes Node; the fingerprint in the filename comes from esbuild,
+//! so a changed bundle automatically gets a new URL and the year-long
+//! `Cache-Control` can never serve stale chrome.
 
 use std::sync::OnceLock;
 
 use actix_web::{HttpResponse, web};
-use sha2::{Digest, Sha256};
 
-pub const CSS: &str = include_str!("../../web/assets/app.css");
-pub const JS: &str = include_str!("../../web/assets/app.js");
+pub struct Dist {
+    css_href: String,
+    css: String,
+    js_href: String,
+    js: String,
+}
 
-fn fingerprint(content: &str) -> String {
-    hex::encode(&Sha256::digest(content.as_bytes())[..8])
+/// The dist directory: `APP_FRONTEND_DIST` if set, else `frontend/dist`
+/// next to the backend crate (correct for development and tests).
+fn dist_dir() -> String {
+    std::env::var("APP_FRONTEND_DIST")
+        .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../frontend/dist").to_string())
+}
+
+/// Loads the two bundles once. Called eagerly from `main.rs` so a
+/// deployment without built assets dies at startup with instructions,
+/// not mid-request.
+pub fn dist() -> &'static Dist {
+    static DIST: OnceLock<Dist> = OnceLock::new();
+    DIST.get_or_init(|| {
+        let dir = dist_dir();
+        let mut css = None;
+        let mut js = None;
+        let entries = std::fs::read_dir(&dir).unwrap_or_else(|error| {
+            panic!(
+                "cannot read the frontend dist directory {dir}: {error}. \
+                 Run `npm run build` in frontend/ or point APP_FRONTEND_DIST \
+                 at the built assets."
+            )
+        });
+        for entry in entries {
+            let path = entry.expect("dist directory entry").path();
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let slot = match name {
+                _ if name.starts_with("app-") && name.ends_with(".css") => &mut css,
+                _ if name.starts_with("app-") && name.ends_with(".js") => &mut js,
+                _ => continue,
+            };
+            assert!(
+                slot.is_none(),
+                "more than one app-*{} bundle in {dir}; re-run `npm run build`",
+                &name[name.rfind('.').unwrap()..]
+            );
+            let content = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+            *slot = Some((format!("/assets/{name}"), content));
+        }
+        let (css_href, css) =
+            css.unwrap_or_else(|| panic!("no app-*.css bundle in {dir}; run `npm run build`"));
+        let (js_href, js) =
+            js.unwrap_or_else(|| panic!("no app-*.js bundle in {dir}; run `npm run build`"));
+        Dist {
+            css_href,
+            css,
+            js_href,
+            js,
+        }
+    })
 }
 
 /// `/assets/app-<fingerprint>.css` — referenced from `base.html`.
 pub fn css_href() -> &'static str {
-    static HREF: OnceLock<String> = OnceLock::new();
-    HREF.get_or_init(|| format!("/assets/app-{}.css", fingerprint(CSS)))
+    &dist().css_href
 }
 
 /// `/assets/app-<fingerprint>.js` — referenced from `base.html`.
 pub fn js_href() -> &'static str {
-    static HREF: OnceLock<String> = OnceLock::new();
-    HREF.get_or_init(|| format!("/assets/app-{}.js", fingerprint(JS)))
+    &dist().js_href
 }
 
 /// Badge modifier class for a domain status string, used by templates as
@@ -48,14 +99,14 @@ async fn css() -> HttpResponse {
     HttpResponse::Ok()
         .content_type("text/css; charset=utf-8")
         .insert_header(IMMUTABLE)
-        .body(CSS)
+        .body(dist().css.as_str())
 }
 
 async fn js() -> HttpResponse {
     HttpResponse::Ok()
         .content_type("text/javascript; charset=utf-8")
         .insert_header(IMMUTABLE)
-        .body(JS)
+        .body(dist().js.as_str())
 }
 
 pub fn routes(cfg: &mut web::ServiceConfig) {
@@ -67,8 +118,7 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
 /// flow test (the "automated checks for the critical pages"). String-level
 /// on purpose — no HTML-parser dependency — so it catches the regressions
 /// that matter (missing labels, captions, landmarks, CSP violations)
-/// without pretending to replace a real browser + axe pass, which lives in
-/// the manual checklist (docs/FRONTEND_DESIGN_SYSTEM.md).
+/// without pretending to replace the axe pass in frontend/test/.
 #[cfg(test)]
 pub fn assert_page_a11y(html: &str) {
     assert!(
@@ -143,8 +193,8 @@ mod tests {
         .await;
 
         for (href, content_type, body) in [
-            (css_href(), "text/css; charset=utf-8", CSS),
-            (js_href(), "text/javascript; charset=utf-8", JS),
+            (css_href(), "text/css; charset=utf-8", &dist().css),
+            (js_href(), "text/javascript; charset=utf-8", &dist().js),
         ] {
             assert!(
                 href.starts_with("/assets/app-") && href.len() > "/assets/app-.css".len(),
@@ -209,53 +259,58 @@ mod tests {
         assert_eq!(badge_class("something-new"), "");
     }
 
-    /// Performance budget (docs/PERFORMANCE.md): chrome stays small. The
-    /// limits are generous multiples of today's sizes so the test fails on
-    /// a regression class (a vendored framework, a base64 image), not on
-    /// honest growth.
+    /// Performance budget (docs/PERFORMANCE.md): the CSS budget catches a
+    /// vendored framework or embedded image; the JS budget fits the Alpine
+    /// CSP build (~61 KiB minified, ADR-12) and catches a second one.
     #[test]
     fn asset_sizes_stay_inside_the_budget() {
         assert!(
-            CSS.len() <= 16 * 1024,
-            "app.css is {} bytes; budget is 16 KiB uncompressed",
-            CSS.len()
+            dist().css.len() <= 32 * 1024,
+            "app css bundle is {} bytes; budget is 32 KiB uncompressed",
+            dist().css.len()
         );
         assert!(
-            JS.len() <= 4 * 1024,
-            "app.js is {} bytes; budget is 4 KiB uncompressed",
-            JS.len()
+            dist().js.len() <= 80 * 1024,
+            "app js bundle is {} bytes; budget is 80 KiB uncompressed",
+            dist().js.len()
         );
     }
 
     /// No images, no inline styles, no inline handlers, no third-party
     /// URLs anywhere in the templates: critical workflow pages are text,
-    /// one stylesheet, one small script — all same-origin.
+    /// one stylesheet, one script bundle — all same-origin.
     #[test]
     fn templates_carry_no_images_or_csp_violations() {
-        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/web/pages");
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../frontend/templates");
         let mut checked = 0;
-        for entry in std::fs::read_dir(dir).unwrap() {
-            let path = entry.unwrap().path();
-            let name = path.file_name().unwrap().to_string_lossy().into_owned();
-            let source = std::fs::read_to_string(&path).unwrap();
-            assert!(!source.contains("<img"), "{name}: image on a workflow page");
-            assert!(!source.contains("<style"), "{name}: inline style block");
-            assert!(
-                !source.contains(" style=\""),
-                "{name}: inline style attribute"
-            );
-            assert!(!source.contains("onclick="), "{name}: inline event handler");
-            assert!(
-                !source.contains("http://") && !source.contains("https://"),
-                "{name}: external URL — assets must be same-origin"
-            );
-            if name != "base.html" {
-                assert!(
-                    source.contains("extends \"pages/base.html\""),
-                    "{name}: page does not extend the shared base"
-                );
+        for sub in ["pages", "components"] {
+            let dir = format!("{root}/{sub}");
+            if !std::path::Path::new(&dir).exists() {
+                continue;
             }
-            checked += 1;
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                let source = std::fs::read_to_string(&path).unwrap();
+                assert!(!source.contains("<img"), "{name}: image on a workflow page");
+                assert!(!source.contains("<style"), "{name}: inline style block");
+                assert!(
+                    !source.contains(" style=\""),
+                    "{name}: inline style attribute"
+                );
+                assert!(!source.contains("onclick="), "{name}: inline event handler");
+                assert!(
+                    !source.contains("http://") && !source.contains("https://"),
+                    "{name}: external URL — assets must be same-origin"
+                );
+                if sub == "pages" && name != "base.html" {
+                    assert!(
+                        source.contains("extends \"pages/base.html\""),
+                        "{name}: page does not extend the shared base"
+                    );
+                }
+                checked += 1;
+            }
         }
         assert!(
             checked >= 12,
@@ -263,10 +318,14 @@ mod tests {
         );
     }
 
-    fn hex_color(css: &str, token: &str) -> (f64, f64, f64) {
-        let at = css
-            .find(&format!("--{token}: #"))
-            .unwrap_or_else(|| panic!("token --{token} not found in app.css"));
+    /// The token sheet is the contrast source of truth (dist is minified,
+    /// so the source file is parsed; CI proves dist matches the sources).
+    fn tokens_css() -> &'static str {
+        include_str!("../../../frontend/styles/tokens.css")
+    }
+
+    fn hex_color(css: &str, token: &str) -> Option<(f64, f64, f64)> {
+        let at = css.find(&format!("--{token}: #"))?;
         let hex = &css[at + token.len() + 5..at + token.len() + 11];
         let channel = |i: usize| {
             let value = u8::from_str_radix(&hex[i..i + 2], 16).unwrap() as f64 / 255.0;
@@ -276,7 +335,7 @@ mod tests {
                 ((value + 0.055) / 1.055).powf(2.4)
             }
         };
-        (channel(0), channel(2), channel(4))
+        Some((channel(0), channel(2), channel(4)))
     }
 
     fn contrast(a: (f64, f64, f64), b: (f64, f64, f64)) -> f64 {
@@ -289,33 +348,53 @@ mod tests {
         (light + 0.05) / (dark + 0.05)
     }
 
-    /// WCAG AA, verified against the real stylesheet: change a token and
-    /// this test tells you whether the pair still reads.
+    /// WCAG AA over the real token sheet, light AND dark: change a token
+    /// and this test tells you whether the pair still reads.
     #[test]
     fn design_tokens_meet_wcag_contrast() {
+        let sheet = tokens_css();
+        let split = sheet
+            .find("prefers-color-scheme: dark")
+            .expect("tokens.css must define the dark theme");
+        let (light, dark) = sheet.split_at(split);
+        // The dark block only overrides; anything absent falls back.
+        let lookup = |theme: &str, token: &str| {
+            let block = if theme == "dark" { dark } else { light };
+            hex_color(block, token)
+                .or_else(|| hex_color(light, token))
+                .unwrap_or_else(|| panic!("token --{token} not found in tokens.css"))
+        };
+
         let text_pairs = [
-            ("ink", "paper"),
-            ("ink", "paper-dim"),
-            ("ink-soft", "paper"),
-            ("link", "paper"),
+            ("text-primary", "surface-0"),
+            ("text-primary", "surface-1"),
+            ("text-primary", "surface-2"),
+            ("text-secondary", "surface-0"),
+            ("text-secondary", "surface-1"),
+            ("text-secondary", "surface-2"),
+            ("text-muted", "surface-0"),
+            ("text-accent", "surface-0"),
+            ("text-accent", "surface-2"),
+            ("text-accent", "bg-accent"),
+            ("text-success", "bg-success"),
+            ("text-warning", "bg-warning"),
+            ("text-danger", "bg-danger"),
             ("action-ink", "action"),
-            ("ok-ink", "ok-bg"),
-            ("warn-ink", "warn-bg"),
-            ("bad-ink", "bad-bg"),
-            ("info-ink", "info-bg"),
-            ("mute-ink", "mute-bg"),
         ];
-        for (fg, bg) in text_pairs {
-            let ratio = contrast(hex_color(CSS, fg), hex_color(CSS, bg));
+        for theme in ["light", "dark"] {
+            for (fg, bg) in text_pairs {
+                let ratio = contrast(lookup(theme, fg), lookup(theme, bg));
+                assert!(
+                    ratio >= 4.5,
+                    "[{theme}] --{fg} on --{bg} is {ratio:.2}:1; WCAG AA text needs 4.5:1"
+                );
+            }
+            // Focus indicator against the page background (non-text: 3:1).
+            let ratio = contrast(lookup(theme, "border-accent"), lookup(theme, "surface-0"));
             assert!(
-                ratio >= 4.5,
-                "--{fg} on --{bg} is {ratio:.2}:1; WCAG AA text needs 4.5:1"
+                ratio >= 3.0,
+                "[{theme}] --border-accent on --surface-0 is {ratio:.2}:1; needs 3:1"
             );
-        }
-        // Focus indicator against both page backgrounds (non-text: 3:1).
-        for bg in ["paper", "paper-dim"] {
-            let ratio = contrast(hex_color(CSS, "focus"), hex_color(CSS, bg));
-            assert!(ratio >= 3.0, "--focus on --{bg} is {ratio:.2}:1; needs 3:1");
         }
     }
 }
