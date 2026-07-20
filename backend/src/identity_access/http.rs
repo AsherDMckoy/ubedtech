@@ -110,12 +110,18 @@ struct LoginPage<'a> {
     error: Option<&'a str>,
 }
 
+/// The rendered sign-in page, shared by the handlers below and the
+/// `render-pages` subcommand (frontend accessibility harness).
+pub(crate) fn signin_html(error: Option<&str>) -> Result<String, askama::Error> {
+    LoginPage { error }.render()
+}
+
 /// HTML login for the no-JavaScript flow the student pages degrade to.
 #[get("/ui/login")]
 pub async fn login_page() -> Result<HttpResponse, AppError> {
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
-        .body(LoginPage { error: None }.render()?))
+        .body(signin_html(None)?))
 }
 
 #[post("/ui/login")]

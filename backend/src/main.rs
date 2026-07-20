@@ -3,6 +3,7 @@ mod app;
 mod audit;
 mod config;
 mod db;
+mod dev;
 mod documents;
 mod enrollment;
 mod identity_access;
@@ -31,6 +32,18 @@ async fn main() -> std::io::Result<()> {
     // environment variables, so production configuration always wins.
     dotenvy::dotenv().ok();
 
+    // `render-pages <dir>`: render the critical pages for the frontend
+    // accessibility harness (frontend/test/). No config, no database, no
+    // tracing — it must work on a bare checkout and print only the files.
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("render-pages") {
+        let out_dir = args
+            .get(2)
+            .map(String::as_str)
+            .unwrap_or("../frontend/test/pages");
+        return crate::dev::render_pages(out_dir);
+    }
+
     crate::shared::observability::init_tracing();
 
     let config = AppConfig::from_env().unwrap_or_else(|error| {
@@ -55,7 +68,6 @@ async fn main() -> std::io::Result<()> {
     // Operator subcommands run before any server machinery — in particular
     // before the license check, because bootstrapping the platform admin
     // must work on a deployment that is locked or not yet licensed.
-    let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("bootstrap-platform-admin") {
         std::process::exit(run_bootstrap_platform_admin(&pool, &config, &args[2..]).await);
     }

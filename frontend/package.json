@@ -6,7 +6,9 @@
     "node": ">=26"
   },
   "scripts": {
-    "build": "node build.mjs"
+    "build": "node build.mjs",
+    "pretest": "cd ../backend && cargo run --quiet -- render-pages ../frontend/test/pages",
+    "test": "node test/a11y.mjs"
   },
   "dependencies": {
     "@alpinejs/csp": "3.15.12"

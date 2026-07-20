@@ -72,3 +72,20 @@ jobs:
 
       - name: cargo build (release profile compiles)
         run: cargo build --release
+
+      # Frontend: committed dist/ must match the sources (ADR-12), and the
+      # axe harness must pass on the rendered critical pages.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+
+      - name: frontend assets build reproducibly to the committed dist/
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+          git diff --exit-code -- dist
+
+      - name: frontend accessibility harness (axe)
+        working-directory: frontend
+        run: npm test
