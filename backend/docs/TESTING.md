@@ -30,7 +30,23 @@ harness — an infrastructure flake, not a code failure). Run
 `cargo test --all-targets --all-features -- --test-threads=4` locally;
 CI's service container copes with the default.
 
-## Current suite (128 tests as of Phase 8)
+## Current suite (131 tests as of the frontend/design-system session)
+
+The frontend session (2026-07-20) added 3: the sign-in redirect for
+signed-out browsers vs honest API 401s, the full UI sign-out flow
+(CSRF-protected, forged token 403, dead cookie redirects), and the
+structural audit over the design-system gallery + sign-in pages. The
+asset tests now audit the esbuild bundles loaded from `frontend/dist/`
+(ADR-12), and `design_tokens_meet_wcag_contrast` covers light AND dark
+from `frontend/styles/tokens.css`.
+
+There is also a frontend test step (not `cargo test`): `cd frontend &&
+npm test` renders the critical pages via `cargo run -- render-pages` and
+runs axe-core over them (jsdom; color-contrast excluded there because the
+token test proves it). CI runs it after the Rust gates, plus a
+dist-matches-sources diff.
+
+## Phase 8 (128 tests)
 
 Phase 8 added: `storage::tests::reads_are_confined_to_the_storage_root`
 (absolute + traversal paths refused) and

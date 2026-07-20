@@ -1,22 +1,24 @@
 # Performance
 
-## Frontend budgets (Phase 7 — established and enforced by tests)
+## Frontend budgets (Phase 7, rebased on the frontend/ pipeline — ADR-12)
 
-| Budget | Limit | Actual (2026-07-16) | Enforced by |
+| Budget | Limit | Actual (2026-07-20) | Enforced by |
 |---|---|---|---|
-| Stylesheet size | ≤ 16 KiB uncompressed | ~5.5 KiB (~1.8 KiB gzipped) | `asset_sizes_stay_inside_the_budget` |
-| Script size | ≤ 4 KiB uncompressed | ~1.2 KiB | same |
+| Stylesheet bundle (tokens + base + components) | ≤ 32 KiB uncompressed | ~10 KiB (~2.7 KiB gzipped) | `asset_sizes_stay_inside_the_budget` |
+| Script bundle (Alpine CSP build + enhancements) | ≤ 80 KiB uncompressed | ~61 KiB (~20 KiB gzipped) | same |
 | Images on workflow pages | none | none | `templates_carry_no_images_or_csp_violations` |
-| Third-party/external resources | none | none | same |
-| Asset caching | fingerprinted URL + `public, max-age=31536000, immutable` | ✓ | `assets_serve_fingerprinted_with_an_immutable_cache_lifetime` |
+| Third-party/external resources at runtime | none (Alpine is bundled, same-origin) | none | same |
+| Asset caching | esbuild content hash in the URL + `public, max-age=31536000, immutable` | ✓ | `assets_serve_fingerprinted_with_an_immutable_cache_lifetime` |
 | Compression | gzip (brotli/zstd also available) via `Compress` middleware | ✓ | `assets_compress_when_the_client_accepts_gzip` |
 
-Consequences: a first page view costs the HTML plus one ~2 KiB stylesheet
-and one ~1 KiB script; every later view costs the HTML alone (assets are
-immutable-cached). There is no client-side data fetching, no layout shift
-from late chrome (notices are server-rendered), and no blank-screen state
-(PRG navigation keeps the previous page until the response arrives; the
-submitting form shows a busy state via `aria-busy`).
+Consequences: a first page view costs the HTML plus one ~2.7 KiB
+stylesheet and one ~20 KiB script (both immutably cached — every later
+view costs the HTML alone). First meaningful content never waits on JS:
+pages are server-rendered, navigation is real links, and every form works
+before the bundle arrives (FRONTEND.md §7). No layout shift from late
+chrome (notices are server-rendered; the shell reserves its regions), and
+no blank-screen state (PRG keeps the previous page until the response
+arrives; the submitting form shows a busy state via `aria-busy`).
 
 ## Backend benchmarks (Phase 8, run 2026-07-17 — `load/README.md` to reproduce)
 

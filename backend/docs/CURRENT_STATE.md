@@ -5,12 +5,11 @@ Method: read every file in `backend/`, ran the build/test gates, started the
 server against the seeded dev database, and probed it with curl. Nothing below
 is assumed from the design docs.
 
-Note on repo layout: the project root (`ubedtech/`) is **not** a git
-repository; `backend/` is its own git repo (branch `master`, single "Initial
-Commit"). `docs/` therefore lives at `backend/docs/` so it can be committed
-per CLAUDE.md section 6. `frontend/` and `backend/load/` are empty
-directories. The design docs at the project root have `(1)`/`(2)` filename
-suffixes (download copies).
+Note on repo layout (updated 2026-07-20): the repository root is now the
+project root (`ubedtech/`) — moved from `backend/` so `frontend/`,
+`CLAUDE.md`, `FRONTEND.md`, and `docs/design-references/` are versioned
+(ADR-12). Canonical engineering docs remain at `backend/docs/`. The design
+docs at the project root keep their `(1)`/`(2)` download-suffix names.
 
 ## What exists and works
 
@@ -453,3 +452,42 @@ Phase 7 (frontend/UX hardening) not started, per session scope.
   test-backed row.
 - Test count: 126 → 128. All four critical journeys green end-to-end over
   HTTP (enrollment ui, records ui, documents ui, licensing lock tests).
+
+## Frontend foundation session outcome (2026-07-20)
+
+The `frontend/` structure, asset pipeline, design system, shell, auth
+wiring, demo seed, and axe harness — no feature screens (next session).
+
+- **Repo root moved** to the project root (pure-rename commit, history
+  follows); CI paths adjusted. ADR-12 records the frontend/backend
+  ownership split.
+- **Pipeline**: Node isolated in `frontend/` (exact pins, lockfile,
+  `.nvmrc`); esbuild bundles `js/app.js` (Alpine CSP build + submit-once/
+  busy-label/bfcache/dialog enhancements) and `styles/app.css` (tokens →
+  base → components) into content-fingerprinted `dist/` files.
+  **dist/ is committed**: backend builds and tests never invoke Node; CI
+  rebuilds and diffs to keep it honest.
+- **Backend serving**: `shared/assets.rs` loads `frontend/dist/` at
+  startup (`APP_FRONTEND_DIST` override, eager check in `main`), serves
+  immutable + gzip. Askama renders from `frontend/templates/`.
+- **Design system**: `tokens.css` extracted from the reference screens
+  (light + dark, both WCAG-tested; two documented AA deviations);
+  primitives per FRONTEND.md §9 with exactly three animated surfaces
+  (`<details>` menu, native `<dialog>`, `<details>` mobile nav sheet),
+  enter-only motion from tokens, global reduced-motion kill switch;
+  component macros in `templates/components/ui.html`; every primitive
+  rendered once in `pages/gallery.html`; docs/FRONTEND_DESIGN_SYSTEM.md
+  rewritten as built.
+- **Shell + auth**: base.html is the app shell (desktop rail / mobile
+  sheet). Signed-out GET on `/ui/*` 303s to `/ui/login` (API keeps 401);
+  CSRF-protected `GET/POST /ui/signout` revokes server-side and clears
+  the cookie. Both test-proven.
+- **Demo seed**: `src/dev/seed.sql` extended — Fall 2026 (add/drop OPEN),
+  six role accounts, full/low-seats/prereq-blocked sections, mixed grade
+  roster, advising hold, pending transcript request. Applies twice on a
+  fresh database (verified). No waitlist rows: waitlists are not a
+  backend feature.
+- **a11y harness**: `cargo run -- render-pages` + `frontend/test/a11y.mjs`
+  (axe-core in jsdom, color-contrast delegated to the token test) wired
+  as `npm test` and into CI; verified to fail on a seeded-violation page.
+- **Gates**: fmt/clippy/tests green at every slice; suite now 131.

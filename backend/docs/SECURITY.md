@@ -137,8 +137,9 @@ grants nothing. Sessions predating the column fail closed (re-login).
 Middleware outside the session layer: when the deployment's license is not
 active, every request answers **402** before any database work — except the
 tested exemption list (health probes, license status/import, locked page,
-session login/logout, `/ui/platform/` recovery UI), so a platform licensing
-admin can sign in and unlock a locked deployment. Proofs: `licensing::
+session login/logout and UI sign-out, static assets, `/ui/platform/`
+recovery UI), so a platform licensing admin can sign in and unlock a
+locked deployment. Proofs: `licensing::
 middleware` unit tests both directions, `locked_institution_answers_402_and_
 recovery_stays_reachable`, `platform_admin_flips_the_license_end_to_end`.
 

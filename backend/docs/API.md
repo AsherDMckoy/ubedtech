@@ -18,6 +18,8 @@ Created in Phase 2, when the first real API surface landed. Conventions:
 |---|---|---|
 | `POST /api/v1/session/login` | none (CSRF-exempt, license-exempt) | `{"username","password"}` → 200 `{"csrf_token"}` + session cookie; 401 uniform on any failure; 429 when throttled |
 | `POST /api/v1/session/logout` | session + CSRF | → 204 + removal cookie |
+| `GET /ui/signout` | session | sign-out confirmation page (CSRF form) |
+| `POST /ui/signout` | session + CSRF | revoke + removal cookie → 303 `/ui/login` |
 
 ## Account & roles (identity_access)
 

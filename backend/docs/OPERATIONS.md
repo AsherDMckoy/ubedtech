@@ -17,6 +17,7 @@ overrides real environment variables. See `.env.example` for the full list.
 | `APP_DB_MAX_CONNECTIONS` / `APP_DB_MIN_CONNECTIONS` | 64 / 8 | bounded pool = deliberate backpressure |
 | `APP_DB_ACQUIRE_TIMEOUT_SECS` | 5 | fail fast when the pool is saturated |
 | `APP_DOCUMENT_STORAGE_PATH` | `./var/documents` | PDF artifact store (back up with the database) |
+| `APP_FRONTEND_DIST` | `../frontend/dist` (next to the crate) | Built, fingerprinted frontend bundles; loaded once at startup, which fails loudly if they are missing (`npm run build`) |
 | `APP_WORKER_ID` | `document-worker-1` | claims jobs under this name (`document_job.locked_by`) |
 | `APP_SHUTDOWN_TIMEOUT_SECS` | 30 | HTTP drain and worker-stop budget |
 | `APP_READINESS_INTERVAL_SECS` | 5 | readiness prober cadence |
