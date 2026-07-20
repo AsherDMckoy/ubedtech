@@ -94,6 +94,8 @@ macro_rules! test_app {
                 .wrap(actix_web::middleware::from_fn(
                     crate::identity_access::middleware::session_middleware,
                 ))
+                // Same as main.rs: signed-out browsers land on sign-in.
+                .wrap(crate::app::login_redirects())
                 .configure(crate::identity_access::http::routes)
                 .service(whoami)
                 .service(form_probe),
@@ -1360,4 +1362,121 @@ async fn role_management_guardrails(pool: PgPool) {
     .await
     .unwrap();
     assert_eq!(audits, 0);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn signed_out_browsers_land_on_sign_in_but_api_clients_keep_401(pool: PgPool) {
+    let institution_id = seed_institution(&pool).await;
+    let app = test_app!(&pool, institution_id);
+
+    // A protected UI page without a session: redirect to the sign-in page.
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/ui/signout")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response.headers().get("location").unwrap(),
+        "/ui/login",
+        "browser navigation must land on sign-in"
+    );
+
+    // An API route stays an honest 401 for programmatic clients.
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/probe/whoami")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    // The sign-in page itself never redirects to itself.
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get().uri("/ui/login").to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn ui_signout_revokes_the_session_and_clears_the_cookie(pool: PgPool) {
+    let institution_id = seed_institution(&pool).await;
+    seed_credentialed_user(
+        &pool,
+        institution_id,
+        "signout.user",
+        "pw-signout",
+        "active",
+    )
+    .await;
+    let app = test_app!(&pool, institution_id);
+
+    let (cookie, csrf) = login_session!(&app, "signout.user", "pw-signout");
+
+    // The confirmation page renders a real CSRF-protected form.
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/ui/signout")
+            .cookie(cookie.clone())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+    assert!(body.contains("form method=\"post\" action=\"/ui/signout\""));
+    assert!(body.contains(&csrf));
+    crate::shared::assets::assert_page_a11y(&body);
+
+    // Signing out without the token is refused (cross-site POST).
+    let forged = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri("/ui/signout")
+            .cookie(cookie.clone())
+            .insert_header((
+                actix_web::http::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            ))
+            .set_payload("csrf_token=forged")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(forged.status(), StatusCode::FORBIDDEN);
+
+    // With the token: session revoked, cookie removed, back to sign-in.
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri("/ui/signout")
+            .cookie(cookie.clone())
+            .insert_header((
+                actix_web::http::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            ))
+            .set_payload(format!("csrf_token={csrf}"))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers().get("location").unwrap(), "/ui/login");
+    let removal = session_cookie_from(&response);
+    assert_eq!(removal.value(), "", "cookie must be cleared");
+
+    // The old cookie is dead server-side: the browser lands on sign-in.
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/ui/signout")
+            .cookie(cookie)
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(response.headers().get("location").unwrap(), "/ui/login");
 }

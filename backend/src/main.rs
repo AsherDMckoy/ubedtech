@@ -162,6 +162,8 @@ async fn main() -> std::io::Result<()> {
             .wrap(middleware::from_fn(
                 crate::licensing::middleware::license_middleware,
             ))
+            // Signed-out browsers land on sign-in instead of a bare 401.
+            .wrap(app::login_redirects())
             .wrap(middleware::NormalizePath::trim())
             // Compression sits outside everything that produces bodies; the
             // CSS/JS budget in docs/PERFORMANCE.md assumes it is on.

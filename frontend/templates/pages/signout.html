@@ -1,0 +1,13 @@
+{% extends "pages/base.html" %}
+{% block title %}Sign out{% endblock %}
+{% block content %}
+  <div class="wrap">
+    <h1>Sign out</h1>
+    <p>Signing out ends your session on this device.</p>
+    <form method="post" action="/ui/signout">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn-primary" data-busy-label="Signing out…">Sign out</button>
+      <a class="btn" href="/ui/registration">Stay signed in</a>
+    </form>
+  </div>
+{% endblock %}

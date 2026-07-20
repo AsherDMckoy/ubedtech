@@ -25,6 +25,7 @@ pub(crate) fn is_license_exempt(path: &str) -> bool {
         "/api/v1/session/login",
         "/api/v1/session/logout",
         "/ui/login",
+        "/ui/signout",
     ];
     // Static assets carry no institution data; the login and locked pages
     // need their stylesheet while locked.

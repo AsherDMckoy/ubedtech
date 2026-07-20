@@ -2,6 +2,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use actix_web::body::MessageBody;
+use actix_web::dev::ServiceResponse;
+use actix_web::http::{Method, StatusCode, header};
+use actix_web::middleware::{ErrorHandlerResponse, ErrorHandlers};
 use actix_web::{HttpResponse, middleware::DefaultHeaders, web};
 use sqlx::PgPool;
 
@@ -126,6 +130,32 @@ pub fn spawn_readiness_prober(
             }
             readiness.set(healthy);
         }
+    })
+}
+
+/// A signed-out browser navigating to a protected UI page lands on the
+/// sign-in page instead of a bare 401. Only GET under `/ui/` is rewritten
+/// — API clients keep their JSON 401, and the sign-in POST keeps its
+/// inline 401 re-render.
+pub fn login_redirects<B: MessageBody + 'static>() -> ErrorHandlers<B> {
+    ErrorHandlers::new().handler(StatusCode::UNAUTHORIZED, |response: ServiceResponse<B>| {
+        let request = response.request();
+        if request.method() == Method::GET
+            && request.path().starts_with("/ui/")
+            && request.path() != "/ui/login"
+        {
+            let redirect = HttpResponse::SeeOther()
+                .insert_header((header::LOCATION, "/ui/login"))
+                .finish()
+                .map_into_right_body();
+            let (request, _) = response.into_parts();
+            return Ok(ErrorHandlerResponse::Response(ServiceResponse::new(
+                request, redirect,
+            )));
+        }
+        Ok(ErrorHandlerResponse::Response(
+            response.map_into_left_body(),
+        ))
     })
 }
 

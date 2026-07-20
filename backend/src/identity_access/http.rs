@@ -174,6 +174,50 @@ fn session_response(policy: &SessionCookiePolicy, session: NewSession) -> HttpRe
     })
 }
 
+#[derive(Template)]
+#[template(path = "pages/signout.html")]
+struct SignoutPage<'a> {
+    csrf_token: &'a str,
+}
+
+/// Sign-out confirmation for the browser flow: a real CSRF-protected form,
+/// so a cross-site GET can never end a session.
+#[get("/ui/signout")]
+pub async fn signout_page(current: CurrentSession) -> Result<HttpResponse, AppError> {
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(
+            SignoutPage {
+                csrf_token: &current.csrf_token,
+            }
+            .render()?,
+        ))
+}
+
+#[derive(Deserialize)]
+pub struct SignoutForm {
+    csrf_token: String,
+}
+
+#[post("/ui/signout")]
+pub async fn signout_form(
+    current: CurrentSession,
+    sessions: web::Data<SessionService>,
+    form: web::Form<SignoutForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token; // validated by the CSRF middleware
+    sessions.revoke(current.session_id).await?;
+
+    let mut removal = Cookie::new(SESSION_COOKIE, "");
+    removal.set_path("/");
+    removal.make_removal();
+
+    Ok(HttpResponse::SeeOther()
+        .cookie(removal)
+        .insert_header(("Location", "/ui/login"))
+        .finish())
+}
+
 #[post("/api/v1/session/logout")]
 pub async fn logout(
     current: CurrentSession,
@@ -321,6 +365,8 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(login)
         .service(login_page)
         .service(login_form)
+        .service(signout_page)
+        .service(signout_form)
         .service(logout)
         .service(change_own_password)
         .service(reset_password)
