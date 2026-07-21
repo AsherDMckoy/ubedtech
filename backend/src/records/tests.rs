@@ -832,6 +832,87 @@ async fn draft_grades_never_reach_student_queries_however_called(pool: PgPool) {
     );
 }
 
+/// The grade-history view walks the full lifecycle newest-first with each
+/// value attributed, and obeys roster scoping: an unassigned instructor
+/// gets 404 for a real enrollment id, a student is forbidden outright.
+#[sqlx::test(migrations = "./migrations")]
+async fn grade_history_shows_attributed_lifecycle_under_roster_scoping(pool: PgPool) {
+    let fx = seed_grade_fixture(&pool).await;
+    let service = GradeService::new(pool.clone(), crate::audit::AuditWriter);
+
+    let version = service
+        .save_draft(&fx.instructor, save_command(fx.enrollment_id, "B", 0))
+        .await
+        .unwrap();
+    service
+        .save_draft(
+            &fx.instructor,
+            save_command(fx.enrollment_id, "B+", version),
+        )
+        .await
+        .unwrap();
+    service
+        .publish_section(&fx.officer, fx.section_id)
+        .await
+        .unwrap();
+    service
+        .correct_grade(
+            &fx.officer,
+            CorrectGradeCommand {
+                enrollment_id: fx.enrollment_id,
+                grade_code: "A-".into(),
+                grade_points: Some(3.7),
+                numeric_value: None,
+                reason: "transcription error".into(),
+                expected_version: version + 2,
+            },
+        )
+        .await
+        .unwrap();
+
+    let history = service
+        .grade_history(&fx.instructor, fx.enrollment_id)
+        .await
+        .unwrap();
+    let states: Vec<(&str, &str, i64)> = history
+        .entries
+        .iter()
+        .map(|entry| {
+            (
+                entry.grade_code.as_str(),
+                entry.state.as_str(),
+                entry.version,
+            )
+        })
+        .collect();
+    assert_eq!(
+        states,
+        vec![
+            ("A-", "amended", 4),
+            ("B+", "published", 3),
+            ("B+", "draft", 2),
+            ("B", "draft", 1),
+        ],
+        "every prior value survives, newest first"
+    );
+    // Attribution: the draft belongs to the instructor, the correction to
+    // the officer.
+    assert_ne!(history.entries[0].entered_by, history.entries[3].entered_by);
+    assert_eq!(history.head.student_number.len(), 10);
+
+    // Scoping mirrors the roster.
+    assert!(matches!(
+        service
+            .grade_history(&fx.other_instructor, fx.enrollment_id)
+            .await,
+        Err(AppError::NotFound)
+    ));
+    assert!(matches!(
+        service.grade_history(&fx.student, fx.enrollment_id).await,
+        Err(AppError::Forbidden)
+    ));
+}
+
 // ---------------------------------------------------------------------------
 // Grade pages over plain forms: instructor entry, officer publish, student
 // views — no JavaScript anywhere in the flow.
@@ -1126,6 +1207,18 @@ mod ui {
             roster.contains("grade-final") && !roster.contains("name=\"grade_code\""),
             "published rows are read-only"
         );
+
+        // The row links its grade history; the page walks draft → published
+        // with attribution (audited for a11y by get()).
+        let history_uri = format!(
+            "/ui/instructor/enrollments/{}/grade-history",
+            fx.enrollment_id
+        );
+        assert!(roster.contains(&history_uri));
+        let (status, grade_history) = get(&app, &instructor, &history_uri).await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(grade_history.contains("B+"));
+        assert!(grade_history.contains(">draft<") && grade_history.contains(">published<"));
 
         // Student now sees the published grade, and the history page shows
         // the record with no snapshots yet.

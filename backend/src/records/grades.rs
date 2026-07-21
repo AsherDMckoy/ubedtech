@@ -138,6 +138,36 @@ impl RosterView {
     }
 }
 
+/// Header of the grade-history page: whose grade, in which section.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct GradeHistoryHead {
+    pub section_id: Uuid,
+    pub student_number: String,
+    pub student_name: String,
+    pub course_code: String,
+    pub course_title: String,
+    pub section_code: String,
+}
+
+/// One line of a grade's history: the current record or a captured prior
+/// value, attributed to who entered it.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct RevisionRow {
+    pub grade_code: String,
+    pub state: String,
+    pub version: i64,
+    pub entered_by: String,
+    pub recorded_at: DateTime<Utc>,
+}
+
+/// The grade-history view: header plus entries newest-version first (the
+/// first entry is the current record).
+#[derive(Debug, Serialize)]
+pub struct GradeHistoryView {
+    pub head: GradeHistoryHead,
+    pub entries: Vec<RevisionRow>,
+}
+
 /// The grade codes the entry select offers. Anything else still passes the
 /// server-side 1–8 character validation (the select is UI, not the trust
 /// boundary).
@@ -205,11 +235,15 @@ impl GradeService {
         Ok(sections)
     }
 
-    /// The roster of one section: header plus each enrollment's grade state.
-    /// Instructors see only sections they are assigned to (anything else is
+    /// Section visibility, shared by the roster and the grade-history view:
+    /// instructors see only sections they are assigned to (anything else is
     /// 404, indistinguishable from nonexistent); a records officer sees any
-    /// section in the institution.
-    pub async fn roster(&self, actor: &Actor, section_id: Uuid) -> Result<RosterView, AppError> {
+    /// section in the institution; everyone else is Forbidden.
+    async fn require_section_visible(
+        &self,
+        actor: &Actor,
+        section_id: Uuid,
+    ) -> Result<(), AppError> {
         let visible: bool = if actor.has_role(Role::RecordsOfficer) {
             sqlx::query_scalar(
                 "SELECT EXISTS (SELECT 1 FROM section WHERE id = $1 AND institution_id = $2)",
@@ -241,6 +275,13 @@ impl GradeService {
         if !visible {
             return Err(AppError::NotFound);
         }
+        Ok(())
+    }
+
+    /// The roster of one section: header plus each enrollment's grade state,
+    /// under `require_section_visible` scoping.
+    pub async fn roster(&self, actor: &Actor, section_id: Uuid) -> Result<RosterView, AppError> {
+        self.require_section_visible(actor, section_id).await?;
 
         let section = sqlx::query_as::<_, SectionHeader>(
             r#"
@@ -283,6 +324,64 @@ impl GradeService {
         .fetch_all(&self.pool)
         .await?;
         Ok(RosterView { section, rows })
+    }
+
+    /// The full revision history of one enrollment's grade — the current
+    /// record plus every prior value the 0013 trigger captured, newest
+    /// first, each attributed to who entered it. Same visibility rule as
+    /// the roster.
+    pub async fn grade_history(
+        &self,
+        actor: &Actor,
+        enrollment_id: Uuid,
+    ) -> Result<GradeHistoryView, AppError> {
+        let head = sqlx::query_as::<_, GradeHistoryHead>(
+            r#"
+            SELECT
+                e.section_id,
+                sp.student_number,
+                ua.username AS student_name,
+                c.code AS course_code,
+                c.title AS course_title,
+                s.section_code
+            FROM enrollment e
+            JOIN student_profile sp ON sp.id = e.student_id
+            JOIN user_account ua ON ua.id = sp.user_id
+            JOIN section s ON s.id = e.section_id
+            JOIN course c ON c.id = s.course_id
+            WHERE e.id = $1 AND e.institution_id = $2
+            "#,
+        )
+        .bind(enrollment_id)
+        .bind(actor.institution_id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or(AppError::NotFound)?;
+
+        self.require_section_visible(actor, head.section_id).await?;
+
+        let entries = sqlx::query_as::<_, RevisionRow>(
+            r#"
+            SELECT g.grade_code, g.state, g.version,
+                   ua.username AS entered_by, g.updated_at AS recorded_at
+            FROM grade_record g
+            JOIN user_account ua ON ua.id = g.entered_by_user_id
+            WHERE g.enrollment_id = $1
+            UNION ALL
+            SELECT r.grade_code, r.state, r.version,
+                   ua.username AS entered_by, r.recorded_at
+            FROM grade_revision r
+            JOIN grade_record g ON g.id = r.grade_record_id
+            JOIN user_account ua ON ua.id = r.entered_by_user_id
+            WHERE g.enrollment_id = $1
+            ORDER BY version DESC
+            "#,
+        )
+        .bind(enrollment_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(GradeHistoryView { head, entries })
     }
 
     pub async fn student_grades(

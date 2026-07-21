@@ -1,0 +1,44 @@
+{% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
+{% block title %}Grade history — {{ view.head.student_name }}{% endblock %}
+{% block content %}
+  <div class="wrap">
+    <p class="crumb"><a href="/ui/instructor/sections/{{ view.head.section_id }}">{{ view.head.course_code }} · {{ view.head.course_title }}</a> · Section {{ view.head.section_code }}</p>
+
+    <h1>Grade history</h1>
+    <p class="sub">{{ view.head.student_name }} · <span class="s-id">{{ view.head.student_number }}</span></p>
+
+    {% if view.entries.is_empty() %}
+      {% call ui::empty_state("No grade has been entered for this enrollment yet.", "", "") %}{% endcall %}
+    {% else %}
+      <div class="card card-flush table-wrap">
+        <table>
+          <caption>Every recorded value of this grade, newest first — prior values are captured automatically and can never be erased</caption>
+          <thead>
+            <tr>
+              <th scope="col">Version</th>
+              <th scope="col">Grade</th>
+              <th scope="col">State</th>
+              <th scope="col">Entered by</th>
+              <th scope="col">When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for entry in view.entries %}
+              <tr>
+                <td class="num">
+                  {{ entry.version }}{% if loop.first %} <span class="badge">current</span>{% endif %}
+                </td>
+                <td class="num">{{ entry.grade_code }}</td>
+                <td>{% call ui::badge(entry.state.as_str()) %}{% endcall %}</td>
+                <td>{{ entry.entered_by }}</td>
+                <td>{{ entry.recorded_at.format("%b %-d, %Y %H:%M") }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="foot">A published grade changes only through a recorded correction — each line above says who entered what, and when.</p>
+    {% endif %}
+  </div>
+{% endblock %}

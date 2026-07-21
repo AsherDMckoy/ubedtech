@@ -271,6 +271,60 @@ pub async fn roster_page(
     Ok(html(StatusCode::OK, body))
 }
 
+#[derive(Template)]
+#[template(path = "pages/grade_history.html")]
+struct GradeHistoryPage {
+    view: crate::records::grades::GradeHistoryView,
+}
+
+/// Per-student grade revision history: the current record plus every prior
+/// value the database trigger captured, attributed. Roster visibility rules
+/// apply (assigned instructor or records officer).
+#[get("/ui/instructor/enrollments/{enrollment_id}/grade-history")]
+pub async fn grade_history_page(
+    actor: Actor,
+    service: web::Data<GradeService>,
+    enrollment_id: web::Path<Uuid>,
+) -> Result<HttpResponse, AppError> {
+    let page = GradeHistoryPage {
+        view: service
+            .grade_history(&actor, enrollment_id.into_inner())
+            .await?,
+    };
+    Ok(html(StatusCode::OK, page.render()?))
+}
+
+/// Renders the grade-history page with representative data and no
+/// database, for the frontend axe harness (`render-pages`).
+pub fn sample_grade_history_html() -> Result<String, askama::Error> {
+    use crate::records::grades::{GradeHistoryHead, GradeHistoryView, RevisionRow};
+    let entry = |version, code: &str, state: &str, by: &str| RevisionRow {
+        grade_code: code.to_owned(),
+        state: state.to_owned(),
+        version,
+        entered_by: by.to_owned(),
+        recorded_at: chrono::Utc::now(),
+    };
+    GradeHistoryPage {
+        view: GradeHistoryView {
+            head: GradeHistoryHead {
+                section_id: Uuid::nil(),
+                student_number: "2023-01144".into(),
+                student_name: "Marcus Bennett".into(),
+                course_code: "CMPS 2131".into(),
+                course_title: "Data structures".into(),
+                section_code: "01".into(),
+            },
+            entries: vec![
+                entry(3, "A-", "amended", "records.officer"),
+                entry(2, "B+", "published", "records.officer"),
+                entry(1, "B+", "draft", "prof.alvarez"),
+            ],
+        },
+    }
+    .render()
+}
+
 #[derive(Deserialize)]
 pub struct GradeEntryForm {
     section_id: Uuid,
@@ -773,6 +827,7 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .service(roster_page)
         .service(save_grade_form)
         .service(publish_form)
+        .service(grade_history_page)
         .service(schedule_page)
         .service(student_grades_page)
         .service(history_page)

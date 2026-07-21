@@ -90,7 +90,11 @@
                   <span class="badge">Not entered</span>
                 {% endif %}
               </td>
-              <td class="col-hist"></td>
+              <td class="col-hist">
+                {% if row.state.is_some() %}
+                  <a href="/ui/instructor/enrollments/{{ row.enrollment_id }}/grade-history">History</a>
+                {% endif %}
+              </td>
             </tr>
           {% endfor %}
         </tbody>
