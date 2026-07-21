@@ -1,35 +1,40 @@
 {% extends "pages/base.html" %}
-{% block title %}My grades{% endblock %}
+{% import "components/ui.html" as ui %}
+{% block title %}Your grades{% endblock %}
 {% block content %}
-  <h1>My grades</h1>
-  {% if let Some(term) = term %}
-    <h2>{{ term.name }} ({{ term.code }})</h2>
-    {% if grades.is_empty() %}
-      <p>No published grades yet this term.</p>
+  <div class="wrap">
+    <h1>Your grades</h1>
+    {% if let Some(term) = term %}
+      <p class="sub">{{ term.name }} · published grades only</p>
+      {% if grades.is_empty() %}
+        {% call ui::empty_state("No published grades yet this term.", "/ui/history", "See your academic history") %}{% endcall %}
+      {% else %}
+        <div class="card card-flush table-wrap">
+          <table>
+            <caption>Published grades for {{ term.name }}</caption>
+            <thead>
+              <tr>
+                <th scope="col">Course</th>
+                <th scope="col">Section</th>
+                <th scope="col">Grade</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for grade in grades %}
+                <tr>
+                  <td>{{ grade.course_code }} · {{ grade.course_title }}</td>
+                  <td>{{ grade.section_code }}</td>
+                  <td class="num">{{ grade.grade_code }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
     {% else %}
-      <table>
-        <caption>Published grades</caption>
-        <thead>
-          <tr>
-            <th scope="col">Course</th>
-            <th scope="col">Section</th>
-            <th scope="col">Grade</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for grade in grades %}
-            <tr>
-              <td>{{ grade.course_code }} — {{ grade.course_title }}</td>
-              <td>{{ grade.section_code }}</td>
-              <td>{{ grade.grade_code }}</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+      {% call ui::alert("accent", "There is no active term right now.") %}{% endcall %}
     {% endif %}
-  {% else %}
-    <p>There is no active term right now.</p>
-  {% endif %}
 
-  <p><a href="/ui/history">Full academic history</a></p>
+    <p><a href="/ui/history">Full academic history</a></p>
+  </div>
 {% endblock %}

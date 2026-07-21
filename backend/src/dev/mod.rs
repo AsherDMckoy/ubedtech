@@ -42,6 +42,14 @@ pub fn render_pages(out_dir: &str) -> std::io::Result<()> {
             "schedule.html",
             render("schedule", crate::records::http::sample_schedule_html()),
         ),
+        (
+            "grades.html",
+            render("grades", crate::records::http::sample_grades_html()),
+        ),
+        (
+            "history.html",
+            render("history", crate::records::http::sample_history_html()),
+        ),
     ];
     for (name, html) in pages {
         let path = format!("{out_dir}/{name}");

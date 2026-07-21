@@ -775,6 +775,63 @@ async fn grade_entry_window_binds_instructors_not_the_officer(pool: PgPool) {
         .expect("no deadline means no window");
 }
 
+/// The no-draft-leak guarantee at the SERVICE layer: every student-facing
+/// grade read excludes drafts in the query itself, so there is no calling
+/// convention — page, JSON, future caller — that can surface one. (The
+/// HTTP-level proof lives in the UI flow test; this pins the queries.)
+#[sqlx::test(migrations = "./migrations")]
+async fn draft_grades_never_reach_student_queries_however_called(pool: PgPool) {
+    let fx = seed_grade_fixture(&pool).await;
+    let service = GradeService::new(pool.clone(), crate::audit::AuditWriter);
+
+    service
+        .save_draft(&fx.instructor, save_command(fx.enrollment_id, "A", 0))
+        .await
+        .unwrap();
+    let state: String =
+        sqlx::query_scalar("SELECT state FROM grade_record WHERE enrollment_id = $1")
+            .bind(fx.enrollment_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(state, "draft", "the grade exists, as a draft");
+
+    assert!(
+        service
+            .student_grades(&fx.student, fx.term_id)
+            .await
+            .unwrap()
+            .is_empty(),
+        "current-term view must not return the draft"
+    );
+    assert!(
+        service
+            .academic_history(&fx.student)
+            .await
+            .unwrap()
+            .is_empty(),
+        "academic history must not return the draft"
+    );
+
+    // Publication is the one gate that makes it visible.
+    service
+        .publish_section(&fx.officer, fx.section_id)
+        .await
+        .unwrap();
+    assert_eq!(
+        service
+            .student_grades(&fx.student, fx.term_id)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        service.academic_history(&fx.student).await.unwrap().len(),
+        1
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Grade pages over plain forms: instructor entry, officer publish, student
 // views — no JavaScript anywhere in the flow.

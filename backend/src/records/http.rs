@@ -408,6 +408,56 @@ struct StudentGradesPage {
     grades: Vec<StudentGradeRow>,
 }
 
+/// Sample term used by the no-database axe renders below.
+fn sample_term() -> TermSummary {
+    use chrono::{Duration, Utc};
+    let now = Utc::now();
+    TermSummary {
+        id: Uuid::nil(),
+        code: "FA26".into(),
+        name: "Fall 2026".into(),
+        starts_on: now.date_naive(),
+        ends_on: (now + Duration::days(100)).date_naive(),
+        registration_opens_at: now - Duration::days(20),
+        add_drop_closes_at: now + Duration::days(14),
+    }
+}
+
+/// Renders the grades page with representative data and no database, for
+/// the frontend axe harness (`render-pages`).
+pub fn sample_grades_html() -> Result<String, askama::Error> {
+    StudentGradesPage {
+        term: Some(sample_term()),
+        grades: vec![StudentGradeRow {
+            course_code: "CMPS 2131".into(),
+            course_title: "Data structures".into(),
+            section_code: "01".into(),
+            grade_code: "B+".into(),
+            published_at: Some(chrono::Utc::now()),
+        }],
+    }
+    .render()
+}
+
+/// Renders the history page with representative data and no database, for
+/// the frontend axe harness (`render-pages`).
+pub fn sample_history_html() -> Result<String, askama::Error> {
+    HistoryPage {
+        courses: vec![HistoryRow {
+            term_code: "FA26".into(),
+            term_name: "Fall 2026".into(),
+            course_code: "CMPS 2131".into(),
+            course_title: "Data structures".into(),
+            credit_hours: 3.0,
+            grade_code: "B+".into(),
+            grade_points: Some(3.3),
+            state: "published".into(),
+        }],
+        snapshots: Vec::new(),
+    }
+    .render()
+}
+
 /// The student's published grades for the current term. Drafts are excluded
 /// by the underlying query, not by this page.
 #[get("/ui/grades")]
