@@ -61,6 +61,13 @@ pub fn render_pages(out_dir: &str) -> std::io::Result<()> {
                 crate::records::http::sample_proof_html(),
             ),
         ),
+        (
+            "instructor_sections.html",
+            render(
+                "instructor_sections",
+                crate::records::http::sample_instructor_sections_html(),
+            ),
+        ),
     ];
     for (name, html) in pages {
         let path = format!("{out_dir}/{name}");

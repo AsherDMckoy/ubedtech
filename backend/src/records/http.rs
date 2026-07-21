@@ -152,6 +152,22 @@ pub async fn instructor_sections_page(
     Ok(html(StatusCode::OK, page.render()?))
 }
 
+/// Renders the instructor landing with representative data and no
+/// database, for the frontend axe harness (`render-pages`).
+pub fn sample_instructor_sections_html() -> Result<String, askama::Error> {
+    InstructorSectionsPage {
+        sections: vec![InstructorSection {
+            section_id: Uuid::nil(),
+            course_code: "CMPS 2131".into(),
+            course_title: "Data structures".into(),
+            section_code: "01".into(),
+            term_name: "Fall 2026".into(),
+            enrolled_count: 40,
+        }],
+    }
+    .render()
+}
+
 #[derive(Template)]
 #[template(path = "pages/roster.html")]
 struct RosterPage<'a> {

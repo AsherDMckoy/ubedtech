@@ -1,34 +1,40 @@
 {% extends "pages/base.html" %}
-{% block title %}My sections{% endblock %}
+{% import "components/ui.html" as ui %}
+{% block title %}Your sections{% endblock %}
 {% block content %}
-  <h1>My sections</h1>
-  {% if sections.is_empty() %}
-    <p>You are not assigned to any sections.</p>
-  {% else %}
-    <table>
-      <caption>Assigned sections</caption>
-      <thead>
-        <tr>
-          <th scope="col">Term</th>
-          <th scope="col">Course</th>
-          <th scope="col">Section</th>
-          <th scope="col">Enrolled</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for section in sections %}
-          <tr>
-            <td>{{ section.term_name }}</td>
-            <td>
-              <a href="/ui/instructor/sections/{{ section.section_id }}">
-                {{ section.course_code }} — {{ section.course_title }}
-              </a>
-            </td>
-            <td>{{ section.section_code }}</td>
-            <td>{{ section.enrolled_count }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% endif %}
+  <div class="wrap">
+    <h1>Your sections</h1>
+    <p class="sub">Sections you are assigned to teach — grade entry runs from here</p>
+    {% if sections.is_empty() %}
+      {% call ui::empty_state("No sections are assigned to you yet. Assignments come from the registrar.", "", "") %}{% endcall %}
+    {% else %}
+      <div class="card card-flush table-wrap">
+        <table>
+          <caption>Assigned sections</caption>
+          <thead>
+            <tr>
+              <th scope="col">Term</th>
+              <th scope="col">Course</th>
+              <th scope="col">Section</th>
+              <th scope="col" class="num">Enrolled</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for section in sections %}
+              <tr>
+                <td>{{ section.term_name }}</td>
+                <td>
+                  <a href="/ui/instructor/sections/{{ section.section_id }}">
+                    {{ section.course_code }} · {{ section.course_title }}
+                  </a>
+                </td>
+                <td>{{ section.section_code }}</td>
+                <td class="num">{{ section.enrolled_count }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+  </div>
 {% endblock %}
