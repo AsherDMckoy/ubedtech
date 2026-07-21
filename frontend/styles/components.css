@@ -810,6 +810,78 @@ tr.just-changed {
   font-size: 14px;
 }
 
+/* ---------- unofficial student documents (transcript, proof of
+   enrollment): a labeled identity header, and a print stylesheet that
+   drops the app chrome — the page itself is the printable document. */
+
+.doc-actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  margin-bottom: var(--space-4);
+}
+
+.doc-head {
+  margin: 0 0 var(--space-4);
+}
+
+.doc-head > div {
+  display: flex;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  font-size: 14px;
+}
+
+.doc-head dt {
+  width: 140px;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+
+.doc-head dd {
+  margin: 0;
+  font-weight: 500;
+}
+
+.doc-foot {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: var(--space-4);
+}
+
+@media print {
+  .rail,
+  .topbar,
+  .skip-link,
+  .no-print {
+    display: none !important;
+  }
+
+  .shell {
+    display: block;
+  }
+
+  body {
+    background: #fff;
+    color: #000;
+  }
+
+  main {
+    padding: 0;
+  }
+
+  .card {
+    border-color: #000;
+  }
+
+  /* The unofficial marking must survive on paper. */
+  .alert-warning {
+    background: none;
+    color: #000;
+    border: 1px solid #000;
+  }
+}
+
 /* ---------- shared keyframes (enter only; exit is instant) */
 
 @keyframes enter-down {

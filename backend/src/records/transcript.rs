@@ -72,6 +72,34 @@ impl TranscriptSnapshotService {
         Ok(snapshot_id)
     }
 
+    /// The student's own identity header for unofficial documents (the
+    /// on-screen transcript and proof of enrollment).
+    pub async fn own_identity(
+        &self,
+        pool: &PgPool,
+        actor: &Actor,
+    ) -> Result<StudentIdentity, AppError> {
+        let student_id = actor.require_student_self()?;
+        sqlx::query_as::<_, StudentIdentity>(
+            r#"
+            SELECT
+                sp.student_number,
+                ua.username AS student_name,
+                sp.program_code,
+                i.name AS institution_name
+            FROM student_profile sp
+            JOIN user_account ua ON ua.id = sp.user_id
+            JOIN institution i ON i.id = sp.institution_id
+            WHERE sp.id = $1 AND sp.institution_id = $2
+            "#,
+        )
+        .bind(student_id)
+        .bind(actor.institution_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or(AppError::NotFound)
+    }
+
     /// The student's own snapshot list, newest first.
     pub async fn own_snapshots(
         &self,
@@ -209,4 +237,13 @@ struct StudentHeader {
     student_number: String,
     student_name: String,
     program_code: String,
+}
+
+/// Identity block on the unofficial student documents.
+#[derive(Debug, sqlx::FromRow)]
+pub struct StudentIdentity {
+    pub student_number: String,
+    pub student_name: String,
+    pub program_code: String,
+    pub institution_name: String,
 }

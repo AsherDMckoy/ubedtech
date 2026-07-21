@@ -13,7 +13,7 @@ use crate::records::grades::{
     CorrectGradeCommand, HistoryRow, InstructorSection, RosterView, SaveGradeCommand,
     StudentGradeRow,
 };
-use crate::records::transcript::SnapshotSummary;
+use crate::records::transcript::{SnapshotSummary, StudentIdentity};
 use crate::records::{GradeService, ScheduleQuery, TranscriptSnapshotService};
 use sqlx::PgPool;
 
@@ -496,6 +496,116 @@ pub async fn history_page(
     Ok(html(StatusCode::OK, page.render()?))
 }
 
+#[derive(Template)]
+#[template(path = "pages/transcript.html")]
+struct TranscriptPage {
+    identity: StudentIdentity,
+    courses: Vec<HistoryRow>,
+    generated_on: String,
+}
+
+/// The unofficial transcript: the student's published record on screen,
+/// printable via the print stylesheet, clearly marked unofficial. No PDF
+/// pipeline — official documents keep theirs.
+#[get("/ui/transcript")]
+pub async fn transcript_page(
+    actor: Actor,
+    grades: web::Data<GradeService>,
+    snapshots: web::Data<TranscriptSnapshotService>,
+    pool: web::Data<PgPool>,
+) -> Result<HttpResponse, AppError> {
+    let page = TranscriptPage {
+        identity: snapshots.own_identity(&pool, &actor).await?,
+        courses: grades.academic_history(&actor).await?,
+        generated_on: generated_on(),
+    };
+    Ok(html(StatusCode::OK, page.render()?))
+}
+
+#[derive(Template)]
+#[template(path = "pages/proof_of_enrollment.html")]
+struct ProofOfEnrollmentPage {
+    identity: StudentIdentity,
+    term: Option<TermSummary>,
+    enrollments: Vec<crate::enrollment::types::EnrolledSection>,
+    generated_on: String,
+}
+
+/// Unofficial proof of enrollment: identity plus the current term's active
+/// enrollments, printable, clearly marked unofficial.
+#[get("/ui/proof-of-enrollment")]
+pub async fn proof_of_enrollment_page(
+    actor: Actor,
+    enrollment: web::Data<crate::enrollment::EnrollmentService>,
+    academics: web::Data<AcademicsService>,
+    snapshots: web::Data<TranscriptSnapshotService>,
+    pool: web::Data<PgPool>,
+) -> Result<HttpResponse, AppError> {
+    let term = academics.current_term(&actor).await?;
+    let enrollments = match &term {
+        Some(term) => enrollment.list_own_active(&actor, term.id).await?,
+        None => Vec::new(),
+    };
+    let page = ProofOfEnrollmentPage {
+        identity: snapshots.own_identity(&pool, &actor).await?,
+        term,
+        enrollments,
+        generated_on: generated_on(),
+    };
+    Ok(html(StatusCode::OK, page.render()?))
+}
+
+fn generated_on() -> String {
+    chrono::Utc::now().format("%b %-d, %Y").to_string()
+}
+
+fn sample_identity() -> StudentIdentity {
+    StudentIdentity {
+        student_number: "2026-0042".into(),
+        student_name: "d.reyes".into(),
+        program_code: "CS".into(),
+        institution_name: "University of Belize".into(),
+    }
+}
+
+/// Renders the unofficial transcript with representative data and no
+/// database, for the frontend axe harness (`render-pages`).
+pub fn sample_transcript_html() -> Result<String, askama::Error> {
+    TranscriptPage {
+        identity: sample_identity(),
+        courses: vec![HistoryRow {
+            term_code: "FA26".into(),
+            term_name: "Fall 2026".into(),
+            course_code: "CMPS 2131".into(),
+            course_title: "Data structures".into(),
+            credit_hours: 3.0,
+            grade_code: "B+".into(),
+            grade_points: Some(3.3),
+            state: "published".into(),
+        }],
+        generated_on: generated_on(),
+    }
+    .render()
+}
+
+/// Renders the proof of enrollment with representative data and no
+/// database, for the frontend axe harness (`render-pages`).
+pub fn sample_proof_html() -> Result<String, askama::Error> {
+    ProofOfEnrollmentPage {
+        identity: sample_identity(),
+        term: Some(sample_term()),
+        enrollments: vec![crate::enrollment::types::EnrolledSection {
+            enrollment_id: Uuid::nil(),
+            course_code: "CMPS 2131".into(),
+            course_title: "Data structures".into(),
+            section_code: "01".into(),
+            meetings: "Mon/Wed 09:00-10:15".into(),
+        }],
+        generated_on: generated_on(),
+    }
+    .render()
+}
+
 async fn render_roster(
     actor: &Actor,
     current: &CurrentSession,
@@ -543,5 +653,7 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .service(publish_form)
         .service(schedule_page)
         .service(student_grades_page)
-        .service(history_page);
+        .service(history_page)
+        .service(transcript_page)
+        .service(proof_of_enrollment_page);
 }

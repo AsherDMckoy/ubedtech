@@ -50,6 +50,17 @@ pub fn render_pages(out_dir: &str) -> std::io::Result<()> {
             "history.html",
             render("history", crate::records::http::sample_history_html()),
         ),
+        (
+            "transcript.html",
+            render("transcript", crate::records::http::sample_transcript_html()),
+        ),
+        (
+            "proof_of_enrollment.html",
+            render(
+                "proof_of_enrollment",
+                crate::records::http::sample_proof_html(),
+            ),
+        ),
     ];
     for (name, html) in pages {
         let path = format!("{out_dir}/{name}");

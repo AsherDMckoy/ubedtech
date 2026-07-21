@@ -1,0 +1,52 @@
+{% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
+{% block title %}Unofficial transcript{% endblock %}
+{% block content %}
+  <div class="wrap print-doc">
+    <div class="doc-actions no-print">
+      <button type="button" data-print>Print this page</button>
+      <a class="btn" href="/ui/documents">Request an official transcript</a>
+    </div>
+
+    {% call ui::alert("warning", "Unofficial transcript — for your own reference. It is not an official university document and carries no seal or signature.") %}{% endcall %}
+
+    <h1>Unofficial transcript</h1>
+    <dl class="doc-head">
+      <div><dt>Institution</dt><dd>{{ identity.institution_name }}</dd></div>
+      <div><dt>Student</dt><dd>{{ identity.student_name }}</dd></div>
+      <div><dt>Student number</dt><dd>{{ identity.student_number }}</dd></div>
+      <div><dt>Program</dt><dd>{{ identity.program_code }}</dd></div>
+      <div><dt>Generated</dt><dd>{{ generated_on }}</dd></div>
+    </dl>
+
+    {% if courses.is_empty() %}
+      {% call ui::empty_state("No published grades on record yet.", "", "") %}{% endcall %}
+    {% else %}
+      <div class="card card-flush table-wrap">
+        <table>
+          <caption>Published academic record, oldest term first</caption>
+          <thead>
+            <tr>
+              <th scope="col">Term</th>
+              <th scope="col">Course</th>
+              <th scope="col">Credits</th>
+              <th scope="col">Grade</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in courses %}
+              <tr>
+                <td>{{ row.term_name }} ({{ row.term_code }})</td>
+                <td>{{ row.course_code }} · {{ row.course_title }}</td>
+                <td class="num">{{ row.credit_hours }}</td>
+                <td class="num">{{ row.grade_code }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+
+    <p class="doc-foot">Unofficial — generated for the student's own use. Official transcripts are requested under Documents.</p>
+  </div>
+{% endblock %}

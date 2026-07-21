@@ -71,6 +71,11 @@ addEventListener("click", (event) => {
   }
   if (event.target.closest("[data-dialog-close]")) {
     event.target.closest("dialog")?.close();
+    return;
+  }
+  // Print buttons on the unofficial documents (CSP forbids inline handlers).
+  if (event.target.closest("[data-print]")) {
+    window.print();
   }
 });
 

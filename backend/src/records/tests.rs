@@ -895,6 +895,10 @@ mod ui {
                     .app_data(web::Data::new(crate::records::ScheduleQuery::new(
                         $pool.clone(),
                     )))
+                    .app_data(web::Data::new(crate::enrollment::EnrollmentService::new(
+                        $pool.clone(),
+                        crate::audit::AuditWriter,
+                    )))
                     .wrap(actix_web::middleware::from_fn(
                         crate::identity_access::csrf::csrf_middleware,
                     ))
@@ -1145,5 +1149,27 @@ mod ui {
             schedule.contains("Tuesday") && schedule.contains("Records Course"),
             "meeting shows on its weekday"
         );
+
+        // Unofficial transcript: identity, the published grade, and the
+        // unofficial marking — for the student's own record only.
+        let (status, transcript) = get(&app, &student, "/ui/transcript").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(transcript.contains("Unofficial transcript"));
+        assert!(transcript.contains("B+") && transcript.contains("Records Course"));
+        assert!(
+            transcript.contains("not an official university document"),
+            "transcript marks itself unofficial"
+        );
+
+        // Proof of enrollment: identity plus the active enrollment.
+        let (status, proof) = get(&app, &student, "/ui/proof-of-enrollment").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(proof.contains("Proof of enrollment"));
+        assert!(proof.contains("Records Course"));
+        assert!(proof.contains("not an official university document"));
+
+        // Staff without a student profile have no student documents.
+        let (status, _) = get(&app, &officer, "/ui/transcript").await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
     }
 }

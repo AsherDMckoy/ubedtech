@@ -93,6 +93,25 @@ box-shadow).
   `role="alert"`, no "Error:" prefix, never a raw exception string.
 - **Empty state**: `ui::empty_state(message, href, action_label)` — names
   the space and invites an action, not an apology.
+- **Registration row** (`components/section_row.html`, session 1): one
+  `<tr>` fragment shared by the registration page (included per row) and
+  the fragment endpoints (rendered alone, swapped in after register/drop),
+  so a swapped row is byte-identical to a fresh page load. Four states via
+  `RegistrationRow` helpers (available / enrolled / low-seats / blocked —
+  a blocked row names its reason in `.reason`, never just a color). The
+  page-level `.meta` line + `data-search` attributes feed the instant
+  filter.
+- **Dashboard strip** (`.strip`): compact label/value list rows inside a
+  card (schedule strip, campus events).
+- **Weekly schedule** (`.week`/`.day`): day sections with time-sorted
+  lists; stacked mobile-first, grid columns (5, or 7 with `.week-7`) from
+  861 px — one structure, CSS-only, nothing duplicated.
+- **Unofficial document** (`.print-doc`, `.doc-head`, `.doc-actions`,
+  `.doc-foot`): identity `<dl>` header + warning alert marking the page
+  unofficial; `@media print` drops the chrome (`.rail`, `.topbar`,
+  `.no-print`) so the page itself is the printable document — no PDF
+  pipeline for unofficial output. `[data-print]` buttons call
+  `window.print()` (CSP forbids inline handlers).
 
 ## Motion policy (enforced shape)
 
@@ -105,13 +124,19 @@ surface requires an ADR (FRONTEND.md §2).
 ## JavaScript policy
 
 `frontend/js/app.js` bundles Alpine's CSP build (CSP stays
-`script-src 'self'`, no inline anything) and three first-party
-enhancements: submit-once/busy-label, bfcache restore, dialog wiring.
-Alpine components register via `Alpine.data()` in this file as screens
-need them; Alpine AJAX fragment swaps are enhancement over working HTML
-forms, never a replacement (FRONTEND.md §5). Server-side idempotency
-keys remain the real duplicate guarantee — the script is UX, not
-correctness.
+`script-src 'self'`, no inline anything) and the first-party
+enhancements: submit-once/busy-label, bfcache restore, dialog wiring,
+print buttons (`[data-print]`), the registration screen's instant search
+filter (`[data-search-form]` over `tr[data-search]`, read path — zero
+round trips), and the registration fragment swap: a `[data-fragment]`
+form POSTs with an `X-Fragment` header and the server answers with the
+single re-rendered row in its committed state (200, or 409 with the
+named denial), which replaces the old `<tr>` — an honest "Checking…"
+wait, never an optimistic success. `[data-confirm]` drop forms route
+through the shared `#drop-dialog` first. Alpine AJAX fragment swaps are
+enhancement over working HTML forms, never a replacement (FRONTEND.md
+§5). Server-side idempotency keys remain the real duplicate guarantee —
+the script is UX, not correctness.
 
 ## Automated checks
 

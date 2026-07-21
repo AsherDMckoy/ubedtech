@@ -1,0 +1,55 @@
+{% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
+{% block title %}Proof of enrollment{% endblock %}
+{% block content %}
+  <div class="wrap print-doc">
+    <div class="doc-actions no-print">
+      <button type="button" data-print>Print this page</button>
+      <a class="btn" href="/ui/documents">Request an official letter</a>
+    </div>
+
+    {% call ui::alert("warning", "Unofficial proof of enrollment — for your own reference. It is not an official university document and carries no seal or signature.") %}{% endcall %}
+
+    <h1>Proof of enrollment</h1>
+    <dl class="doc-head">
+      <div><dt>Institution</dt><dd>{{ identity.institution_name }}</dd></div>
+      <div><dt>Student</dt><dd>{{ identity.student_name }}</dd></div>
+      <div><dt>Student number</dt><dd>{{ identity.student_number }}</dd></div>
+      <div><dt>Program</dt><dd>{{ identity.program_code }}</dd></div>
+      <div><dt>Generated</dt><dd>{{ generated_on }}</dd></div>
+    </dl>
+
+    {% if let Some(term) = term %}
+      {% if enrollments.is_empty() %}
+        {% call ui::empty_state("No active enrollments this term.", "/ui/catalog", "Browse the catalog") %}{% endcall %}
+      {% else %}
+        <p>This student is enrolled in the following sections for {{ term.name }} ({{ term.code }}):</p>
+        <div class="card card-flush table-wrap">
+          <table>
+            <caption>Active enrollments for {{ term.name }}</caption>
+            <thead>
+              <tr>
+                <th scope="col">Course</th>
+                <th scope="col">Section</th>
+                <th scope="col">Meets</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for enrollment in enrollments %}
+                <tr>
+                  <td>{{ enrollment.course_code }} · {{ enrollment.course_title }}</td>
+                  <td>{{ enrollment.section_code }}</td>
+                  <td>{{ enrollment.meetings }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% endif %}
+    {% else %}
+      {% call ui::alert("accent", "There is no active term right now.") %}{% endcall %}
+    {% endif %}
+
+    <p class="doc-foot">Unofficial — generated for the student's own use. Official enrollment letters are requested under Documents.</p>
+  </div>
+{% endblock %}
