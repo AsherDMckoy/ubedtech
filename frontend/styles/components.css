@@ -559,6 +559,50 @@ details.menu[open] > .menu-panel {
   animation: spin 800ms linear infinite;
 }
 
+/* ---------- dashboard strip: a compact list of schedule rows / events
+   inside a card. Composed from tokens, no new colors. */
+
+.strip {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.strip > li {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 0.5px solid var(--border);
+}
+
+.strip > li:first-child {
+  border-top: none;
+}
+
+.strip-meet {
+  color: var(--text-secondary);
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.hold-list {
+  margin: 0 0 var(--space-4);
+  padding-left: var(--space-5);
+  color: var(--text-danger);
+  font-size: 14px;
+}
+
+.dash-deadline {
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.card-foot {
+  margin: var(--space-3) 0 0;
+  font-size: 14px;
+}
+
 /* ---------- shared keyframes (enter only; exit is instant) */
 
 @keyframes enter-down {

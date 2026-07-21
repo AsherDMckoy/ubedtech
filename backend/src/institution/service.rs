@@ -162,6 +162,25 @@ impl InstitutionService {
         .fetch_all(&self.pool)
         .await?)
     }
+
+    /// Upcoming events/holidays for any member of the institution — the
+    /// campus-events strip on the student dashboard. Read-only, no special
+    /// role: events are institution-wide public information.
+    pub async fn upcoming_events(&self, actor: &Actor) -> Result<Vec<InstitutionEvent>, AppError> {
+        Ok(sqlx::query_as::<_, InstitutionEvent>(
+            r#"
+            SELECT id, title, event_type, starts_on, ends_on
+            FROM institution_event
+            WHERE institution_id = $1
+              AND ends_on >= CURRENT_DATE
+            ORDER BY starts_on, title
+            LIMIT 8
+            "#,
+        )
+        .bind(actor.institution_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]

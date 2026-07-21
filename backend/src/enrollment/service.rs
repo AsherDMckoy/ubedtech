@@ -873,6 +873,25 @@ impl EnrollmentService {
         Ok(rows)
     }
 
+    /// The student's own active registration holds for one term (dashboard
+    /// alert). A hold blocks registration, so a non-empty list is surfaced
+    /// loudly; the flags themselves are short tokens ("financial").
+    pub async fn own_holds(&self, actor: &Actor, term_id: Uuid) -> Result<Vec<String>, AppError> {
+        let student_id = actor.require_student_self()?;
+        let flags: Option<Vec<String>> = sqlx::query_scalar(
+            r#"
+            SELECT hold_flags
+            FROM student_term_registration
+            WHERE student_id = $1 AND term_id = $2
+            "#,
+        )
+        .bind(student_id)
+        .bind(term_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(flags.unwrap_or_default())
+    }
+
     async fn check_hold_target(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,

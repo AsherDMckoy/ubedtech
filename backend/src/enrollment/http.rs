@@ -1,6 +1,8 @@
 use crate::academics::AcademicsService;
 use crate::academics::service::TermSummary;
 use crate::identity_access::sessions::CurrentSession;
+use crate::institution::InstitutionService;
+use crate::institution::service::InstitutionEvent;
 use crate::shared::{actor::Actor, error::AppError};
 use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, delete, get, post, web};
@@ -10,6 +12,78 @@ use uuid::Uuid;
 
 use crate::enrollment::types::{EnrollError, EnrolledSection};
 use crate::enrollment::{EnrollmentService, GrantOverrideCommand, RegisterCommand};
+
+#[derive(Template)]
+#[template(path = "pages/dashboard.html")]
+struct DashboardPage {
+    term: Option<TermSummary>,
+    holds: Vec<String>,
+    enrollments: Vec<EnrolledSection>,
+    events: Vec<InstitutionEvent>,
+}
+
+/// Renders the dashboard with representative data and no database, for the
+/// frontend axe harness (`render-pages`).
+pub fn sample_dashboard_html() -> Result<String, askama::Error> {
+    use chrono::{Duration, Utc};
+    let now = Utc::now();
+    DashboardPage {
+        term: Some(TermSummary {
+            id: Uuid::nil(),
+            code: "FA26".into(),
+            name: "Fall 2026".into(),
+            starts_on: now.date_naive(),
+            ends_on: (now + Duration::days(100)).date_naive(),
+            registration_opens_at: now - Duration::days(20),
+            add_drop_closes_at: now + Duration::days(14),
+        }),
+        holds: vec!["financial".into()],
+        enrollments: vec![EnrolledSection {
+            enrollment_id: Uuid::nil(),
+            course_code: "CMPS 2131".into(),
+            course_title: "Data structures".into(),
+            section_code: "01".into(),
+            meetings: "Mon/Wed 09:00-10:15".into(),
+        }],
+        events: vec![InstitutionEvent {
+            id: Uuid::nil(),
+            title: "Independence Day".into(),
+            event_type: "holiday".into(),
+            starts_on: (now + Duration::days(30)).date_naive(),
+            ends_on: (now + Duration::days(30)).date_naive(),
+        }],
+    }
+    .render()
+}
+
+/// The student's home screen: current schedule strip, the add/drop deadline,
+/// any registration holds (surfaced loudly), and upcoming campus events —
+/// server-rendered, useful the instant the HTML arrives.
+#[get("/ui/dashboard")]
+pub async fn dashboard_page(
+    actor: Actor,
+    enrollment: web::Data<EnrollmentService>,
+    academics: web::Data<AcademicsService>,
+    institution: web::Data<InstitutionService>,
+) -> Result<HttpResponse, AppError> {
+    let term = academics.current_term(&actor).await?;
+    let (holds, enrollments) = match &term {
+        Some(term) => (
+            enrollment.own_holds(&actor, term.id).await?,
+            enrollment.list_own_active(&actor, term.id).await?,
+        ),
+        None => (Vec::new(), Vec::new()),
+    };
+    let page = DashboardPage {
+        term,
+        holds,
+        enrollments,
+        events: institution.upcoming_events(&actor).await?,
+    };
+    Ok(HttpResponse::Ok()
+        .content_type("text/html; charset=utf-8")
+        .body(page.render()?))
+}
 
 #[derive(Deserialize)]
 pub struct RegisterForm {
@@ -242,6 +316,7 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .service(grant_override)
         .service(place_hold)
         .service(release_hold)
+        .service(dashboard_page)
         .service(registration_page)
         .service(register_form)
         .service(drop_form);

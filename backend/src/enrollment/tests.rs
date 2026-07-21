@@ -1242,6 +1242,10 @@ mod ui {
                         $pool.clone(),
                         crate::audit::AuditWriter,
                     )))
+                    .app_data(web::Data::new(crate::institution::InstitutionService::new(
+                        $pool.clone(),
+                        crate::audit::AuditWriter,
+                    )))
                     // Same order as main.rs: csrf inside session resolution.
                     .wrap(actix_web::middleware::from_fn(
                         crate::identity_access::csrf::csrf_middleware,
@@ -1429,8 +1433,15 @@ mod ui {
         let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
         assert!(body.contains("Invalid username or password."));
 
-        // Real login → catalog shows the section with seats and a register form.
+        // Real login → the dashboard renders with the term and campus events
+        // strip, and the a11y structure holds.
         let cookie = login(&app, &username, PASSWORD).await;
+        let dashboard = get_page(&app, &cookie, "/ui/dashboard").await;
+        crate::shared::assets::assert_page_a11y(&dashboard);
+        assert!(dashboard.contains("Your dashboard"));
+        assert!(dashboard.contains("Add/drop closes"));
+
+        // Catalog shows the section with seats and a register form.
         let catalog = get_page(&app, &cookie, "/ui/catalog").await;
         assert!(catalog.contains("Concurrency Test"), "course listed");
         assert!(catalog.contains("0/1"), "seat counts shown");

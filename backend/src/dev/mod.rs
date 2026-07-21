@@ -24,6 +24,13 @@ pub fn render_pages(out_dir: &str) -> std::io::Result<()> {
             render("signin", crate::identity_access::http::signin_html(None)),
         ),
         ("gallery.html", render("gallery", GalleryPage.render())),
+        (
+            "dashboard.html",
+            render(
+                "dashboard",
+                crate::enrollment::http::sample_dashboard_html(),
+            ),
+        ),
     ];
     for (name, html) in pages {
         let path = format!("{out_dir}/{name}");
