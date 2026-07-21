@@ -10,6 +10,23 @@
         <h1>{{ view.section.course_code }} · {{ view.section.course_title }}</h1>
         <p class="ctx-detail">Section {{ view.section.section_code }} · {{ view.rows.len() }} student{% if view.rows.len() != 1 %}s{% endif %}</p>
       </div>
+      {# Section switcher — animated surface #1 (dropdown menu primitive,
+         native disclosure, works with JS off). Lists ONLY this
+         instructor's assignments. #}
+      {% if !switcher.is_empty() %}
+        <details class="menu">
+          <summary>Switch section</summary>
+          <div class="menu-panel">
+            <p class="menu-sub">Your sections</p>
+            {% for section in switcher %}
+              <a href="/ui/instructor/sections/{{ section.section_id }}"
+                 {% if section.section_id == view.section.section_id %}class="cur" aria-current="page"{% endif %}>
+                {{ section.course_code }} · {{ section.course_title }} · Sec {{ section.section_code }}
+              </a>
+            {% endfor %}
+          </div>
+        </details>
+      {% endif %}
     </div>
 
     {% if let Some(notice) = notice %}

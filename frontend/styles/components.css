@@ -489,6 +489,18 @@ details.menu[open] > .menu-panel {
   text-decoration: none;
 }
 
+.menu-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 6px var(--space-2) 4px;
+  margin: 0;
+}
+
+.menu-panel a.cur {
+  color: var(--text-accent);
+  font-weight: 500;
+}
+
 /* ---------- status badge (colors come from shared::assets::badge_class —
    one status → one color everywhere). */
 

@@ -184,6 +184,9 @@ struct RosterPage<'a> {
     entry_enabled: bool,
     window_kind: &'static str,
     window_note: String,
+    /// The section-switcher menu: the viewing instructor's own assignments
+    /// (empty for a records officer — no menu renders).
+    switcher: Vec<InstructorSection>,
 }
 
 impl RosterPage<'_> {
@@ -236,6 +239,24 @@ pub fn sample_roster_html() -> Result<String, askama::Error> {
         window_note:
             "Grade entry open · closes Oct 21, 2026 17:00. Published grades are visible to students immediately."
                 .to_owned(),
+        switcher: vec![
+            InstructorSection {
+                section_id: Uuid::nil(),
+                course_code: "CMPS 2131".into(),
+                course_title: "Data structures".into(),
+                section_code: "01".into(),
+                term_name: "Fall 2026".into(),
+                enrolled_count: 40,
+            },
+            InstructorSection {
+                section_id: Uuid::new_v4(),
+                course_code: "CMPS 3141".into(),
+                course_title: "Software engineering".into(),
+                section_code: "01".into(),
+                term_name: "Fall 2026".into(),
+                enrolled_count: 28,
+            },
+        ],
     }
     .render()
 }
@@ -787,6 +808,12 @@ async fn render_roster(
         window_note.push_str(" As records office you may still enter grades.");
     }
 
+    let switcher = if actor.has_role(Role::Instructor) {
+        service.instructor_sections(actor).await?
+    } else {
+        Vec::new()
+    };
+
     Ok(RosterPage {
         csrf_token: &current.csrf_token,
         view,
@@ -797,6 +824,7 @@ async fn render_roster(
         entry_enabled: window_open || is_officer,
         window_kind,
         window_note,
+        switcher,
     }
     .render()?)
 }

@@ -1125,6 +1125,13 @@ mod ui {
             !roster.contains("/publish"),
             "instructors get no publish form"
         );
+        // The section switcher lists ONLY this instructor's assignments —
+        // the sibling section's real id never appears in the menu.
+        assert!(roster.contains("Switch section"));
+        assert!(
+            !roster.contains(&other_section.to_string()),
+            "switcher must not offer unassigned sections"
+        );
         let (status, _) = get(
             &app,
             &instructor,

@@ -106,6 +106,17 @@ box-shadow).
 - **Weekly schedule** (`.week`/`.day`): day sections with time-sorted
   lists; stacked mobile-first, grid columns (5, or 7 with `.week-7`) from
   861 px — one structure, CSS-only, nothing duplicated.
+- **Grade-entry roster** (session 2, instructor-grades reference): context
+  header (`.crumb`, `.ctx`) with the section switcher — the dropdown-menu
+  primitive extended with `.menu-sub` (group label) and `.cur` (current
+  item), listing only the viewer's assignments; window banner via the
+  alert primitive; `.prog` progress line; rows in three states — muted
+  "Not entered", amber Draft (`select.grade.dirty` + amber badge), green
+  Published (`tr.published`, `.grade-final`, read-only); per-row Save with
+  busy label; inline row errors (`.field-error`, aria-describedby);
+  `.actions` sticky bar whose publish form is confirm-gated
+  (`data-confirm-dialog`, see JavaScript policy) with `.warnbox` stating
+  the consequence inside the dialog.
 - **Unofficial document** (`.print-doc`, `.doc-head`, `.doc-actions`,
   `.doc-foot`): identity `<dl>` header + warning alert marking the page
   unofficial; `@media print` drops the chrome (`.rail`, `.topbar`,
