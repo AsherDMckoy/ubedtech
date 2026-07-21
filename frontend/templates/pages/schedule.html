@@ -1,0 +1,43 @@
+{% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
+{% block title %}Your schedule{% endblock %}
+{% block content %}
+  <div class="wrap">
+    <h1>Your schedule</h1>
+    {% if let Some(term) = term %}
+      <p class="sub">{{ term.name }}</p>
+
+      {% if empty %}
+        {% call ui::empty_state("No classes on your schedule this term.", "/ui/catalog", "Browse the catalog") %}{% endcall %}
+      {% else %}
+        {# One structure, two renderings: stacked day list on small screens,
+           weekly grid columns on desktop (CSS only — no duplicated content,
+           nothing animates in). #}
+        <div class="week{% if weekend %} week-7{% endif %}">
+          {% for day in days %}
+            <section class="day" aria-label="{{ day.name }}">
+              <h2>{{ day.name }}</h2>
+              {% if day.meetings.is_empty() %}
+                <p class="day-empty">No classes</p>
+              {% else %}
+                <ul class="day-list">
+                  {% for meeting in day.meetings %}
+                    <li>
+                      <span class="day-time">{{ meeting.starts_at.format("%H:%M") }}–{{ meeting.ends_at.format("%H:%M") }}</span>
+                      <span class="day-course">{{ meeting.course_code }} · {{ meeting.course_title }}</span>
+                      <span class="day-room">
+                        Sec {{ meeting.section_code }}{% if let Some(room) = meeting.room_code %} · Rm {{ room }}{% endif %}
+                      </span>
+                    </li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
+            </section>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% else %}
+      {% call ui::alert("accent", "There is no active term right now.") %}{% endcall %}
+    {% endif %}
+  </div>
+{% endblock %}

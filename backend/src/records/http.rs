@@ -291,6 +291,117 @@ pub async fn publish_form(
 }
 
 #[derive(Template)]
+#[template(path = "pages/schedule.html")]
+struct SchedulePage {
+    term: Option<TermSummary>,
+    days: Vec<DayColumn>,
+    empty: bool,
+    weekend: bool,
+}
+
+/// One weekday's meetings, already time-sorted by the schedule query.
+struct DayColumn {
+    name: &'static str,
+    meetings: Vec<crate::records::schedule::ScheduleMeeting>,
+}
+
+const DAY_NAMES: [&str; 7] = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+];
+
+/// Group meetings into Monday-first day columns. Weekend columns render
+/// only when a weekend meeting exists.
+fn day_columns(meetings: Vec<crate::records::schedule::ScheduleMeeting>) -> (Vec<DayColumn>, bool) {
+    let weekend = meetings.iter().any(|meeting| meeting.day_of_week > 5);
+    let mut days: Vec<DayColumn> = DAY_NAMES[..if weekend { 7 } else { 5 }]
+        .iter()
+        .map(|name| DayColumn {
+            name,
+            meetings: Vec::new(),
+        })
+        .collect();
+    for meeting in meetings {
+        // ISO day 1-7; an out-of-range row is broken data — clamp rather
+        // than panic on a student's schedule.
+        let index = usize::from(meeting.day_of_week.clamp(1, 7) as u16) - 1;
+        if let Some(day) = days.get_mut(index) {
+            day.meetings.push(meeting);
+        }
+    }
+    (days, weekend)
+}
+
+/// The student's weekly schedule: a stacked day list on small screens, the
+/// same markup as grid columns on desktop (CSS only).
+#[get("/ui/schedule")]
+pub async fn schedule_page(
+    actor: Actor,
+    query_service: web::Data<ScheduleQuery>,
+    academics: web::Data<AcademicsService>,
+) -> Result<HttpResponse, AppError> {
+    let term = academics.current_term(&actor).await?;
+    let meetings = match &term {
+        Some(term) => query_service.for_student(&actor, term.id).await?,
+        None => Vec::new(),
+    };
+    let empty = meetings.is_empty();
+    let (days, weekend) = day_columns(meetings);
+    let page = SchedulePage {
+        term,
+        days,
+        empty,
+        weekend,
+    };
+    Ok(html(StatusCode::OK, page.render()?))
+}
+
+/// Renders the schedule with representative data and no database, for the
+/// frontend axe harness (`render-pages`).
+pub fn sample_schedule_html() -> Result<String, askama::Error> {
+    use crate::records::schedule::ScheduleMeeting;
+    use chrono::{Duration, NaiveTime, Utc};
+    let now = Utc::now();
+    let meeting =
+        |day, course: &str, title: &str, from: (u32, u32), to: (u32, u32)| ScheduleMeeting {
+            course_code: course.to_owned(),
+            course_title: title.to_owned(),
+            section_code: "01".to_owned(),
+            day_of_week: day,
+            starts_at: NaiveTime::from_hms_opt(from.0, from.1, 0).unwrap(),
+            ends_at: NaiveTime::from_hms_opt(to.0, to.1, 0).unwrap(),
+            campus_code: None,
+            room_code: Some("214".to_owned()),
+        };
+    let meetings = vec![
+        meeting(1, "CMPS 2131", "Data structures", (9, 0), (10, 15)),
+        meeting(3, "CMPS 2131", "Data structures", (9, 0), (10, 15)),
+        meeting(2, "MATH 3201", "Linear algebra", (13, 0), (14, 15)),
+    ];
+    let (days, weekend) = day_columns(meetings);
+    SchedulePage {
+        term: Some(TermSummary {
+            id: Uuid::nil(),
+            code: "FA26".into(),
+            name: "Fall 2026".into(),
+            starts_on: now.date_naive(),
+            ends_on: (now + Duration::days(100)).date_naive(),
+            registration_opens_at: now - Duration::days(20),
+            add_drop_closes_at: now + Duration::days(14),
+        }),
+        days,
+        empty: false,
+        weekend,
+    }
+    .render()
+}
+
+#[derive(Template)]
 #[template(path = "pages/grades.html")]
 struct StudentGradesPage {
     term: Option<TermSummary>,
@@ -380,6 +491,7 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .service(roster_page)
         .service(save_grade_form)
         .service(publish_form)
+        .service(schedule_page)
         .service(student_grades_page)
         .service(history_page);
 }

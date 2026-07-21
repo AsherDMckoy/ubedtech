@@ -835,6 +835,9 @@ mod ui {
                         crate::audit::AuditWriter,
                     )))
                     .app_data(web::Data::new(crate::records::TranscriptSnapshotService))
+                    .app_data(web::Data::new(crate::records::ScheduleQuery::new(
+                        $pool.clone(),
+                    )))
                     .wrap(actix_web::middleware::from_fn(
                         crate::identity_access::csrf::csrf_middleware,
                     ))
@@ -1068,5 +1071,22 @@ mod ui {
         assert_eq!(status, StatusCode::OK);
         assert!(history.contains("B+") && history.contains("published"));
         assert!(history.contains("No transcript snapshots"));
+
+        // Schedule: the enrolled section's meeting lands on its weekday.
+        sqlx::query(
+            "INSERT INTO section_meeting (id, section_id, day_of_week, starts_at, ends_at) \
+             VALUES ($1, $2, 2, '09:00:00', '10:15:00')",
+        )
+        .bind(Uuid::new_v4())
+        .bind(fx.section_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let (status, schedule) = get(&app, &student, "/ui/schedule").await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(
+            schedule.contains("Tuesday") && schedule.contains("Records Course"),
+            "meeting shows on its weekday"
+        );
     }
 }

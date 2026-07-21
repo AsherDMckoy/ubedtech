@@ -677,6 +677,95 @@ tr.just-changed {
   animation: flag var(--dur-base) var(--ease-enter);
 }
 
+/* ---------- weekly schedule: one semantic structure, two renderings.
+   Mobile-first: days stack (the list view). Desktop: days become grid
+   columns (the weekly-grid enhancement). Pure CSS — nothing duplicated,
+   nothing loads late, nothing animates in. */
+
+.week {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.day {
+  background: var(--surface-2);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: var(--space-3) var(--space-4);
+}
+
+.day > h2 {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: var(--space-2);
+}
+
+.day-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.day-list > li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-2) 0;
+  border-top: 0.5px solid var(--border);
+  font-size: 14px;
+}
+
+.day-list > li:first-child {
+  border-top: none;
+}
+
+.day-time {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.day-course {
+  font-weight: 500;
+}
+
+.day-room,
+.day-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.day-empty {
+  margin: 0;
+}
+
+@media (min-width: 861px) {
+  .week {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    align-items: start;
+  }
+
+  /* Weekend meetings exist → seven columns. */
+  .week-7 {
+    grid-template-columns: repeat(7, 1fr);
+  }
+
+  /* Inside a narrow grid column the row collapses to a stack. */
+  .day-list > li {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .day-room {
+    white-space: normal;
+  }
+}
+
 /* ---------- dashboard strip: a compact list of schedule rows / events
    inside a card. Composed from tokens, no new colors. */
 
