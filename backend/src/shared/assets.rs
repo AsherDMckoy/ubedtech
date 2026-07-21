@@ -253,6 +253,11 @@ mod tests {
     fn every_known_status_has_a_stable_badge_color() {
         // The same status must never render in two colors on two pages.
         assert_eq!(badge_class("ready"), "badge-ok");
+        // Every document-request status is visually distinct and never
+        // color alone (the badge text is the status word itself).
+        assert_eq!(badge_class("approved"), "badge-ok");
+        assert_eq!(badge_class("generating"), "badge-info");
+        assert_eq!(badge_class("rejected"), "badge-bad");
         assert_eq!(badge_class("published"), "badge-ok");
         assert_eq!(badge_class("pending"), "badge-info");
         assert_eq!(badge_class("draft"), "badge-warn");

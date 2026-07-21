@@ -117,6 +117,18 @@ box-shadow).
   `.actions` sticky bar whose publish form is confirm-gated
   (`data-confirm-dialog`, see JavaScript policy) with `.warnbox` stating
   the consequence inside the dialog.
+- **Request drawer** (`details.drawer` + `.drawer-panel`, session 3):
+  animated surface #2 on native `<details>` — the document-request form
+  opens and submits with JS off; enter-down animation on open only.
+- **Status rows** (`components/document_row.html` student side,
+  `document_status_row.html` officer side): one `<tr>` per document
+  request carrying `data-status` and, in non-terminal states, `data-poll`
+  pointing at its owner-/officer-scoped row-fragment endpoint. The
+  polling enhancement (see JavaScript policy) swaps in the
+  server-rendered row, so a status on screen is always the real backend
+  row; terminal rows drop `data-poll` and polling stops itself. Status is
+  always badge + the status word from the ONE badge map — never color
+  alone.
 - **Unofficial document** (`.print-doc`, `.doc-head`, `.doc-actions`,
   `.doc-foot`): identity `<dl>` header + warning alert marking the page
   unofficial; `@media print` drops the chrome (`.rail`, `.topbar`,
@@ -144,10 +156,14 @@ form POSTs with an `X-Fragment` header and the server answers with the
 single re-rendered row in its committed state (200, or 409 with the
 named denial), which replaces the old `<tr>` — an honest "Checking…"
 wait, never an optimistic success. `[data-confirm]` drop forms route
-through the shared `#drop-dialog` first. Alpine AJAX fragment swaps are
-enhancement over working HTML forms, never a replacement (FRONTEND.md
-§5). Server-side idempotency keys remain the real duplicate guarantee —
-the script is UX, not correctness.
+through the shared `#drop-dialog` first. Document status rows carrying
+`data-poll` re-fetch their server-rendered fragment every 4 s and swap it
+in (honest pipeline view — approved → generating → ready only as the
+worker actually completes; terminal rows stop polling by omitting the
+attribute). Alpine AJAX fragment swaps are enhancement over working HTML
+forms, never a replacement (FRONTEND.md §5). Server-side idempotency
+keys remain the real duplicate guarantee — the script is UX, not
+correctness.
 
 ## Automated checks
 
