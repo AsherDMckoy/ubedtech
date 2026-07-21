@@ -1,78 +1,130 @@
 {% extends "pages/base.html" %}
-{% block title %}Roster — {{ view.section.course_code }} {{ view.section.section_code }}{% endblock %}
+{% import "components/ui.html" as ui %}
+{% block title %}Grade entry — {{ view.section.course_code }} {{ view.section.section_code }}{% endblock %}
 {% block content %}
-  <h1>{{ view.section.course_code }} — {{ view.section.course_title }},
-      section {{ view.section.section_code }}</h1>
-  <p>{{ view.section.term_name }}
-    {% if let Some(closes_at) = view.section.grade_entry_closes_at %}
-      — grade entry closes {{ closes_at }}
+  <div class="wrap">
+    <p class="crumb"><a href="/ui/instructor">Your sections</a> · {{ view.section.term_name }}</p>
+
+    <div class="ctx">
+      <div>
+        <h1>{{ view.section.course_code }} · {{ view.section.course_title }}</h1>
+        <p class="ctx-detail">Section {{ view.section.section_code }} · {{ view.rows.len() }} student{% if view.rows.len() != 1 %}s{% endif %}</p>
+      </div>
+    </div>
+
+    {% if let Some(notice) = notice %}
+      {% call ui::alert("success", notice) %}{% endcall %}
     {% endif %}
-  </p>
-  {% if let Some(notice) = notice %}
-    <p role="status">{{ notice }}</p>
-  {% endif %}
-  {% if let Some(error) = error %}
-    <p role="alert">{{ error }}</p>
-  {% endif %}
+    {% if let Some(error) = error %}
+      {% if error_enrollment.is_none() %}
+        {% call ui::alert("danger", error) %}{% endcall %}
+      {% endif %}
+    {% endif %}
 
-  <table>
-    <caption>Roster and grade states</caption>
-    <thead>
-      <tr>
-        <th scope="col">Student</th>
-        <th scope="col">Name</th>
-        <th scope="col">State</th>
-        <th scope="col">Grade</th>
-        <th scope="col">Entry</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for row in view.rows %}
-        <tr>
-          <td>{{ row.student_number }}</td>
-          <td>{{ row.student_name }}</td>
-          <td>
-            {% if let Some(state) = row.state %}
-              <span class="badge {{ crate::shared::assets::badge_class(state.as_str()) }}">{{ state }}</span>
-            {% else %}
-              <span class="badge badge-info">pending</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if let Some(grade) = row.grade_code %}{{ grade }}{% else %}—{% endif %}
-          </td>
-          <td>
-            {% if row.editable() %}
-              <form method="post" action="/ui/instructor/grades">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <input type="hidden" name="section_id" value="{{ view.section.section_id }}">
-                <input type="hidden" name="enrollment_id" value="{{ row.enrollment_id }}">
-                <input type="hidden" name="expected_version"
-                       value="{{ row.version.unwrap_or(0) }}">
-                <label>Grade
-                  <input name="grade_code" required maxlength="8" size="4"
-                         value="{% if let Some(grade) = row.grade_code %}{{ grade }}{% endif %}">
-                </label>
-                <label>Points
-                  <input name="grade_points" size="4" inputmode="decimal">
-                </label>
-                <button type="submit">Save draft</button>
-              </form>
-            {% else %}
-              locked
-            {% endif %}
-          </td>
-        </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+    {% call ui::alert(window_kind, window_note) %}{% endcall %}
 
-  {% if can_publish %}
-    <form method="post" action="/ui/instructor/sections/{{ view.section.section_id }}/publish">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <button type="submit">Publish all draft grades</button>
-    </form>
-  {% endif %}
+    <p class="prog" aria-label="Roster progress">
+      <span><b>{{ view.published_count() }}</b> published</span>
+      <span><b>{{ view.draft_count() }}</b> draft</span>
+      <span><b>{{ view.pending_count() }}</b> not entered</span>
+    </p>
 
-  <p><a href="/ui/instructor">My sections</a></p>
+    <div class="card card-flush table-wrap">
+      <table>
+        <caption>Grade roster for {{ view.section.course_code }} section {{ view.section.section_code }}</caption>
+        <thead>
+          <tr>
+            <th scope="col">Student</th>
+            <th scope="col" class="col-grade">Grade</th>
+            <th scope="col">Status</th>
+            <th scope="col"><span class="sr-only">Grade history</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in view.rows %}
+            <tr{% if row.is_published() %} class="published"{% endif %}>
+              <td>
+                <p class="s-name">{{ row.student_name }}</p>
+                <span class="s-id">{{ row.student_number }}</span>
+              </td>
+              <td class="col-grade">
+                {% if row.is_published() %}
+                  <span class="grade-final">{% if let Some(grade) = row.grade_code %}{{ grade }}{% endif %}</span>
+                {% else if entry_enabled %}
+                  {# Draft entry: a real per-row form POST (PRG). A saved
+                     draft renders amber; the busy label is the honest
+                     in-progress state — the badge only changes when the
+                     server has committed the draft. #}
+                  <form method="post" action="/ui/instructor/grades" class="grade-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="section_id" value="{{ view.section.section_id }}">
+                    <input type="hidden" name="enrollment_id" value="{{ row.enrollment_id }}">
+                    <input type="hidden" name="expected_version" value="{{ row.version.unwrap_or(0) }}">
+                    <label class="sr-only" for="grade-{{ row.enrollment_id }}">Grade for {{ row.student_name }}</label>
+                    <select class="grade{% if row.is_draft() %} dirty{% endif %}"
+                            id="grade-{{ row.enrollment_id }}" name="grade_code" required
+                            {% if self.row_error(row).is_some() %}aria-describedby="err-{{ row.enrollment_id }}" aria-invalid="true"{% endif %}>
+                      <option value="">—</option>
+                      {% for code in crate::records::grades::GRADE_CODES %}
+                        <option value="{{ code }}"{% if row.has_code(code) %} selected{% endif %}>{{ code }}</option>
+                      {% endfor %}
+                      {% if let Some(saved) = row.nonstandard_code() %}
+                        <option value="{{ saved }}" selected>{{ saved }}</option>
+                      {% endif %}
+                    </select>
+                    <button type="submit" data-busy-label="Saving…">Save</button>
+                  </form>
+                {% else %}
+                  <span class="grade-final">{% if let Some(grade) = row.grade_code %}{{ grade }}{% else %}—{% endif %}</span>
+                {% endif %}
+                {% if let Some(message) = self.row_error(row) %}
+                  <p class="field-error" id="err-{{ row.enrollment_id }}">{{ message }}</p>
+                {% endif %}
+              </td>
+              <td>
+                {% if row.is_published() %}
+                  {% if let Some(state) = row.state %}{% call ui::badge(state.as_str()) %}{% endcall %}{% endif %}
+                {% else if row.is_draft() %}
+                  {% call ui::badge("draft") %}{% endcall %}
+                {% else %}
+                  <span class="badge">Not entered</span>
+                {% endif %}
+              </td>
+              <td class="col-hist"></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="actions">
+      {% if can_publish %}
+        <p class="note">Publishing makes draft grades visible to those students immediately.</p>
+        <form method="post" action="/ui/instructor/sections/{{ view.section.section_id }}/publish"
+              data-confirm-dialog="publish-dialog">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="btn-primary" data-busy-label="Publishing…"
+                  {% if view.draft_count() == 0 %}disabled{% endif %}>
+            Publish {{ view.draft_count() }} draft{% if view.draft_count() != 1 %}s{% endif %}
+          </button>
+        </form>
+      {% else %}
+        <p class="note">Drafts are visible only to you. The records office publishes them to students, and published grades change only through a recorded correction.</p>
+      {% endif %}
+    </div>
+
+    <p class="foot">Grades save as drafts only instructors and the records office can see. Publishing is the moment students see them — it waits for the server to confirm, and never shows as done before it is.</p>
+
+    {% if can_publish %}
+      <dialog id="publish-dialog" aria-labelledby="publish-dialog-title">
+        <h2 id="publish-dialog-title">Publish grades to students?</h2>
+        <p>{{ view.draft_count() }} draft grade{% if view.draft_count() != 1 %}s{% endif %} will become visible to those students right away. Already-published grades are unchanged.</p>
+        <p class="warnbox">Published grades can only be changed afterward through a recorded correction, with the corrector's name attached.</p>
+        <div class="dialog-actions">
+          <button type="button" data-dialog-close>Not yet</button>
+          <button type="button" class="btn-primary" data-dialog-confirm>Publish now</button>
+        </div>
+      </dialog>
+    {% endif %}
+  </div>
 {% endblock %}

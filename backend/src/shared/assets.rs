@@ -86,8 +86,10 @@ pub fn js_href() -> &'static str {
 pub fn badge_class(status: &str) -> &'static str {
     match status {
         "ready" | "published" | "active" | "enrolled" | "approved" => "badge-ok",
-        "pending" | "generating" | "queued" | "draft" => "badge-info",
-        "amended" | "suspended" => "badge-warn",
+        "pending" | "generating" | "queued" => "badge-info",
+        // A draft grade is amber everywhere: entered, unpublished, invisible
+        // to students (instructor-grades reference).
+        "amended" | "suspended" | "draft" => "badge-warn",
         "rejected" | "failed" | "expired" => "badge-bad",
         _ => "",
     }
@@ -253,6 +255,7 @@ mod tests {
         assert_eq!(badge_class("ready"), "badge-ok");
         assert_eq!(badge_class("published"), "badge-ok");
         assert_eq!(badge_class("pending"), "badge-info");
+        assert_eq!(badge_class("draft"), "badge-warn");
         assert_eq!(badge_class("amended"), "badge-warn");
         assert_eq!(badge_class("failed"), "badge-bad");
         assert_eq!(badge_class("suspended"), "badge-warn");

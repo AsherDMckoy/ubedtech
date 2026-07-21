@@ -810,6 +810,139 @@ tr.just-changed {
   font-size: 14px;
 }
 
+/* ---------- instructor grade entry (instructor-grades reference):
+   context header, window banner via .alert, progress line, roster rows in
+   three visually-unmistakable states — not entered (muted), draft (amber,
+   editable), published (green, read-only) — and the sticky action bar. */
+
+.crumb {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 0 var(--space-3);
+}
+
+.ctx {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.ctx h1 {
+  margin-bottom: 0;
+}
+
+.ctx-detail {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: var(--space-1) 0 0;
+}
+
+.prog {
+  display: flex;
+  gap: var(--space-4);
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 var(--space-1) var(--space-3);
+}
+
+.prog b {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.s-name {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.s-id {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.col-grade {
+  width: 220px;
+}
+
+.grade-form {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+select.grade {
+  width: 90px;
+  height: 34px;
+  padding: 0 var(--space-2);
+  background: var(--surface-1);
+}
+
+/* A SAVED draft is amber — entered, unpublished, invisible to students. */
+select.grade.dirty {
+  border-color: var(--border-warning);
+  background: var(--bg-warning);
+}
+
+.grade-form .field-error {
+  flex-basis: 100%;
+}
+
+tr.published {
+  background: var(--bg-success);
+}
+
+tr.published .s-name {
+  color: var(--text-success);
+}
+
+.grade-final {
+  font-size: 15px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-success);
+}
+
+.actions {
+  position: sticky;
+  bottom: 0;
+  margin-top: var(--space-4);
+  background: var(--surface-2);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.actions .note {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0;
+  flex: 1;
+}
+
+.warnbox {
+  background: var(--bg-warning);
+  color: var(--text-warning);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
 /* ---------- unofficial student documents (transcript, proof of
    enrollment): a labeled identity header, and a print stylesheet that
    drops the app chrome — the page itself is the printable document. */

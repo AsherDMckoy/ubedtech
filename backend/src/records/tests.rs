@@ -1039,10 +1039,10 @@ mod ui {
         )
         .await;
         assert_eq!(status, StatusCode::OK);
-        assert!(roster.contains("pending"));
+        assert!(roster.contains("Not entered"));
         assert!(
-            !roster.contains("Publish all draft grades"),
-            "instructors get no publish button"
+            !roster.contains("/publish"),
+            "instructors get no publish form"
         );
         let (status, _) = get(
             &app,
@@ -1098,7 +1098,7 @@ mod ui {
             &format!("/ui/instructor/sections/{}", fx.section_id),
         )
         .await;
-        assert!(officer_roster.contains("Publish all draft grades"));
+        assert!(officer_roster.contains("Publish 1 draft"));
         let officer_csrf = extract_input(&officer_roster, "csrf_token");
         let response = actix_test::call_service(
             &app,
@@ -1122,7 +1122,10 @@ mod ui {
         )
         .await;
         assert!(roster.contains("published"));
-        assert!(roster.contains("locked"));
+        assert!(
+            roster.contains("grade-final") && !roster.contains("name=\"grade_code\""),
+            "published rows are read-only"
+        );
 
         // Student now sees the published grade, and the history page shows
         // the record with no snapshots yet.
@@ -1171,5 +1174,163 @@ mod ui {
         // Staff without a student profile have no student documents.
         let (status, _) = get(&app, &officer, "/ui/transcript").await;
         assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    /// No optimistic publish: the roster shows "published" only after the
+    /// server has committed it. A crafted instructor publish is refused and
+    /// flips nothing; the officer's publish flips the row only on the
+    /// post-redirect re-render.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn publish_never_flips_before_the_server_commits(pool: PgPool) {
+        let fx: GradeFixture = seed_grade_fixture(&pool).await;
+        let institution = fx.officer.institution_id;
+        let instructor_login =
+            credential(&pool, fx.instructor.user_id, institution, "instructor").await;
+        let officer_login =
+            credential(&pool, fx.officer.user_id, institution, "records_officer").await;
+        let app = records_ui_app!(&pool, institution);
+
+        // Instructor enters a draft through the select form (no explicit
+        // points: the standard scale supplies them, assumption A29).
+        let instructor = login(&app, &instructor_login).await;
+        let (_, roster) = get(
+            &app,
+            &instructor,
+            &format!("/ui/instructor/sections/{}", fx.section_id),
+        )
+        .await;
+        let csrf = extract_input(&roster, "csrf_token");
+        let publish_uri = format!("/ui/instructor/sections/{}/publish", fx.section_id);
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/ui/instructor/grades")
+                .cookie(instructor.clone())
+                .set_form(serde_json::json!({
+                    "csrf_token": csrf,
+                    "section_id": fx.section_id,
+                    "enrollment_id": fx.enrollment_id,
+                    "grade_code": "B+",
+                    "expected_version": 0,
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let points: Option<f64> =
+            sqlx::query_scalar("SELECT grade_points FROM grade_record WHERE enrollment_id = $1")
+                .bind(fx.enrollment_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(points, Some(3.3), "standard scale supplied the points");
+
+        // Draft state on screen; nothing published.
+        let (_, roster) = get(
+            &app,
+            &instructor,
+            &format!("/ui/instructor/sections/{}", fx.section_id),
+        )
+        .await;
+        assert!(roster.contains(">draft<") && !roster.contains("grade-final"));
+
+        // Crafted instructor publish: refused, and the roster still shows a
+        // draft — no flip without a committed outcome.
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri(&publish_uri)
+                .cookie(instructor.clone())
+                .set_form(serde_json::json!({ "csrf_token": csrf }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        let (_, roster) = get(
+            &app,
+            &instructor,
+            &format!("/ui/instructor/sections/{}", fx.section_id),
+        )
+        .await;
+        assert!(roster.contains(">draft<") && !roster.contains("grade-final"));
+
+        // Officer publishes; only the post-commit re-render shows published.
+        let officer = login(&app, &officer_login).await;
+        let (_, officer_roster) = get(
+            &app,
+            &officer,
+            &format!("/ui/instructor/sections/{}", fx.section_id),
+        )
+        .await;
+        let officer_csrf = extract_input(&officer_roster, "csrf_token");
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri(&publish_uri)
+                .cookie(officer.clone())
+                .set_form(serde_json::json!({ "csrf_token": officer_csrf }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let (_, roster) = get(
+            &app,
+            &instructor,
+            &format!("/ui/instructor/sections/{}", fx.section_id),
+        )
+        .await;
+        assert!(roster.contains("grade-final") && roster.contains("published"));
+    }
+
+    /// Outside the entry window the roster is read-only with a plain
+    /// explanation; a denial on save renders inline, associated with the
+    /// row it belongs to.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn closed_window_disables_entry_and_denials_render_inline(pool: PgPool) {
+        let fx: GradeFixture = seed_grade_fixture(&pool).await;
+        let institution = fx.officer.institution_id;
+        let instructor_login =
+            credential(&pool, fx.instructor.user_id, institution, "instructor").await;
+        let app = records_ui_app!(&pool, institution);
+        let instructor = login(&app, &instructor_login).await;
+        let roster_uri = format!("/ui/instructor/sections/{}", fx.section_id);
+
+        // Window open: the entry select renders.
+        let (_, roster) = get(&app, &instructor, &roster_uri).await;
+        assert!(roster.contains("Grade entry open"));
+        assert!(roster.contains("name=\"grade_code\""));
+        let csrf = extract_input(&roster, "csrf_token");
+
+        // Stale version: 409 whose message sits inline in the row.
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/ui/instructor/grades")
+                .cookie(instructor.clone())
+                .set_form(serde_json::json!({
+                    "csrf_token": csrf,
+                    "section_id": fx.section_id,
+                    "enrollment_id": fx.enrollment_id,
+                    "grade_code": "B+",
+                    "expected_version": 99,
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        assert!(
+            body.contains(&format!("id=\"err-{}\"", fx.enrollment_id)),
+            "denial is associated with its row: {body}"
+        );
+
+        // Window closed: inputs give way to read-only values + explanation.
+        sqlx::query("UPDATE academic_term SET grade_entry_closes_at = now() - interval '1 hour'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (_, roster) = get(&app, &instructor, &roster_uri).await;
+        assert!(roster.contains("Grade entry closed"));
+        assert!(!roster.contains("name=\"grade_code\""), "no entry controls");
     }
 }

@@ -79,6 +79,36 @@ addEventListener("click", (event) => {
   }
 });
 
+// Confirm-gated full-page forms (publish grades): the first submit opens
+// the named dialog instead; [data-dialog-confirm] resubmits for real
+// (form.submit() skips the submit handlers). With JS off the form POSTs
+// directly — the dialog is enhancement, the POST is the action.
+let pendingConfirm = null;
+
+addEventListener(
+  "submit",
+  (event) => {
+    const form = event.target;
+    if (!form.matches("[data-confirm-dialog]")) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    pendingConfirm = form;
+    document.getElementById(form.dataset.confirmDialog)?.showModal();
+  },
+  true,
+);
+
+addEventListener("click", (event) => {
+  if (!event.target.closest("[data-dialog-confirm]")) return;
+  event.target.closest("dialog")?.close();
+  if (pendingConfirm) {
+    const form = pendingConfirm;
+    pendingConfirm = null;
+    setBusy(form);
+    form.submit();
+  }
+});
+
 // ---- Registration screen ------------------------------------------------
 // Read path: filter the already-loaded rows in place, no round trip
 // (FRONTEND.md §4). With JS off the search form GETs and the server filters.

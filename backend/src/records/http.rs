@@ -176,6 +176,68 @@ struct RosterPage<'a> {
     can_publish: bool,
     notice: Option<&'a str>,
     error: Option<&'a str>,
+    /// The row a denial belongs to — its message renders inline under that
+    /// row's select instead of as a page banner.
+    error_enrollment: Option<Uuid>,
+    /// False outside the grade-entry window (for non-officers): selects
+    /// render read-only with the window banner explaining why.
+    entry_enabled: bool,
+    window_kind: &'static str,
+    window_note: String,
+}
+
+impl RosterPage<'_> {
+    /// The denial message for one row, when the failed save was that row's.
+    fn row_error(&self, row: &crate::records::grades::RosterRow) -> Option<&str> {
+        (self.error_enrollment == Some(row.enrollment_id))
+            .then_some(self.error)
+            .flatten()
+    }
+}
+
+/// Renders the grade-entry roster with every row state (not entered, draft,
+/// published, inline error) and no database, for the frontend axe harness.
+pub fn sample_roster_html() -> Result<String, askama::Error> {
+    use crate::records::grades::{RosterRow, SectionHeader};
+    let row = |number: &str, name: &str, grade: Option<&str>, state: Option<&str>| RosterRow {
+        enrollment_id: Uuid::new_v4(),
+        student_number: number.to_owned(),
+        student_name: name.to_owned(),
+        grade_code: grade.map(str::to_owned),
+        state: state.map(str::to_owned),
+        version: state.map(|_| 1),
+    };
+    let rows = vec![
+        row("2024-00871", "Layla Ahmad", None, None),
+        row("2023-01144", "Marcus Bennett", Some("B+"), Some("draft")),
+        row("2024-00233", "Wei Chen", Some("A"), Some("published")),
+        row("2024-00590", "Kwame Osei", Some("I"), Some("draft")),
+    ];
+    let error_enrollment = Some(rows[3].enrollment_id);
+    RosterPage {
+        csrf_token: "sample",
+        view: RosterView {
+            section: SectionHeader {
+                section_id: Uuid::nil(),
+                course_code: "CMPS 2131".into(),
+                course_title: "Data structures".into(),
+                section_code: "01".into(),
+                term_name: "Fall 2026".into(),
+                grade_entry_closes_at: Some(chrono::Utc::now() + chrono::Duration::days(14)),
+            },
+            rows,
+        },
+        can_publish: true,
+        notice: None,
+        error: Some("Incomplete needs a filed extension on record before it can be published."),
+        error_enrollment,
+        entry_enabled: true,
+        window_kind: "success",
+        window_note:
+            "Grade entry open · closes Oct 21, 2026 17:00. Published grades are visible to students immediately."
+                .to_owned(),
+    }
+    .render()
 }
 
 #[derive(Deserialize)]
@@ -202,6 +264,7 @@ pub async fn roster_page(
         &service,
         section_id.into_inner(),
         notice,
+        None,
         None,
     )
     .await?;
@@ -230,9 +293,14 @@ pub async fn save_grade_form(
 ) -> Result<HttpResponse, AppError> {
     let _ = &form.csrf_token; // validated by the CSRF middleware
 
+    // The roster select supplies only a code; points come from the standard
+    // scale (assumption A29). An explicit points field still wins so API
+    // and legacy callers keep their exact values.
     let points_text = form.grade_points.as_deref().unwrap_or("").trim();
     let grade_points = if points_text.is_empty() {
-        Ok(None)
+        Ok(crate::records::grades::standard_grade_points(
+            &form.grade_code,
+        ))
     } else {
         points_text
             .parse::<f64>()
@@ -277,6 +345,7 @@ pub async fn save_grade_form(
                 form.section_id,
                 None,
                 Some(&message),
+                Some(form.enrollment_id),
             )
             .await?;
             Ok(html(status, body))
@@ -622,6 +691,7 @@ pub fn sample_proof_html() -> Result<String, askama::Error> {
     .render()
 }
 
+#[allow(clippy::too_many_arguments)] // one page, one call site per outcome
 async fn render_roster(
     actor: &Actor,
     current: &CurrentSession,
@@ -629,14 +699,50 @@ async fn render_roster(
     section_id: Uuid,
     notice: Option<&str>,
     error: Option<&str>,
+    error_enrollment: Option<Uuid>,
 ) -> Result<String, AppError> {
     let view = service.roster(actor, section_id).await?;
+    let is_officer = actor.has_role(Role::RecordsOfficer);
+
+    // The entry window binds instructors; the officer is the late-entry
+    // escape hatch (assumption A17) — the banner explains either way.
+    let closes_at = view.section.grade_entry_closes_at;
+    let window_open = closes_at.is_none_or(|at| chrono::Utc::now() < at);
+    let (window_kind, mut window_note) = match (window_open, closes_at) {
+        (true, Some(at)) => (
+            "success",
+            format!(
+                "Grade entry open · closes {}. Published grades are visible to students immediately.",
+                at.format("%b %-d, %Y %H:%M")
+            ),
+        ),
+        (true, None) => (
+            "success",
+            "Grade entry open. Published grades are visible to students immediately.".to_owned(),
+        ),
+        (false, at) => (
+            "warning",
+            format!(
+                "Grade entry closed{}. Entries are read-only — the records office handles late entry.",
+                at.map(|at| format!(" {}", at.format("%b %-d, %Y %H:%M")))
+                    .unwrap_or_default()
+            ),
+        ),
+    };
+    if is_officer && !window_open {
+        window_note.push_str(" As records office you may still enter grades.");
+    }
+
     Ok(RosterPage {
         csrf_token: &current.csrf_token,
         view,
-        can_publish: actor.has_role(Role::RecordsOfficer),
+        can_publish: is_officer,
         notice,
         error,
+        error_enrollment,
+        entry_enabled: window_open || is_officer,
+        window_kind,
+        window_note,
     }
     .render()?)
 }

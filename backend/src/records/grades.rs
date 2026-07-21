@@ -99,11 +99,69 @@ pub struct RosterRow {
 }
 
 impl RosterRow {
-    /// Draft entry applies to pending (no grade yet) and draft rows;
-    /// published/amended rows are corrected by the records office instead.
-    pub fn editable(&self) -> bool {
-        matches!(self.state.as_deref(), None | Some("draft"))
+    /// Published and amended are both locked-in, student-visible states;
+    /// everything else (pending, draft) takes draft entry — the roster
+    /// template branches on this, the service enforces it.
+    pub fn is_published(&self) -> bool {
+        matches!(self.state.as_deref(), Some("published" | "amended"))
     }
+
+    pub fn is_draft(&self) -> bool {
+        self.state.as_deref() == Some("draft")
+    }
+
+    /// True when this row's saved grade is exactly `code` (select options).
+    pub fn has_code(&self, code: &str) -> bool {
+        self.grade_code.as_deref() == Some(code)
+    }
+
+    /// A saved code outside the standard select list (entered via API or an
+    /// older form) — rendered as an extra selected option so it survives a
+    /// re-save untouched.
+    pub fn nonstandard_code(&self) -> Option<&str> {
+        self.grade_code
+            .as_deref()
+            .filter(|code| !GRADE_CODES.contains(code))
+    }
+}
+
+impl RosterView {
+    // Progress line on the grade-entry screen.
+    pub fn published_count(&self) -> usize {
+        self.rows.iter().filter(|row| row.is_published()).count()
+    }
+    pub fn draft_count(&self) -> usize {
+        self.rows.iter().filter(|row| row.is_draft()).count()
+    }
+    pub fn pending_count(&self) -> usize {
+        self.rows.len() - self.published_count() - self.draft_count()
+    }
+}
+
+/// The grade codes the entry select offers. Anything else still passes the
+/// server-side 1–8 character validation (the select is UI, not the trust
+/// boundary).
+pub const GRADE_CODES: [&str; 11] = ["A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D", "F", "I"];
+
+/// Standard 4.0-scale points for a letter grade, applied when the entry
+/// form supplies no explicit points (assumption A29: standard scale;
+/// an institution-configurable scale is deferred until one needs it).
+/// Non-scale codes (I, custom) carry no points and therefore never
+/// satisfy a prerequisite.
+pub fn standard_grade_points(code: &str) -> Option<f64> {
+    Some(match code {
+        "A" => 4.0,
+        "A-" => 3.7,
+        "B+" => 3.3,
+        "B" => 3.0,
+        "B-" => 2.7,
+        "C+" => 2.3,
+        "C" => 2.0,
+        "C-" => 1.7,
+        "D" => 1.0,
+        "F" => 0.0,
+        _ => return None,
+    })
 }
 
 impl GradeService {
