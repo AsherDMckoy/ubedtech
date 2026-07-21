@@ -79,6 +79,10 @@ pub fn render_pages(out_dir: &str) -> std::io::Result<()> {
                 crate::records::http::sample_grade_history_html(),
             ),
         ),
+        (
+            "documents.html",
+            render("documents", crate::documents::http::sample_documents_html()),
+        ),
     ];
     for (name, html) in pages {
         let path = format!("{out_dir}/{name}");

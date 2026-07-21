@@ -728,6 +728,47 @@ mod ui {
             "duplicate submission must not create a second request"
         );
 
+        // The polling row fragment tells the truth at every stage. Pending:
+        // the row polls and shows pending.
+        let request_id_early: uuid::Uuid =
+            sqlx::query_scalar("SELECT id FROM document_request LIMIT 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let row_uri = format!("/ui/documents/{request_id_early}/row");
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri(&row_uri)
+                .cookie(student_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let row = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        assert!(row.contains("data-status=\"pending\"") && row.contains("data-poll="));
+
+        // Owner-scoped: a crafted id is 404; an officer holds no student
+        // row at all (403).
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri(&format!("/ui/documents/{}/row", Uuid::new_v4()))
+                .cookie(student_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri(&row_uri)
+                .cookie(officer_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
         // Students cannot open the officer queue.
         let response = actix_test::call_service(
             &app,
@@ -802,6 +843,22 @@ mod ui {
         let body = String::from_utf8(actix_test::read_body(page).await.to_vec()).unwrap();
         assert!(body.contains("ready"));
         assert!(body.contains(&format!("/ui/documents/{request_id}/download")));
+
+        // Terminal state: the row fragment shows ready with the download
+        // link and stops polling — the status was never faked along the
+        // way; each render was the real backend row.
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri(&format!("/ui/documents/{request_id}/row"))
+                .cookie(student_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        let row = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        assert!(row.contains("data-status=\"ready\""));
+        assert!(!row.contains("data-poll="), "terminal rows stop polling");
+        assert!(row.contains(&format!("/ui/documents/{request_id}/download")));
 
         let response = actix_test::call_service(
             &app,

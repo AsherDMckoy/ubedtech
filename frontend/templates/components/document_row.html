@@ -1,0 +1,19 @@
+{#-
+  One row of the student's document-request list, in its true server state —
+  included per row by the documents page and rendered alone by the row
+  fragment endpoint the polling enhancement fetches. Non-terminal rows
+  (pending/approved/generating) carry data-poll so the page keeps them
+  honest without a full reload; terminal rows (ready/rejected/failed) stop
+  polling by not carrying it. Status is always badge + the status word —
+  never color alone. Requires `request` (StudentRequestView) in scope.
+-#}
+<tr data-status="{{ request.status }}"{% if request.polling() %} data-poll="/ui/documents/{{ request.id }}/row"{% endif %}>
+  <td>{{ request.label }}</td>
+  <td><span class="badge {{ crate::shared::assets::badge_class(request.status.as_str()) }}">{{ request.status }}</span></td>
+  <td>{{ request.requested_at }}</td>
+  <td class="c-action">
+    {% if request.status == "ready" %}
+      <a href="/ui/documents/{{ request.id }}/download">Download</a>
+    {% endif %}
+  </td>
+</tr>

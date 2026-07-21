@@ -955,6 +955,45 @@ tr.published .s-name {
   }
 }
 
+/* ---------- request drawer (documents): animated surface #2 on native
+   <details>, so it opens and its form submits with JS off. Enter-only
+   animation, user-triggered. */
+
+details.drawer > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 14px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  background: var(--action);
+  color: var(--action-ink);
+  border: 0.5px solid var(--action);
+  border-radius: var(--radius);
+}
+
+details.drawer > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.drawer {
+  margin-bottom: var(--space-5);
+}
+
+.drawer-panel {
+  margin-top: var(--space-3);
+  background: var(--surface-2);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: var(--space-4);
+  max-width: 440px;
+}
+
+details.drawer[open] > .drawer-panel {
+  animation: enter-down var(--dur-base) var(--ease-enter);
+}
+
 /* ---------- unofficial student documents (transcript, proof of
    enrollment): a labeled identity header, and a print stylesheet that
    drops the app chrome — the page itself is the printable document. */

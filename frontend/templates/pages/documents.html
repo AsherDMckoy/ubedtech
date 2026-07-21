@@ -1,73 +1,78 @@
 {% extends "pages/base.html" %}
-{% block title %}My documents{% endblock %}
+{% import "components/ui.html" as ui %}
+{% block title %}Your documents{% endblock %}
 {% block content %}
-  <h1>My documents</h1>
-  {% if let Some(notice) = notice %}
-    <p role="status">{{ notice }}</p>
-  {% endif %}
-  {% if let Some(error) = error %}
-    <p role="alert">{{ error }}</p>
-  {% endif %}
+  <div class="wrap">
+    <h1>Your documents</h1>
+    <p class="sub">Official documents are requested here, reviewed by the records office, and generated as signed PDFs</p>
 
-  <h2>Request a document</h2>
-  {% if available_types.is_empty() %}
-    <p>Document requests are not available at your institution right now.</p>
-  {% else %}
-  <form method="post" action="/ui/documents">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
-    <p>
-      <label for="document_type">Document</label>
-      <select id="document_type" name="document_type">
-        {% for kind in available_types %}
-          <option value="{{ kind.value }}">{{ kind.label }}</option>
-        {% endfor %}
-      </select>
-    </p>
-    <p>
-      <label for="purpose">Purpose (optional)</label>
-      <input id="purpose" name="purpose" maxlength="500">
-    </p>
-    <p>
-      <label for="delivery_method">Delivery</label>
-      <select id="delivery_method" name="delivery_method">
-        <option value="download">Download</option>
-        <option value="pickup">Pickup</option>
-        <option value="email">Email</option>
-      </select>
-    </p>
-    <button type="submit">Submit request</button>
-  </form>
-  {% endif %}
+    {% if let Some(notice) = notice %}
+      {% call ui::alert("success", notice) %}{% endcall %}
+    {% endif %}
+    {% if let Some(error) = error %}
+      {% call ui::alert("danger", error) %}{% endcall %}
+    {% endif %}
 
-  <h2>Your requests</h2>
-  {% if requests.is_empty() %}
-    <p>No document requests yet.</p>
-  {% else %}
-    <table>
-      <caption>Document requests, newest first</caption>
-      <thead>
-        <tr>
-          <th scope="col">Document</th>
-          <th scope="col">Status</th>
-          <th scope="col">Requested</th>
-          <th scope="col"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for request in requests %}
-          <tr>
-            <td>{{ request.label }}</td>
-            <td><span class="badge {{ crate::shared::assets::badge_class(request.status.as_str()) }}">{{ request.status }}</span></td>
-            <td>{{ request.requested_at }}</td>
-            <td>
-              {% if request.status == "ready" %}
-                <a href="/ui/documents/{{ request.id }}/download">Download</a>
-              {% endif %}
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% endif %}
+    {# Request drawer — animated surface #2, on <details> so it opens and
+       submits with JS off. The real form lives inside; the server-minted
+       idempotency key makes a double submit return the original request. #}
+    {% if available_types.is_empty() %}
+      {% call ui::empty_state("Document requests are not available at your institution right now.", "", "") %}{% endcall %}
+    {% else %}
+      <details class="drawer">
+        <summary>Request a document</summary>
+        <div class="drawer-panel">
+          <form method="post" action="/ui/documents">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="idempotency_key" value="{{ idempotency_key }}">
+            <div class="field">
+              <label for="document_type">Document</label>
+              <select id="document_type" name="document_type">
+                {% for kind in available_types %}
+                  <option value="{{ kind.value }}">{{ kind.label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            {% call ui::field("purpose", "purpose", "Purpose (optional)", "text", "", "", "Shown to the reviewing officer — e.g. visa application") %}{% endcall %}
+            <div class="field">
+              <label for="delivery_method">Delivery</label>
+              <select id="delivery_method" name="delivery_method">
+                <option value="download">Download</option>
+                <option value="pickup">Pickup</option>
+                <option value="email">Email</option>
+              </select>
+            </div>
+            {% call ui::busy_button("Submit request", "Submitting…", true) %}{% endcall %}
+          </form>
+        </div>
+      </details>
+    {% endif %}
+
+    <h2>Your requests</h2>
+    {% if requests.is_empty() %}
+      {% call ui::empty_state("No document requests yet.", "", "") %}{% endcall %}
+    {% else %}
+      <div class="card card-flush table-wrap">
+        <table>
+          <caption>Document requests, newest first — statuses update as the records office and generator work</caption>
+          <thead>
+            <tr>
+              <th scope="col">Document</th>
+              <th scope="col">Status</th>
+              <th scope="col">Requested</th>
+              <th scope="col"><span class="sr-only">Download</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for request in requests %}
+              {% include "components/document_row.html" %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="foot">A request becomes downloadable only when its document has actually been generated — the status here is the real one.</p>
+    {% endif %}
+
+    <p class="sr-only" data-live aria-live="polite"></p>
+  </div>
 {% endblock %}

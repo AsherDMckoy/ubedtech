@@ -109,6 +109,33 @@ addEventListener("click", (event) => {
   }
 });
 
+// Honest status polling (documents): rows carrying data-poll re-fetch
+// their server-rendered fragment and swap it in — the status shown is
+// always the real backend row, never a predicted one. Terminal rows render
+// without data-poll, so polling stops by itself. Pure enhancement: with JS
+// off, a reload shows the same truth.
+if (document.querySelector("[data-poll]")) {
+  setInterval(async () => {
+    for (const row of document.querySelectorAll("[data-poll]")) {
+      try {
+        const response = await fetch(row.dataset.poll, {
+          credentials: "same-origin",
+        });
+        if (!response.ok) continue;
+        const html = (await response.text()).trim();
+        if (!html.startsWith("<tr")) continue;
+        const changed = !html.includes(`data-status="${row.dataset.status}"`);
+        row.outerHTML = html;
+        if (changed) {
+          announce("A document request changed status");
+        }
+      } catch {
+        // Network hiccup: the next tick retries; the row keeps its state.
+      }
+    }
+  }, 4000);
+}
+
 // ---- Registration screen ------------------------------------------------
 // Read path: filter the already-loaded rows in place, no round trip
 // (FRONTEND.md §4). With JS off the search form GETs and the server filters.

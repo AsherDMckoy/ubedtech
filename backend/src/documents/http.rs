@@ -70,6 +70,63 @@ struct StudentRequestView {
     requested_at: String,
 }
 
+impl StudentRequestView {
+    /// Non-terminal states keep polling their row fragment; ready,
+    /// rejected, and failed stop (the row drops its data-poll attribute).
+    fn polling(&self) -> bool {
+        matches!(self.status.as_str(), "pending" | "approved" | "generating")
+    }
+
+    fn from_row(row: StudentRequestRow) -> Self {
+        Self {
+            id: row.id,
+            label: document_type_label(&row.document_type),
+            status: row.status,
+            requested_at: row.requested_at.format("%Y-%m-%d %H:%M UTC").to_string(),
+        }
+    }
+}
+
+/// One request row rendered alone — what the polling enhancement swaps in.
+/// The same markup the page includes per row, so a swapped row is
+/// identical to a fresh page load.
+#[derive(Template)]
+#[template(path = "components/document_row.html")]
+struct StudentRowFragment {
+    request: StudentRequestView,
+}
+
+/// The student's own request row, for status polling. Owner-scoped: any
+/// other id — another student's, another institution's, or nonsense — is
+/// 404, indistinguishable from nonexistent.
+#[get("/ui/documents/{request_id}/row")]
+pub async fn student_row_fragment(
+    actor: Actor,
+    pool: web::Data<PgPool>,
+    request_id: web::Path<Uuid>,
+) -> Result<HttpResponse, AppError> {
+    let student_id = actor.require_student_self()?;
+    let row = sqlx::query_as::<_, StudentRequestRow>(
+        r#"
+        SELECT id, document_type, status, requested_at
+        FROM document_request
+        WHERE id = $1 AND institution_id = $2 AND student_id = $3
+        "#,
+    )
+    .bind(request_id.into_inner())
+    .bind(actor.institution_id)
+    .bind(student_id)
+    .fetch_optional(pool.as_ref())
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    let body = StudentRowFragment {
+        request: StudentRequestView::from_row(row),
+    }
+    .render()?;
+    Ok(html(StatusCode::OK, body))
+}
+
 struct AvailableType {
     value: String,
     label: &'static str,
@@ -174,15 +231,7 @@ async fn render_documents(
     .fetch_all(pool)
     .await?;
 
-    let requests = rows
-        .into_iter()
-        .map(|row| StudentRequestView {
-            id: row.id,
-            label: document_type_label(&row.document_type),
-            status: row.status,
-            requested_at: row.requested_at.format("%Y-%m-%d %H:%M UTC").to_string(),
-        })
-        .collect();
+    let requests = rows.into_iter().map(StudentRequestView::from_row).collect();
 
     // The form offers only what the institution has enabled; the service
     // re-checks on submit, so this is presentation, not the gate.
@@ -387,6 +436,42 @@ async fn render_queue(
     .render()?)
 }
 
+/// Renders the student documents page with every status and no database,
+/// for the frontend axe harness (`render-pages`).
+pub fn sample_documents_html() -> Result<String, askama::Error> {
+    let request = |status: &str, kind: &str| StudentRequestView {
+        id: Uuid::new_v4(),
+        label: document_type_label(kind),
+        status: status.to_owned(),
+        requested_at: "2026-07-20 14:00 UTC".to_owned(),
+    };
+    DocumentsPage {
+        csrf_token: "sample",
+        idempotency_key: Uuid::nil(),
+        available_types: vec![
+            AvailableType {
+                value: "official_transcript".into(),
+                label: "Official transcript",
+            },
+            AvailableType {
+                value: "enrollment_letter".into(),
+                label: "Proof of enrollment",
+            },
+        ],
+        requests: vec![
+            request("pending", "official_transcript"),
+            request("approved", "enrollment_letter"),
+            request("generating", "official_transcript"),
+            request("ready", "official_transcript"),
+            request("rejected", "enrollment_letter"),
+            request("failed", "official_transcript"),
+        ],
+        notice: None,
+        error: None,
+    }
+    .render()
+}
+
 fn document_type_label(value: &str) -> &'static str {
     match value {
         "official_transcript" => "Official transcript",
@@ -411,6 +496,7 @@ fn see_other(location: &str) -> HttpResponse {
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(documents_page)
         .service(request_form)
+        .service(student_row_fragment)
         .service(download)
         .service(queue_page)
         .service(approve_form)
