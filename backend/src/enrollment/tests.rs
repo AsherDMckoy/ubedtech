@@ -1479,6 +1479,92 @@ mod ui {
         assert!(filtered.contains("No open sections match."));
     }
 
+    /// The enhanced write path: a register/drop POST with the `X-Fragment`
+    /// header answers with the single re-rendered row in its COMMITTED
+    /// state — the server outcome, never an optimistic "Enrolled". A denial
+    /// answers 409 with the specific reason named in the row.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn register_fragment_reflects_committed_server_outcome_never_optimistic(pool: PgPool) {
+        let fixture = seed_registration_fixture(&pool, 1).await;
+        let username = credential_student(&pool, &fixture).await;
+        let app = ui_app!(&pool, fixture.registrar.institution_id);
+        let cookie = login(&app, &username, PASSWORD).await;
+
+        let catalog = get_page(&app, &cookie, "/ui/catalog").await;
+        let csrf = extract_input(&catalog, "csrf_token");
+        assert!(
+            !catalog.contains("is-enrolled"),
+            "nothing is enrolled before the server says so"
+        );
+
+        let post_fragment = |uri: &'static str, form: serde_json::Value| {
+            let cookie = cookie.clone();
+            let app = &app;
+            async move {
+                let response = actix_test::call_service(
+                    app,
+                    actix_test::TestRequest::post()
+                        .uri(uri)
+                        .cookie(cookie)
+                        .insert_header(("X-Fragment", "row"))
+                        .set_form(form)
+                        .to_request(),
+                )
+                .await;
+                let status = response.status();
+                let body =
+                    String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+                (status, body)
+            }
+        };
+
+        // Success: the swapped-in row is the enrolled state, from the server.
+        let (status, row) = post_fragment(
+            "/ui/registration/add",
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "section_id": fixture.section_id,
+                "idempotency_key": Uuid::new_v4(),
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(row.trim_start().starts_with("<tr"), "a row, not a page");
+        assert!(row.contains("is-enrolled") && row.contains("Enrolled"));
+        assert!(row.contains("/ui/registration/drop"), "row now offers Drop");
+
+        // Denial: an honest 409 whose row names the specific reason and does
+        // NOT paint an enrolled state it did not earn.
+        let (status, denied) = post_fragment(
+            "/ui/registration/add",
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "section_id": fixture.section_id,
+                "idempotency_key": Uuid::new_v4(),
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(
+            denied.contains("already enrolled"),
+            "the rejection names its reason: {denied}"
+        );
+
+        // Drop through the fragment path: the row returns to available.
+        let enrollment_id = extract_input(&row, "enrollment_id");
+        let (status, row) = post_fragment(
+            "/ui/registration/drop",
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "enrollment_id": enrollment_id,
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(!row.contains("is-enrolled"));
+        assert!(row.contains("/ui/registration/add"), "row offers Register");
+    }
+
     /// Every rejection case in the student capability list renders inline
     /// feedback on the page (status 409), never a bare error blob.
     #[sqlx::test(migrations = "./migrations")]

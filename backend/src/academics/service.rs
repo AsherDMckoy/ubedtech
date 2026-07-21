@@ -82,6 +82,10 @@ pub struct CatalogSection {
     /// e.g. "1 09:00-10:15, 3 09:00-10:15" (ISO day numbers), empty when
     /// meetings are not yet scheduled.
     pub meetings: String,
+    /// The viewing student's active enrollment in this section, if any — the
+    /// registration screen renders that row in its "enrolled" state and
+    /// offers Drop. `None` for a non-student actor or an unenrolled section.
+    pub enrolled_enrollment_id: Option<Uuid>,
 }
 
 impl AcademicsService {
@@ -580,7 +584,8 @@ impl AcademicsService {
                 s.section_code,
                 cap.capacity,
                 cap.enrolled_count,
-                COALESCE(m.summary, '') AS meetings
+                COALESCE(m.summary, '') AS meetings,
+                my_e.id AS enrolled_enrollment_id
             FROM section s
             JOIN course c ON c.id = s.course_id
             JOIN section_capacity cap ON cap.section_id = s.id
@@ -593,6 +598,10 @@ impl AcademicsService {
                 FROM section_meeting
                 WHERE section_id = s.id
             ) m ON true
+            LEFT JOIN enrollment my_e
+                   ON my_e.section_id = s.id
+                  AND my_e.student_id = $6
+                  AND my_e.status = 'enrolled'
             WHERE s.institution_id = $1
               AND s.term_id = $2
               AND s.status = 'open'
@@ -606,9 +615,59 @@ impl AcademicsService {
         .bind(pattern)
         .bind(PAGE_SIZE)
         .bind(i64::from(page) * PAGE_SIZE)
+        .bind(actor.student_id)
         .fetch_all(&self.pool)
         .await?;
         Ok(sections)
+    }
+
+    /// One section's catalog row for this student — the true committed state
+    /// the registration screen swaps in after a register/drop (seats,
+    /// meetings, and whether the student is now enrolled). `None` if the
+    /// section is not an open section in the actor's institution.
+    pub async fn registration_row(
+        &self,
+        actor: &Actor,
+        section_id: Uuid,
+    ) -> Result<Option<CatalogSection>, AppError> {
+        Ok(sqlx::query_as::<_, CatalogSection>(
+            r#"
+            SELECT
+                s.id AS section_id,
+                c.code AS course_code,
+                c.title AS course_title,
+                c.credit_hours::float8 AS credit_hours,
+                s.section_code,
+                cap.capacity,
+                cap.enrolled_count,
+                COALESCE(m.summary, '') AS meetings,
+                my_e.id AS enrolled_enrollment_id
+            FROM section s
+            JOIN course c ON c.id = s.course_id
+            JOIN section_capacity cap ON cap.section_id = s.id
+            LEFT JOIN LATERAL (
+                SELECT string_agg(
+                           day_of_week || ' ' || to_char(starts_at, 'HH24:MI')
+                           || '-' || to_char(ends_at, 'HH24:MI'),
+                           ', ' ORDER BY day_of_week, starts_at
+                       ) AS summary
+                FROM section_meeting
+                WHERE section_id = s.id
+            ) m ON true
+            LEFT JOIN enrollment my_e
+                   ON my_e.section_id = s.id
+                  AND my_e.student_id = $3
+                  AND my_e.status = 'enrolled'
+            WHERE s.id = $1
+              AND s.institution_id = $2
+              AND s.status = 'open'
+            "#,
+        )
+        .bind(section_id)
+        .bind(actor.institution_id)
+        .bind(actor.student_id)
+        .fetch_optional(&self.pool)
+        .await?)
     }
 }
 

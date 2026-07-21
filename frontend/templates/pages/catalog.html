@@ -1,64 +1,76 @@
 {% extends "pages/base.html" %}
-{% block title %}Course catalog{% endblock %}
+{% import "components/ui.html" as ui %}
+{% block title %}Registration{% endblock %}
 {% block content %}
-  <h1>Course catalog</h1>
-  {% if let Some(term) = term %}
-    <p>{{ term.name }} ({{ term.code }}) — add/drop closes {{ term.add_drop_closes_at }}</p>
+  <div class="wrap">
+    <h1>Registration</h1>
+    {% if let Some(term) = term %}
+      <p class="sub">{{ term.name }} · add/drop closes {{ term.add_drop_closes_at.format("%b %-d, %Y") }}</p>
 
-    <form method="get" action="/ui/catalog">
-      <label for="q">Search courses</label>
-      <input id="q" name="q" type="search" value="{{ q }}">
-      <button type="submit">Search</button>
-    </form>
+      {% if let Some(blocked) = blocked %}
+        {% call ui::alert("danger", blocked) %}{% endcall %}
+      {% endif %}
 
-    {% if rows.is_empty() %}
-      <p>No open sections match.</p>
-    {% else %}
-      <table>
-        <caption>Open sections</caption>
-        <thead>
-          <tr>
-            <th scope="col">Course</th>
-            <th scope="col">Section</th>
-            <th scope="col">Credits</th>
-            <th scope="col">Meets</th>
-            <th scope="col">Seats</th>
-            <th scope="col"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in rows %}
+      {# Read path: filters instantly in-page (FRONTEND.md §4). With JS off
+         this is a GET form that reloads with server-filtered results. #}
+      <form data-search-form role="search" method="get" action="/ui/catalog">
+        {% call ui::search("q", "q", "Search sections", "Search CMPS, calculus, Alvarez…", q) %}{% endcall %}
+      </form>
+      <p class="meta">
+        <span data-search-count>Showing all {{ rows.len() }} sections</span>
+        <span class="meta-hint">Search filters instantly · registering waits for the server</span>
+      </p>
+
+      <div class="card card-flush table-wrap">
+        <table>
+          <caption>Available sections for {{ term.name }}</caption>
+          <thead>
             <tr>
-              <td>{{ row.section.course_code }} — {{ row.section.course_title }}</td>
-              <td>{{ row.section.section_code }}</td>
-              <td>{{ row.section.credit_hours }}</td>
-              <td>{{ row.section.meetings }}</td>
-              <td>{{ row.section.enrolled_count }}/{{ row.section.capacity }}</td>
-              <td>
-                <form method="post" action="/ui/registration/add">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                  <input type="hidden" name="section_id" value="{{ row.section.section_id }}">
-                  <input type="hidden" name="idempotency_key" value="{{ row.idempotency_key }}">
-                  <button type="submit">Register</button>
-                </form>
-              </td>
+              <th scope="col">Course</th>
+              <th scope="col">Seats</th>
+              <th scope="col"><span class="sr-only">Actions</span></th>
             </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+              {% include "components/section_row.html" %}
+            {% endfor %}
+            <tr data-search-empty hidden>
+              <td colspan="3" class="c-empty">No sections match your search. Try a course code or instructor.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {% if rows.is_empty() %}
+        <p class="c-empty">No open sections match.</p>
+      {% endif %}
+
+      <p class="foot">Registering reserves your seat only when the server confirms it — you'll never see “Enrolled” before it's real.</p>
+
+      <nav aria-label="Catalog pages" class="pager">
+        {% if page > 0 %}
+          <a href="/ui/catalog?q={{ q }}&amp;page={{ page - 1 }}">Previous</a>
+        {% endif %}
+        {% if rows.len() == 20 %}
+          <a href="/ui/catalog?q={{ q }}&amp;page={{ page + 1 }}">Next</a>
+        {% endif %}
+      </nav>
+    {% else %}
+      {% call ui::alert("accent", "There is no active term right now.") %}{% endcall %}
     {% endif %}
 
-    <nav aria-label="Catalog pages">
-      {% if page > 0 %}
-        <a href="/ui/catalog?q={{ q }}&amp;page={{ page - 1 }}">Previous</a>
-      {% endif %}
-      {% if rows.len() == 20 %}
-        <a href="/ui/catalog?q={{ q }}&amp;page={{ page + 1 }}">Next</a>
-      {% endif %}
-    </nav>
-  {% else %}
-    <p>There is no active term right now.</p>
-  {% endif %}
+    <p class="sr-only" data-live aria-live="polite"></p>
 
-  <p><a href="/ui/registration">My registration</a></p>
+    {# Destructive-confirm dialog (animated surface #2). Enhancement only:
+       with JS off each Drop form posts directly, no dialog. #}
+    <dialog id="drop-dialog" aria-labelledby="drop-dialog-title">
+      <h2 id="drop-dialog-title">Drop this section?</h2>
+      <p data-drop-name>You'll lose your seat. You can re-register while add/drop is open, if seats remain.</p>
+      <div class="dialog-actions">
+        <button type="button" data-dialog-close>Keep it</button>
+        <button type="button" class="btn-primary" data-drop-confirm>Drop section</button>
+      </div>
+    </dialog>
+  </div>
 {% endblock %}

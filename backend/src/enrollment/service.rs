@@ -873,6 +873,29 @@ impl EnrollmentService {
         Ok(rows)
     }
 
+    /// The section a student's own enrollment belongs to — resolved before a
+    /// drop so the registration screen can swap that section's row back to its
+    /// available state. `None` if the enrollment is not this student's.
+    pub async fn enrollment_section(
+        &self,
+        actor: &Actor,
+        enrollment_id: Uuid,
+    ) -> Result<Option<Uuid>, AppError> {
+        let student_id = actor.require_student_self()?;
+        Ok(sqlx::query_scalar(
+            r#"
+            SELECT section_id
+            FROM enrollment
+            WHERE id = $1 AND institution_id = $2 AND student_id = $3
+            "#,
+        )
+        .bind(enrollment_id)
+        .bind(actor.institution_id)
+        .bind(student_id)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
     /// The student's own active registration holds for one term (dashboard
     /// alert). A hold blocks registration, so a non-empty list is surfaced
     /// loudly; the flags themselves are short tokens ("financial").

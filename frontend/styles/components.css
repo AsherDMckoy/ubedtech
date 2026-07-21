@@ -559,6 +559,124 @@ details.menu[open] > .menu-panel {
   animation: spin 800ms linear infinite;
 }
 
+/* ---------- registration rows (the section_row fragment): the four
+   states — available, enrolled, low-seats, blocked — over the shared
+   table primitive. Color is never the only signal (a reason line names
+   the block; the enrolled badge carries a check + text). */
+
+.sub {
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin: calc(var(--space-3) * -1) 0 var(--space-4);
+}
+
+.meta {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 var(--space-1) var(--space-3);
+}
+
+.meta-hint {
+  color: var(--text-muted);
+}
+
+.c-course {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.c-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: var(--space-1) 0 0;
+}
+
+.reason {
+  font-size: 12px;
+  color: var(--text-danger);
+  margin: var(--space-1) 0 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.c-seats {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.c-seats .n {
+  font-weight: 500;
+  display: block;
+  font-size: 13px;
+}
+
+.c-seats .d {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.seats-open {
+  color: var(--text-success);
+}
+
+.seats-low {
+  color: var(--text-warning);
+}
+
+.seats-full {
+  color: var(--text-danger);
+}
+
+.c-action {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+}
+
+.c-empty {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: var(--space-5);
+}
+
+tr.is-enrolled {
+  background: var(--bg-success);
+}
+
+tr.is-enrolled td:first-child {
+  box-shadow: inset 3px 0 0 var(--border-success);
+}
+
+.foot,
+.pager {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: var(--space-4) 0 0;
+}
+
+.pager {
+  display: flex;
+  gap: var(--space-4);
+}
+
+/* Feedback on a just-swapped row: a brief flag on an element already on
+   screen (allowed by FRONTEND.md §2 — user-triggered, not load motion). */
+@keyframes flag {
+  from {
+    background: var(--bg-accent);
+  }
+}
+
+tr.just-changed {
+  animation: flag var(--dur-base) var(--ease-enter);
+}
+
 /* ---------- dashboard strip: a compact list of schedule rows / events
    inside a card. Composed from tokens, no new colors. */
 

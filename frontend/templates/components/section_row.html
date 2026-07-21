@@ -1,0 +1,49 @@
+{#-
+  One registration row, in its true server-decided state — shared by the
+  full registration page (included per row) and the fragment endpoints
+  (rendered alone and swapped in after a register/drop). The four states:
+  available, enrolled, low-seats, and blocked (full, or a named denial
+  reason). Never an optimistic "Enrolled": this markup only ever renders a
+  committed outcome (FRONTEND.md §3). Requires `row` (RegistrationRow) and
+  `csrf_token` in scope.
+-#}
+<tr data-search="{{ row.search_key() }}"{% if row.is_enrolled() %} class="is-enrolled"{% endif %}>
+  <td>
+    <p class="c-course">{{ row.section.course_code }} · {{ row.section.course_title }}</p>
+    <p class="c-detail">Sec {{ row.section.section_code }}{% if !row.section.meetings.is_empty() %} · {{ row.section.meetings }}{% endif %} · {{ row.section.credit_hours }} cr</p>
+    {% if let Some(reason) = row.denial %}
+      <p class="reason"><span aria-hidden="true">🔒</span>{{ reason }}</p>
+    {% endif %}
+  </td>
+  <td class="c-seats">
+    {% if row.is_enrolled() %}
+      <span class="badge badge-ok"><span aria-hidden="true">✓</span> Enrolled</span>
+    {% else if row.is_full() %}
+      <span class="n seats-full">Full</span>
+      <span class="d">{{ row.section.enrolled_count }}/{{ row.section.capacity }}</span>
+    {% else %}
+      <span class="n {% if row.is_low() %}seats-low{% else %}seats-open{% endif %}">{{ row.remaining() }} open</span>
+      <span class="d">{{ row.section.enrolled_count }}/{{ row.section.capacity }}</span>
+    {% endif %}
+  </td>
+  <td class="c-action">
+    {% if let Some(enrollment_id) = row.section.enrolled_enrollment_id %}
+      <form method="post" action="/ui/registration/drop" data-fragment
+            data-confirm="{{ row.section.course_code }} · {{ row.section.course_title }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="enrollment_id" value="{{ enrollment_id }}">
+        <button type="submit" data-busy-label="Dropping…">Drop</button>
+      </form>
+    {% else if row.is_full() %}
+      <button type="button" disabled
+              aria-label="Cannot register for {{ row.section.course_code }}: section is full">Register</button>
+    {% else %}
+      <form method="post" action="/ui/registration/add" data-fragment>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="section_id" value="{{ row.section.section_id }}">
+        <input type="hidden" name="idempotency_key" value="{{ row.idempotency_key }}">
+        <button type="submit" class="btn-primary" data-busy-label="Checking…">Register</button>
+      </form>
+    {% endif %}
+  </td>
+</tr>

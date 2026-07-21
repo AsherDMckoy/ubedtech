@@ -151,27 +151,43 @@ pub struct NoticeQuery {
     notice: Option<String>,
 }
 
-/// Register from a plain form post. Success redirects (PRG); a typed denial
-/// re-renders the page with the reason inline and an honest 409.
+/// Register from a form post. JavaScript-off path: success redirects (PRG);
+/// a typed denial re-renders the registration page with the reason inline
+/// and an honest 409. Enhanced path (`X-Fragment` header from app.js):
+/// returns just the re-rendered section row in its committed state — the
+/// server outcome, never an optimistic "Enrolled" (FRONTEND.md §3).
 #[post("/ui/registration/add")]
 pub async fn register_form(
     actor: Actor,
     current: CurrentSession,
     enrollment: web::Data<EnrollmentService>,
     academics: web::Data<AcademicsService>,
+    req: actix_web::HttpRequest,
     form: web::Form<RegisterForm>,
 ) -> Result<HttpResponse, AppError> {
     let _ = &form.csrf_token; // validated by the CSRF middleware
 
+    let section_id = form.section_id;
     let outcome = enrollment
         .register_self(
             &actor,
             RegisterCommand {
-                section_id: form.section_id,
+                section_id,
                 idempotency_key: form.idempotency_key,
             },
         )
         .await;
+
+    if is_fragment(&req) {
+        return row_fragment(
+            &actor,
+            &current,
+            &academics,
+            section_id,
+            denial_of(outcome)?,
+        )
+        .await;
+    }
     finish_ui_action(
         &actor,
         &current,
@@ -188,10 +204,29 @@ pub async fn drop_form(
     current: CurrentSession,
     enrollment: web::Data<EnrollmentService>,
     academics: web::Data<AcademicsService>,
+    req: actix_web::HttpRequest,
     form: web::Form<DropForm>,
 ) -> Result<HttpResponse, AppError> {
     let _ = &form.csrf_token;
+
+    // Resolve the section before the drop so the fragment can render that
+    // section's row back to its available state afterward.
+    let section_id = enrollment
+        .enrollment_section(&actor, form.enrollment_id)
+        .await?;
     let outcome = enrollment.drop_self(&actor, form.enrollment_id).await;
+
+    if is_fragment(&req) {
+        let section_id = section_id.ok_or(AppError::NotFound)?;
+        return row_fragment(
+            &actor,
+            &current,
+            &academics,
+            section_id,
+            denial_of(outcome)?,
+        )
+        .await;
+    }
     finish_ui_action(
         &actor,
         &current,
@@ -200,6 +235,52 @@ pub async fn drop_form(
         outcome.map(|_| "dropped"),
     )
     .await
+}
+
+/// True when app.js asked for a single-row fragment rather than a full page.
+fn is_fragment(req: &actix_web::HttpRequest) -> bool {
+    req.headers().contains_key("X-Fragment")
+}
+
+/// Collapse an enroll/drop outcome into an optional denial reason for the
+/// row fragment; a non-business error keeps its shape and propagates.
+fn denial_of<T>(outcome: Result<T, EnrollError>) -> Result<Option<String>, AppError> {
+    match outcome {
+        Ok(_) => Ok(None),
+        Err(EnrollError::Denied(denial)) => Ok(Some(denial.message().to_owned())),
+        Err(EnrollError::App(error)) => Err(error),
+    }
+}
+
+/// Render one section's row in its committed state (with an optional named
+/// denial reason) and return it with an honest status: 409 when the action
+/// was refused, 200 when it stuck.
+async fn row_fragment(
+    actor: &Actor,
+    current: &CurrentSession,
+    academics: &AcademicsService,
+    section_id: Uuid,
+    denial: Option<String>,
+) -> Result<HttpResponse, AppError> {
+    let status = if denial.is_some() {
+        StatusCode::CONFLICT
+    } else {
+        StatusCode::OK
+    };
+    let body = match academics.registration_row(actor, section_id).await? {
+        Some(section) => crate::academics::http::SectionRowFragment {
+            row: crate::academics::http::RegistrationRow::new(section, denial),
+            csrf_token: current.csrf_token.clone(),
+        }
+        .render()?,
+        None => {
+            "<tr><td colspan=\"3\" class=\"c-empty\">This section is no longer available.</td></tr>"
+                .to_owned()
+        }
+    };
+    Ok(HttpResponse::build(status)
+        .content_type("text/html; charset=utf-8")
+        .body(body))
 }
 
 /// Success ⇒ 303 back to the page (a refresh never resubmits); a denial ⇒
