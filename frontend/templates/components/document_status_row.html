@@ -1,0 +1,13 @@
+{#-
+  One decided request row on the officer queue — included by the page and
+  rendered alone by the officer row fragment. Approved/generating rows
+  poll so the officer watches the real pipeline (approved → generating →
+  ready) without a completed state ever being faked. Requires `decided`
+  (DecidedRequestView) in scope.
+-#}
+<tr data-status="{{ decided.status }}"{% if decided.polling() %} data-poll="/ui/admin/documents/{{ decided.id }}/row"{% endif %}>
+  <td>{{ decided.student_number }}</td>
+  <td>{{ decided.label }}</td>
+  <td><span class="badge {{ crate::shared::assets::badge_class(decided.status.as_str()) }}">{{ decided.status }}</span></td>
+  <td>{{ decided.updated_at }}</td>
+</tr>

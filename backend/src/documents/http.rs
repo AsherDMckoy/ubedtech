@@ -284,11 +284,84 @@ struct PendingRequestView {
     requested_at: String,
 }
 
+#[derive(sqlx::FromRow)]
+struct DecidedRequestRow {
+    id: Uuid,
+    document_type: String,
+    student_number: String,
+    status: String,
+    updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+struct DecidedRequestView {
+    id: Uuid,
+    label: &'static str,
+    student_number: String,
+    status: String,
+    updated_at: String,
+}
+
+impl DecidedRequestView {
+    /// Approved/generating rows keep polling until the worker settles them.
+    fn polling(&self) -> bool {
+        matches!(self.status.as_str(), "approved" | "generating")
+    }
+
+    fn from_row(row: DecidedRequestRow) -> Self {
+        Self {
+            id: row.id,
+            label: document_type_label(&row.document_type),
+            student_number: row.student_number,
+            status: row.status,
+            updated_at: row.updated_at.format("%Y-%m-%d %H:%M UTC").to_string(),
+        }
+    }
+}
+
+/// One decided row rendered alone, for the officer's status polling.
+#[derive(Template)]
+#[template(path = "components/document_status_row.html")]
+struct OfficerRowFragment {
+    decided: DecidedRequestView,
+}
+
+/// A decided request's row for the officer queue, institution-scoped.
+#[get("/ui/admin/documents/{request_id}/row")]
+pub async fn officer_row_fragment(
+    actor: Actor,
+    pool: web::Data<PgPool>,
+    request_id: web::Path<Uuid>,
+) -> Result<HttpResponse, AppError> {
+    if !actor.has_role(Role::DocumentOfficer) {
+        return Err(AppError::Forbidden);
+    }
+    let row = sqlx::query_as::<_, DecidedRequestRow>(
+        r#"
+        SELECT dr.id, dr.document_type, sp.student_number, dr.status, dr.updated_at
+        FROM document_request dr
+        JOIN student_profile sp ON sp.id = dr.student_id
+        WHERE dr.id = $1 AND dr.institution_id = $2
+        "#,
+    )
+    .bind(request_id.into_inner())
+    .bind(actor.institution_id)
+    .fetch_optional(pool.as_ref())
+    .await?
+    .ok_or(AppError::NotFound)?;
+
+    let body = OfficerRowFragment {
+        decided: DecidedRequestView::from_row(row),
+    }
+    .render()?;
+    Ok(html(StatusCode::OK, body))
+}
+
 #[derive(Template)]
 #[template(path = "pages/document_queue.html")]
 struct QueuePage<'a> {
     csrf_token: &'a str,
     requests: Vec<PendingRequestView>,
+    recent: Vec<DecidedRequestView>,
     notice: Option<&'a str>,
     error: Option<&'a str>,
 }
@@ -427,9 +500,29 @@ async fn render_queue(
         })
         .collect();
 
+    // Recently decided: the officer watches approved requests move through
+    // generating to ready here (the rows poll; nothing is faked).
+    let recent = sqlx::query_as::<_, DecidedRequestRow>(
+        r#"
+        SELECT dr.id, dr.document_type, sp.student_number, dr.status, dr.updated_at
+        FROM document_request dr
+        JOIN student_profile sp ON sp.id = dr.student_id
+        WHERE dr.institution_id = $1 AND dr.status <> 'pending'
+        ORDER BY dr.updated_at DESC
+        LIMIT 20
+        "#,
+    )
+    .bind(actor.institution_id)
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(DecidedRequestView::from_row)
+    .collect();
+
     Ok(QueuePage {
         csrf_token: &current.csrf_token,
         requests,
+        recent,
         notice,
         error,
     }
@@ -472,6 +565,38 @@ pub fn sample_documents_html() -> Result<String, askama::Error> {
     .render()
 }
 
+/// Renders the officer queue with pending and decided rows and no
+/// database, for the frontend axe harness (`render-pages`).
+pub fn sample_queue_html() -> Result<String, askama::Error> {
+    let decided = |status: &str| DecidedRequestView {
+        id: Uuid::new_v4(),
+        label: "Official transcript",
+        student_number: "2024-00871".into(),
+        status: status.to_owned(),
+        updated_at: "2026-07-20 14:10 UTC".to_owned(),
+    };
+    QueuePage {
+        csrf_token: "sample",
+        requests: vec![PendingRequestView {
+            id: Uuid::nil(),
+            label: "Official transcript",
+            student_number: "2023-01144".into(),
+            purpose: "visa application".into(),
+            requested_at: "2026-07-20 13:55 UTC".into(),
+        }],
+        recent: vec![
+            decided("approved"),
+            decided("generating"),
+            decided("ready"),
+            decided("rejected"),
+            decided("failed"),
+        ],
+        notice: None,
+        error: None,
+    }
+    .render()
+}
+
 fn document_type_label(value: &str) -> &'static str {
     match value {
         "official_transcript" => "Official transcript",
@@ -499,6 +624,7 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .service(student_row_fragment)
         .service(download)
         .service(queue_page)
+        .service(officer_row_fragment)
         .service(approve_form)
         .service(reject_form);
 }

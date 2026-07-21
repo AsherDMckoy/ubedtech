@@ -955,6 +955,20 @@ tr.published .s-name {
   }
 }
 
+/* Decision mini-forms on the officer queue: reason input + verb button
+   on one line, one per decision. */
+.decision {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  margin: var(--space-1) 0;
+}
+
+.decision input {
+  width: 200px;
+  height: 32px;
+}
+
 /* ---------- request drawer (documents): animated surface #2 on native
    <details>, so it opens and its form submits with JS off. Enter-only
    animation, user-triggered. */

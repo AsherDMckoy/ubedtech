@@ -1,35 +1,89 @@
 {% extends "pages/base.html" %}
-{% block title %}Document request queue{% endblock %}
+{% import "components/ui.html" as ui %}
+{% block title %}Document requests{% endblock %}
 {% block content %}
-  <h1>Pending document requests</h1>
-  {% if let Some(notice) = notice %}
-    <p role="status">{{ notice }}</p>
-  {% endif %}
-  {% if let Some(error) = error %}
-    <p role="alert">{{ error }}</p>
-  {% endif %}
+  <div class="wrap">
+    <h1>Document requests</h1>
+    <p class="sub">Approving issues the document: a record snapshot is frozen and generation is queued in the same transaction</p>
 
-  {% if requests.is_empty() %}
-    <p>No pending requests.</p>
-  {% endif %}
-  {% for request in requests %}
-    <article>
-      <h2>{{ request.label }} — {{ request.student_number }}</h2>
-      <p>Requested {{ request.requested_at }}{% if !request.purpose.is_empty() %} — “{{ request.purpose }}”{% endif %}</p>
-      <form method="post" action="/ui/admin/documents/{{ request.id }}/approve">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label>Approval reason
-          <input name="note" required maxlength="500">
-        </label>
-        <button type="submit">Approve</button>
-      </form>
-      <form method="post" action="/ui/admin/documents/{{ request.id }}/reject">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-        <label>Rejection reason
-          <input name="note" required maxlength="500">
-        </label>
-        <button type="submit">Reject</button>
-      </form>
-    </article>
-  {% endfor %}
+    {% if let Some(notice) = notice %}
+      {% call ui::alert("success", notice) %}{% endcall %}
+    {% endif %}
+    {% if let Some(error) = error %}
+      {% call ui::alert("danger", error) %}{% endcall %}
+    {% endif %}
+
+    <h2>Pending review</h2>
+    {% if requests.is_empty() %}
+      {% call ui::empty_state("No requests are waiting for review.", "", "") %}{% endcall %}
+    {% else %}
+      <div class="card card-flush table-wrap">
+        <table class="table-dense">
+          <caption>Pending document requests, oldest first</caption>
+          <thead>
+            <tr>
+              <th scope="col">Student</th>
+              <th scope="col">Document</th>
+              <th scope="col">Purpose</th>
+              <th scope="col">Requested</th>
+              <th scope="col">Decision</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for request in requests %}
+              <tr>
+                <td class="s-id">{{ request.student_number }}</td>
+                <td>{{ request.label }}</td>
+                <td>{% if !request.purpose.is_empty() %}“{{ request.purpose }}”{% else %}—{% endif %}</td>
+                <td>{{ request.requested_at }}</td>
+                <td>
+                  {# Both decisions require a reason — the decision trail
+                     must say why either way. Plain per-request forms. #}
+                  <form method="post" action="/ui/admin/documents/{{ request.id }}/approve" class="decision">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <label class="sr-only" for="approve-{{ request.id }}">Approval reason for {{ request.student_number }}</label>
+                    <input id="approve-{{ request.id }}" name="note" required maxlength="500" placeholder="Approval reason">
+                    <button type="submit" class="btn-primary" data-busy-label="Approving…">Approve</button>
+                  </form>
+                  <form method="post" action="/ui/admin/documents/{{ request.id }}/reject" class="decision">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <label class="sr-only" for="reject-{{ request.id }}">Rejection reason for {{ request.student_number }}</label>
+                    <input id="reject-{{ request.id }}" name="note" required maxlength="500" placeholder="Rejection reason">
+                    <button type="submit" data-busy-label="Rejecting…">Reject</button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+
+    <h2>Recent decisions</h2>
+    {% if recent.is_empty() %}
+      {% call ui::empty_state("No decided requests yet.", "", "") %}{% endcall %}
+    {% else %}
+      <div class="card card-flush table-wrap">
+        <table class="table-dense">
+          <caption>Recently decided requests — approved ones move through generating to ready as the worker completes</caption>
+          <thead>
+            <tr>
+              <th scope="col">Student</th>
+              <th scope="col">Document</th>
+              <th scope="col">Status</th>
+              <th scope="col">Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for decided in recent %}
+              {% include "components/document_status_row.html" %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="foot">Statuses here are the real pipeline — a document never shows ready before its file exists.</p>
+    {% endif %}
+
+    <p class="sr-only" data-live aria-live="polite"></p>
+  </div>
 {% endblock %}

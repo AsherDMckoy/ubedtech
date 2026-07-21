@@ -826,9 +826,52 @@ mod ui {
         .await;
         assert_eq!(response.status(), StatusCode::SEE_OTHER);
 
+        // After approval the queue's Recent decisions shows the request in
+        // its real pipeline state (approved, polling) — never ready before
+        // the artifact exists.
+        let queue = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/ui/admin/documents")
+                .cookie(officer_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        let queue_body = String::from_utf8(actix_test::read_body(queue).await.to_vec()).unwrap();
+        assert!(queue_body.contains("data-status=\"approved\""));
+        assert!(!queue_body.contains(">ready<"), "nothing fakes completion");
+        let officer_row_uri = format!("/ui/admin/documents/{request_id}/row");
+        assert!(queue_body.contains(&officer_row_uri), "approved row polls");
+
+        // The officer fragment is officer-only.
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri(&officer_row_uri)
+                .cookie(student_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
         // The worker (same storage root) generates the artifact.
         let worker = DocumentWorker::new(pool.clone(), "ui-test-worker".into(), root.clone(), 60);
         assert!(worker.run_once().await.unwrap());
+
+        // Now — and only now — the officer's row reports ready and stops
+        // polling.
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri(&officer_row_uri)
+                .cookie(officer_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let row = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        assert!(row.contains("data-status=\"ready\""));
+        assert!(!row.contains("data-poll="));
 
         // Student's page now shows ready + a download link, and the download
         // itself is an attachment with PDF bytes.

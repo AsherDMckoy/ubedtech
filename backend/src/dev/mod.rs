@@ -83,6 +83,13 @@ pub fn render_pages(out_dir: &str) -> std::io::Result<()> {
             "documents.html",
             render("documents", crate::documents::http::sample_documents_html()),
         ),
+        (
+            "document_queue.html",
+            render(
+                "document_queue",
+                crate::documents::http::sample_queue_html(),
+            ),
+        ),
     ];
     for (name, html) in pages {
         let path = format!("{out_dir}/{name}");
