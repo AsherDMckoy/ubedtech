@@ -160,6 +160,20 @@ pub fn render_pages(out_dir: &str) -> std::io::Result<()> {
                 crate::institution::http::sample_settings_html(),
             ),
         ),
+        (
+            "accounts_admin.html",
+            render(
+                "accounts_admin",
+                crate::identity_access::http::sample_accounts_html(),
+            ),
+        ),
+        (
+            "account_detail.html",
+            render(
+                "account_detail",
+                crate::identity_access::http::sample_account_detail_html(),
+            ),
+        ),
     ];
     for (name, html) in pages {
         let path = format!("{out_dir}/{name}");

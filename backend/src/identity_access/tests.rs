@@ -1480,3 +1480,193 @@ async fn ui_signout_revokes_the_session_and_clears_the_cookie(pool: PgPool) {
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(response.headers().get("location").unwrap(), "/ui/login");
 }
+
+/// The admin account pages over plain forms — the same guardrails as the
+/// JSON API because they are the same service functions: a password reset
+/// takes effect for real, self role-changes are refused inline, the
+/// platform role stays ungrantable, and suspension blocks the next login.
+#[sqlx::test(migrations = "./migrations")]
+async fn admin_account_pages_work_as_plain_forms(pool: PgPool) {
+    let institution = seed_institution(&pool).await;
+    let admin_id =
+        seed_credentialed_user(&pool, institution, "admin", "admin-pass-123", "active").await;
+    assign_role(&pool, institution, admin_id, "institution_admin").await;
+    let target_id =
+        seed_credentialed_user(&pool, institution, "target", "target-pass-123", "active").await;
+    assign_role(&pool, institution, target_id, "student").await;
+
+    let app = test_app!(&pool, institution);
+    let (admin_cookie, csrf) = login_session!(&app, "admin", "admin-pass-123");
+    let (student_cookie, _) = login_session!(&app, "target", "target-pass-123");
+
+    // A student cannot open the accounts surface.
+    let denied = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/ui/admin/accounts?q=admin")
+            .cookie(student_cookie)
+            .to_request(),
+    )
+    .await;
+    assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+
+    // Lookup finds the target and links its page.
+    let page = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/ui/admin/accounts?q=targ")
+            .cookie(admin_cookie.clone())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(page.status(), StatusCode::OK);
+    let body = String::from_utf8(actix_test::read_body(page).await.to_vec()).unwrap();
+    crate::shared::assets::assert_page_a11y(&body);
+    assert!(body.contains("target"));
+    assert!(body.contains(&format!("/ui/admin/accounts/{target_id}")));
+
+    let detail_uri = format!("/ui/admin/accounts/{target_id}");
+    let page = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri(&detail_uri)
+            .cookie(admin_cookie.clone())
+            .to_request(),
+    )
+    .await;
+    let body = String::from_utf8(actix_test::read_body(page).await.to_vec()).unwrap();
+    crate::shared::assets::assert_page_a11y(&body);
+    assert!(body.contains("Reset password"));
+
+    let post_form = |uri: String, form: serde_json::Value| {
+        let cookie = admin_cookie.clone();
+        let app = &app;
+        async move {
+            let response = actix_test::call_service(
+                app,
+                actix_test::TestRequest::post()
+                    .uri(&uri)
+                    .cookie(cookie)
+                    .set_form(form)
+                    .to_request(),
+            )
+            .await;
+            let status = response.status();
+            let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+            (status, body)
+        }
+    };
+
+    // Too-short password: refused inline, old password still works.
+    let (status, body) = post_form(
+        format!("{detail_uri}/password"),
+        serde_json::json!({ "csrf_token": &csrf, "new_password": "short" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(body.contains("at least 12 characters"));
+
+    // Real reset: the target's NEW password logs in, the old one is dead.
+    let (status, _) = post_form(
+        format!("{detail_uri}/password"),
+        serde_json::json!({ "csrf_token": &csrf, "new_password": "brand-new-pass-9" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let old = actix_test::call_service(
+        &app,
+        login_request("target", "target-pass-123").to_request(),
+    )
+    .await;
+    assert_eq!(old.status(), StatusCode::UNAUTHORIZED, "old password dead");
+    let (_, _fresh_csrf) = login_session!(&app, "target", "brand-new-pass-9");
+
+    // Roles: grant renders on the page; self-change is refused inline; the
+    // platform role is refused outright (403 — same as the API).
+    let (status, _) = post_form(
+        format!("{detail_uri}/roles"),
+        serde_json::json!({ "csrf_token": &csrf, "role_code": "instructor" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let page = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri(&detail_uri)
+            .cookie(admin_cookie.clone())
+            .to_request(),
+    )
+    .await;
+    let body = String::from_utf8(actix_test::read_body(page).await.to_vec()).unwrap();
+    assert!(body.contains("instructor"));
+
+    let (status, body) = post_form(
+        format!("/ui/admin/accounts/{admin_id}/roles"),
+        serde_json::json!({ "csrf_token": &csrf, "role_code": "registrar" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(body.contains("you cannot change your own roles"));
+
+    let (status, _) = post_form(
+        format!("{detail_uri}/roles"),
+        serde_json::json!({ "csrf_token": &csrf, "role_code": "platform_licensing_admin" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "platform role ungrantable");
+
+    let (status, _) = post_form(
+        format!("{detail_uri}/roles/revoke"),
+        serde_json::json!({ "csrf_token": &csrf, "role_code": "instructor" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+
+    // Suspension through the form blocks the next login.
+    let (status, _) = post_form(
+        format!("{detail_uri}/suspend"),
+        serde_json::json!({ "csrf_token": &csrf, "reason": "policy violation" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let blocked = actix_test::call_service(
+        &app,
+        login_request("target", "brand-new-pass-9").to_request(),
+    )
+    .await;
+    assert_eq!(
+        blocked.status(),
+        StatusCode::UNAUTHORIZED,
+        "suspended login blocked"
+    );
+    let page = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri(&detail_uri)
+            .cookie(admin_cookie.clone())
+            .to_request(),
+    )
+    .await;
+    let body = String::from_utf8(actix_test::read_body(page).await.to_vec()).unwrap();
+    assert!(body.contains(">suspended</span>"), "status shown as text");
+
+    // A foreign institution's account id is not found, not leaked.
+    let foreign_institution = seed_institution(&pool).await;
+    let foreign_user = seed_credentialed_user(
+        &pool,
+        foreign_institution,
+        "outsider",
+        "outsider-pw-1",
+        "active",
+    )
+    .await;
+    let response = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri(&format!("/ui/admin/accounts/{foreign_user}"))
+            .cookie(admin_cookie)
+            .to_request(),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}

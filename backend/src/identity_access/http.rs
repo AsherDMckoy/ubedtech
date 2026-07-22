@@ -367,6 +367,284 @@ fn parse_role(code: &str) -> Result<Role, AppError> {
     Role::from_code(code).ok_or_else(|| AppError::Validation(format!("unknown role: {code}")))
 }
 
+// ---------------------------------------------------------------------------
+// Institution-admin account pages: lookup, password reset, suspension, and
+// role management — plain forms over the SAME service functions as the
+// JSON API (no staff-page bypass; every guardrail holds here too).
+// ---------------------------------------------------------------------------
+
+use crate::identity_access::service::AccountHit;
+
+/// The roles an institution admin can grant from the form. The platform
+/// role is absent by design and the service refuses it regardless.
+const GRANTABLE_ROLES: [&str; 6] = [
+    "student",
+    "instructor",
+    "registrar",
+    "records_officer",
+    "document_officer",
+    "institution_admin",
+];
+
+#[derive(Template)]
+#[template(path = "pages/accounts_admin.html")]
+struct AccountsPage {
+    q: String,
+    rows: Vec<AccountHit>,
+}
+
+#[derive(Deserialize)]
+pub struct AccountSearchQuery {
+    q: Option<String>,
+}
+
+#[get("/ui/admin/accounts")]
+pub async fn accounts_page(
+    actor: Actor,
+    auth: web::Data<AuthService>,
+    query: web::Query<AccountSearchQuery>,
+) -> Result<HttpResponse, AppError> {
+    crate::identity_access::policy::require_can_manage_accounts(&actor)?;
+    let q = query.q.as_deref().unwrap_or("").trim().to_owned();
+    let rows = if q.is_empty() {
+        Vec::new()
+    } else {
+        auth.search_accounts(&actor, &q).await?
+    };
+    let body = AccountsPage { q, rows }.render()?;
+    Ok(page_html(StatusCode::OK, body))
+}
+
+#[derive(Template)]
+#[template(path = "pages/account_detail.html")]
+struct AccountDetailPage<'a> {
+    csrf_token: &'a str,
+    account: AccountHit,
+    grantable_roles: &'static [&'static str],
+    /// True when the admin views their own account — the page hides the
+    /// self-directed controls the service refuses anyway.
+    is_self: bool,
+    notice: Option<&'a str>,
+    error: Option<&'a str>,
+}
+
+impl AccountDetailPage<'_> {
+    pub fn role_list(&self) -> Vec<&str> {
+        self.account
+            .roles
+            .split(", ")
+            .filter(|role| !role.is_empty())
+            .collect()
+    }
+}
+
+async fn render_account_detail(
+    actor: &Actor,
+    current: &CurrentSession,
+    auth: &AuthService,
+    user_id: Uuid,
+    notice: Option<&str>,
+    error: Option<&str>,
+) -> Result<String, AppError> {
+    let account = auth
+        .account_admin(actor, user_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    Ok(AccountDetailPage {
+        csrf_token: &current.csrf_token,
+        is_self: account.user_id == actor.user_id,
+        account,
+        grantable_roles: &GRANTABLE_ROLES,
+        notice,
+        error,
+    }
+    .render()?)
+}
+
+#[derive(Deserialize)]
+pub struct AccountNoticeQuery {
+    notice: Option<String>,
+}
+
+#[get("/ui/admin/accounts/{user_id}")]
+pub async fn account_detail_page(
+    actor: Actor,
+    current: CurrentSession,
+    auth: web::Data<AuthService>,
+    user_id: web::Path<Uuid>,
+    query: web::Query<AccountNoticeQuery>,
+) -> Result<HttpResponse, AppError> {
+    let notice = match query.notice.as_deref() {
+        Some("password") => Some("Password reset. The user's other sessions were signed out."),
+        Some("suspended") => Some("Account suspended and signed out everywhere."),
+        Some("role-granted") => Some("Role granted. The user's sessions were signed out."),
+        Some("role-revoked") => Some("Role revoked. The user's sessions were signed out."),
+        _ => None,
+    };
+    let body =
+        render_account_detail(&actor, &current, &auth, user_id.into_inner(), notice, None).await?;
+    Ok(page_html(StatusCode::OK, body))
+}
+
+/// Shared outcome handling: PRG on success, inline 422 on a refused change.
+async fn account_form_outcome(
+    actor: &Actor,
+    current: &CurrentSession,
+    auth: &AuthService,
+    user_id: Uuid,
+    outcome: Result<(), AppError>,
+    notice: &str,
+) -> Result<HttpResponse, AppError> {
+    match outcome {
+        Ok(()) => Ok(see_other_to(&format!(
+            "/ui/admin/accounts/{user_id}?notice={notice}"
+        ))),
+        Err(AppError::Validation(message)) => {
+            let body =
+                render_account_detail(actor, current, auth, user_id, None, Some(&message)).await?;
+            Ok(page_html(StatusCode::UNPROCESSABLE_ENTITY, body))
+        }
+        Err(other) => Err(other),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ResetPasswordForm {
+    new_password: String,
+    csrf_token: String,
+}
+
+#[post("/ui/admin/accounts/{user_id}/password")]
+pub async fn reset_password_form(
+    actor: Actor,
+    current: CurrentSession,
+    auth: web::Data<AuthService>,
+    user_id: web::Path<Uuid>,
+    form: web::Form<ResetPasswordForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let user_id = user_id.into_inner();
+    let outcome = auth
+        .reset_password(&actor, user_id, &form.new_password)
+        .await;
+    account_form_outcome(&actor, &current, &auth, user_id, outcome, "password").await
+}
+
+#[derive(Deserialize)]
+pub struct SuspendForm {
+    reason: String,
+    csrf_token: String,
+}
+
+#[post("/ui/admin/accounts/{user_id}/suspend")]
+pub async fn suspend_form(
+    actor: Actor,
+    current: CurrentSession,
+    auth: web::Data<AuthService>,
+    user_id: web::Path<Uuid>,
+    form: web::Form<SuspendForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let user_id = user_id.into_inner();
+    let outcome = auth.suspend_user(&actor, user_id, &form.reason).await;
+    account_form_outcome(&actor, &current, &auth, user_id, outcome, "suspended").await
+}
+
+#[derive(Deserialize)]
+pub struct RoleForm {
+    role_code: String,
+    csrf_token: String,
+}
+
+#[post("/ui/admin/accounts/{user_id}/roles")]
+pub async fn grant_role_form(
+    actor: Actor,
+    current: CurrentSession,
+    auth: web::Data<AuthService>,
+    user_id: web::Path<Uuid>,
+    form: web::Form<RoleForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let user_id = user_id.into_inner();
+    let outcome = match parse_role(&form.role_code) {
+        Ok(role) => auth.assign_role(&actor, user_id, role).await,
+        Err(error) => Err(error),
+    };
+    account_form_outcome(&actor, &current, &auth, user_id, outcome, "role-granted").await
+}
+
+#[post("/ui/admin/accounts/{user_id}/roles/revoke")]
+pub async fn revoke_role_form(
+    actor: Actor,
+    current: CurrentSession,
+    auth: web::Data<AuthService>,
+    user_id: web::Path<Uuid>,
+    form: web::Form<RoleForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let user_id = user_id.into_inner();
+    let outcome = match parse_role(&form.role_code) {
+        Ok(role) => auth.revoke_role(&actor, user_id, role).await,
+        Err(error) => Err(error),
+    };
+    account_form_outcome(&actor, &current, &auth, user_id, outcome, "role-revoked").await
+}
+
+fn page_html(status: StatusCode, body: String) -> HttpResponse {
+    HttpResponse::build(status)
+        .content_type("text/html; charset=utf-8")
+        .body(body)
+}
+
+fn see_other_to(location: &str) -> HttpResponse {
+    HttpResponse::SeeOther()
+        .insert_header(("Location", location.to_owned()))
+        .finish()
+}
+
+/// Renders the account pages with representative data and no database, for
+/// the frontend axe harness.
+pub fn sample_accounts_html() -> Result<String, askama::Error> {
+    AccountsPage {
+        q: "santos".into(),
+        rows: vec![
+            AccountHit {
+                user_id: Uuid::nil(),
+                username: "m.santos".into(),
+                email: "m.santos@ub.edu.bz".into(),
+                status: "active".into(),
+                roles: "registrar".into(),
+            },
+            AccountHit {
+                user_id: Uuid::nil(),
+                username: "p.santos".into(),
+                email: "p.santos@ub.edu.bz".into(),
+                status: "suspended".into(),
+                roles: String::new(),
+            },
+        ],
+    }
+    .render()
+}
+
+pub fn sample_account_detail_html() -> Result<String, askama::Error> {
+    AccountDetailPage {
+        csrf_token: "sample",
+        account: AccountHit {
+            user_id: Uuid::nil(),
+            username: "m.santos".into(),
+            email: "m.santos@ub.edu.bz".into(),
+            status: "active".into(),
+            roles: "instructor, registrar".into(),
+        },
+        grantable_roles: &GRANTABLE_ROLES,
+        is_self: false,
+        notice: Some("Role granted. The user's sessions were signed out."),
+        error: None,
+    }
+    .render()
+}
+
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(login)
         .service(login_page)
@@ -378,5 +656,11 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .service(reset_password)
         .service(suspend_user)
         .service(grant_role)
-        .service(revoke_role);
+        .service(revoke_role)
+        .service(accounts_page)
+        .service(account_detail_page)
+        .service(reset_password_form)
+        .service(suspend_form)
+        .service(grant_role_form)
+        .service(revoke_role_form);
 }

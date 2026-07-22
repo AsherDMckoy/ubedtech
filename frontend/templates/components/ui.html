@@ -35,6 +35,7 @@
 {% macro admin_nav_links(current) %}
   <a class="navlink" href="/ui/admin/calendar" {% if current == "calendar" %}aria-current="page"{% endif %}>Calendar</a>
   <a class="navlink" href="/ui/admin/settings" {% if current == "settings" %}aria-current="page"{% endif %}>Settings</a>
+  <a class="navlink" href="/ui/admin/accounts" {% if current == "accounts" %}aria-current="page"{% endif %}>Accounts</a>
 {% endmacro %}
 
 {% macro admin_nav(current) %}

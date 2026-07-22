@@ -1,0 +1,95 @@
+{% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
+{% block title %}{{ account.username }} — account management{% endblock %}
+{% block rail %}{% call ui::admin_nav("accounts") %}{% endcall %}{% endblock %}
+{% block content %}
+  <div class="wrap">
+    <p class="crumb"><a href="/ui/admin/accounts">Accounts</a></p>
+    <div class="ctx">
+      <div>
+        <h1>{{ account.username }}</h1>
+        <p class="ctx-detail">{{ account.email }} · {% call ui::badge(account.status) %}{% endcall %}</p>
+      </div>
+    </div>
+
+    {% if let Some(notice) = notice %}
+      {% call ui::alert("success", notice) %}{% endcall %}
+    {% endif %}
+    {% if let Some(error) = error %}
+      {% call ui::alert("danger", error) %}{% endcall %}
+    {% endif %}
+
+    <section class="card detail-card" aria-labelledby="roles-h">
+      <h2 id="roles-h">Roles</h2>
+      {% if self.role_list().is_empty() %}
+        <p class="c-empty">No roles. This user can sign in but reach nothing.</p>
+      {% else %}
+        <ul class="strip">
+          {% for role in self.role_list() %}
+            <li>
+              <span class="code">{{ role }}</span>
+              {% if !is_self %}
+                <form method="post" action="/ui/admin/accounts/{{ account.user_id }}/roles/revoke">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <input type="hidden" name="role_code" value="{{ role }}">
+                  {% call ui::busy_button("Revoke", "Revoking…", false) %}{% endcall %}
+                </form>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      {% if is_self %}
+        <p class="field-hint">You cannot change your own roles — another administrator must.</p>
+      {% else %}
+        <form method="post" action="/ui/admin/accounts/{{ account.user_id }}/roles" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label for="role-select">Grant role</label>
+          <select id="role-select" name="role_code">
+            {% for role in grantable_roles %}
+              <option value="{{ role }}">{{ role }}</option>
+            {% endfor %}
+          </select>
+          {% call ui::busy_button("Grant", "Granting…", false) %}{% endcall %}
+        </form>
+        <p class="field-hint">A role change signs the user out everywhere. The platform licensing role can never be granted here.</p>
+      {% endif %}
+    </section>
+
+    <section class="card detail-card" aria-labelledby="pw-h">
+      <h2 id="pw-h">Reset password</h2>
+      <form method="post" action="/ui/admin/accounts/{{ account.user_id }}/password" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label for="pw-new">New password</label>
+        <input id="pw-new" name="new_password" type="password" required minlength="12" autocomplete="new-password">
+        {% call ui::busy_button("Reset password", "Resetting…", false) %}{% endcall %}
+      </form>
+      <p class="field-hint">Give the new password to the user directly. Their other sessions are signed out.</p>
+    </section>
+
+    {% if !is_self %}
+      <section class="card detail-card" aria-labelledby="susp-h">
+        <h2 id="susp-h">Suspend account</h2>
+        <form method="post" action="/ui/admin/accounts/{{ account.user_id }}/suspend"
+              class="inline-form" data-confirm-dialog="suspend-dialog">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label for="susp-reason">Reason</label>
+          <input id="susp-reason" name="reason" required maxlength="500">
+          {% call ui::busy_button("Suspend", "Suspending…", false) %}{% endcall %}
+        </form>
+        <p class="field-hint">Suspension signs the user out everywhere and blocks sign-in until the account is restored. The reason is recorded in the audit log.</p>
+      </section>
+
+      {# Destructive confirm (animated surface #2). JS off → the form posts
+         directly; the dialog is enhancement. #}
+      <dialog id="suspend-dialog" aria-labelledby="suspend-dialog-title">
+        <h2 id="suspend-dialog-title">Suspend this account?</h2>
+        <p class="warnbox">{{ account.username }} will be signed out everywhere and unable to sign in until restored.</p>
+        <div class="dialog-actions">
+          <button type="button" data-dialog-close>Keep active</button>
+          <button type="button" class="btn-primary" data-dialog-confirm>Suspend account</button>
+        </div>
+      </dialog>
+    {% endif %}
+  </div>
+{% endblock %}

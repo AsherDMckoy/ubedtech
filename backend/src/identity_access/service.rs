@@ -563,6 +563,65 @@ impl AuthService {
         Ok(())
     }
 
+    /// Search accounts by username or email for the admin's lookup page.
+    pub async fn search_accounts(
+        &self,
+        actor: &Actor,
+        query: &str,
+    ) -> Result<Vec<AccountHit>, AppError> {
+        policy::require_can_manage_accounts(actor)?;
+        let pattern = format!("%{}%", query.trim().replace('%', "\\%").replace('_', "\\_"));
+        Ok(sqlx::query_as::<_, AccountHit>(
+            r#"
+            SELECT ua.id AS user_id, ua.username, ua.email, ua.status::text AS status,
+                   COALESCE(r.codes, '') AS roles
+            FROM user_account ua
+            LEFT JOIN LATERAL (
+                SELECT string_agg(role.code, ', ' ORDER BY role.code) AS codes
+                FROM user_role ur
+                JOIN role ON role.id = ur.role_id
+                WHERE ur.user_id = ua.id AND ur.institution_id = $1
+            ) r ON true
+            WHERE ua.institution_id = $1
+              AND (ua.username ILIKE $2 OR ua.email ILIKE $2)
+            ORDER BY ua.username
+            LIMIT 50
+            "#,
+        )
+        .bind(actor.institution_id)
+        .bind(pattern)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// One account for the admin's detail page; `None` (→404) outside the
+    /// institution.
+    pub async fn account_admin(
+        &self,
+        actor: &Actor,
+        user_id: Uuid,
+    ) -> Result<Option<AccountHit>, AppError> {
+        policy::require_can_manage_accounts(actor)?;
+        Ok(sqlx::query_as::<_, AccountHit>(
+            r#"
+            SELECT ua.id AS user_id, ua.username, ua.email, ua.status::text AS status,
+                   COALESCE(r.codes, '') AS roles
+            FROM user_account ua
+            LEFT JOIN LATERAL (
+                SELECT string_agg(role.code, ', ' ORDER BY role.code) AS codes
+                FROM user_role ur
+                JOIN role ON role.id = ur.role_id
+                WHERE ur.user_id = ua.id AND ur.institution_id = $1
+            ) r ON true
+            WHERE ua.institution_id = $1 AND ua.id = $2
+            "#,
+        )
+        .bind(actor.institution_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
     async fn clear_throttle(
         &self,
         institution_id: Uuid,
@@ -593,6 +652,17 @@ pub(crate) fn validate_new_password(new_password: &str) -> Result<(), AppError> 
 
 fn incorrect_current_password() -> AppError {
     AppError::Validation("current password is incorrect".into())
+}
+
+/// One account in the admin's lookup and detail views.
+#[derive(Debug, sqlx::FromRow)]
+pub struct AccountHit {
+    pub user_id: Uuid,
+    pub username: String,
+    pub email: String,
+    pub status: String,
+    /// Comma-joined role codes; empty when the user holds none.
+    pub roles: String,
 }
 
 #[derive(sqlx::FromRow)]

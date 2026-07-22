@@ -1,0 +1,56 @@
+{% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
+{% block title %}Accounts{% endblock %}
+{% block rail %}{% call ui::admin_nav("accounts") %}{% endcall %}{% endblock %}
+{% block content %}
+  <div class="wrap wrap-wide">
+    <div class="head">
+      <div>
+        <h1>Accounts</h1>
+        <p class="sub">Look up a user to reset a password, manage roles, or suspend the account.</p>
+      </div>
+    </div>
+
+    <form data-search-form role="search" method="get" action="/ui/admin/accounts">
+      {% call ui::search("q", "q", "Search accounts", "Username or email…", q) %}{% endcall %}
+      <button type="submit">Search</button>
+    </form>
+
+    {% if q.is_empty() %}
+      <p class="c-empty">Search by username or email to begin.</p>
+    {% else if rows.is_empty() %}
+      <p class="c-empty">No accounts match “{{ q }}”.</p>
+    {% else %}
+      <section class="card card-flush" aria-label="Matching accounts">
+        <div class="table-wrap">
+          <table class="table-dense">
+            <caption>Accounts matching the search, up to 50</caption>
+            <thead>
+              <tr>
+                <th scope="col">Username</th>
+                <th scope="col">Email</th>
+                <th scope="col">Roles</th>
+                <th scope="col">Status</th>
+                <th scope="col"><span class="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in rows %}
+                <tr data-search="{{ row.username|lower }} {{ row.email|lower }}">
+                  <td><span class="code">{{ row.username }}</span></td>
+                  <td>{{ row.email }}</td>
+                  <td>{% if row.roles.is_empty() %}—{% else %}{{ row.roles }}{% endif %}</td>
+                  <td>{% call ui::badge(row.status) %}{% endcall %}</td>
+                  <td><a class="rowlink" href="/ui/admin/accounts/{{ row.user_id }}">Manage</a></td>
+                </tr>
+              {% endfor %}
+              <tr data-search-empty hidden>
+                <td colspan="5" class="c-empty">No accounts match your filter.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+  </div>
+{% endblock %}
