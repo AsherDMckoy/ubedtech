@@ -388,6 +388,12 @@ td.num {
   background: var(--surface-1);
 }
 
+/* Free-text columns (override reasons) may wrap inside the dense grid. */
+.table-dense td.wrap-cell {
+  white-space: normal;
+  min-width: 200px;
+}
+
 /* ---------- dialog: animated surface #2, on the native <dialog> element
    (focus trap + Escape from the platform; opened by data-dialog-open). */
 

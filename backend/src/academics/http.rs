@@ -736,7 +736,10 @@ async fn registrar_terms_page(
 /// `datetime-local` values ("2026-08-25T09:00"); stored as UTC — the labels
 /// say UTC (assumption A30: institution-timezone entry is a later
 /// refinement, storage is UTC either way per CLAUDE.md §3).
-fn parse_utc_local(value: &str, field: &str) -> Result<chrono::DateTime<chrono::Utc>, AppError> {
+pub(crate) fn parse_utc_local(
+    value: &str,
+    field: &str,
+) -> Result<chrono::DateTime<chrono::Utc>, AppError> {
     let value = value.trim();
     chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M")
         .or_else(|_| chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S"))
@@ -744,7 +747,7 @@ fn parse_utc_local(value: &str, field: &str) -> Result<chrono::DateTime<chrono::
         .map_err(|_| AppError::Validation(format!("{field} must be a date and time")))
 }
 
-fn parse_optional_utc_local(
+pub(crate) fn parse_optional_utc_local(
     value: Option<&str>,
     field: &str,
 ) -> Result<Option<chrono::DateTime<chrono::Utc>>, AppError> {

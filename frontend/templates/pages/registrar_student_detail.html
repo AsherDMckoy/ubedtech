@@ -77,5 +77,45 @@
         <p class="c-empty">There is no active term, so term holds cannot be managed right now.</p>
       {% endif %}
     </section>
+
+    <section class="card detail-card" aria-labelledby="override-h">
+      <h2 id="override-h">Grant override</h2>
+      {% if let Some(term) = term %}
+        <p class="field-hint">An override lifts exactly one named rule for this student, once. It records who granted it, why, and its expiry — see the <a href="/ui/registrar/overrides">review list</a>.</p>
+        <form method="post" action="/ui/registrar/students/{{ student.student_id }}/overrides">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="term_id" value="{{ term.id }}">
+          <div class="field">
+            <label for="ov-type">Rule to lift</label>
+            <select id="ov-type" name="override_type">
+              {% for kind in override_types %}
+                <option value="{{ kind }}">{{ kind }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="ov-section">Section</label>
+            <select id="ov-section" name="section_id">
+              <option value="">Whole term</option>
+              {% for section in sections %}
+                <option value="{{ section.id }}">{{ section.label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="ov-reason">Reason</label>
+            <input id="ov-reason" name="reason" required maxlength="300">
+          </div>
+          <div class="field">
+            <label for="ov-expires">Expires (UTC)</label>
+            <input id="ov-expires" name="expires_at" type="datetime-local">
+            <p class="field-hint" id="ov-expires-hint">Optional — an unexpired override stays claimable until consumed.</p>
+          </div>
+          {% call ui::busy_button("Grant override", "Granting…", true) %}{% endcall %}
+        </form>
+      {% else %}
+        <p class="c-empty">There is no active term, so overrides cannot be granted right now.</p>
+      {% endif %}
+    </section>
   </div>
 {% endblock %}

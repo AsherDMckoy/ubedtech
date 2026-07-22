@@ -915,6 +915,42 @@ impl EnrollmentService {
         Ok(flags.unwrap_or_default())
     }
 
+    /// A term's override records for the review list, newest first: who
+    /// they cover, which rule they lift, who granted them, why, expiry, and
+    /// what consumed them. The override IS this record — never a hidden
+    /// boolean.
+    pub async fn list_overrides(
+        &self,
+        actor: &Actor,
+        term_id: Uuid,
+    ) -> Result<Vec<OverrideRow>, AppError> {
+        require_can_grant_override(actor)?;
+        Ok(sqlx::query_as::<_, OverrideRow>(
+            r#"
+            SELECT sp.student_number,
+                   ro.override_type,
+                   COALESCE(c.code || ' ' || s.section_code, '') AS section_label,
+                   ua.username AS granted_by,
+                   COALESCE(ro.note, '') AS note,
+                   ro.created_at,
+                   ro.expires_at,
+                   ro.consumed_at
+            FROM registration_override ro
+            JOIN student_profile sp ON sp.id = ro.student_id
+            JOIN user_account ua ON ua.id = ro.granted_by_user_id
+            LEFT JOIN section s ON s.id = ro.section_id
+            LEFT JOIN course c ON c.id = s.course_id
+            WHERE ro.institution_id = $1 AND ro.term_id = $2
+            ORDER BY ro.created_at DESC
+            LIMIT 200
+            "#,
+        )
+        .bind(actor.institution_id)
+        .bind(term_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     /// Search students by number or username for the registrar's lookup.
     /// Registrar-only; scoped to the institution.
     pub async fn search_students(
@@ -1109,6 +1145,20 @@ fn valid_hold_flag(flag: &str) -> Result<&str, AppError> {
         ));
     }
     Ok(flag)
+}
+
+/// One override record in the registrar's review list.
+#[derive(Debug, sqlx::FromRow)]
+pub struct OverrideRow {
+    pub student_number: String,
+    pub override_type: String,
+    /// "CMPS 2131 01", or empty when the override covers the whole term.
+    pub section_label: String,
+    pub granted_by: String,
+    pub note: String,
+    pub created_at: chrono::DateTime<Utc>,
+    pub expires_at: Option<chrono::DateTime<Utc>>,
+    pub consumed_at: Option<chrono::DateTime<Utc>>,
 }
 
 /// One student in the registrar's lookup and detail views.

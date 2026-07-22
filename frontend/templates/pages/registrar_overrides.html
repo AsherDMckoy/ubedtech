@@ -1,0 +1,65 @@
+{% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
+{% block title %}Overrides{% endblock %}
+{% block rail %}{% call ui::registrar_nav("overrides") %}{% endcall %}{% endblock %}
+{% block content %}
+  <div class="wrap wrap-wide">
+    <div class="head">
+      <div>
+        <h1>Overrides</h1>
+        <p class="sub">Every override is a full record — who granted it, which rule it lifts, why, its expiry, and the enrollment that consumed it. Never a hidden flag.</p>
+      </div>
+    </div>
+
+    {% if let Some(term) = term %}
+      {% if rows.is_empty() %}
+        <p class="c-empty">No overrides have been granted for {{ term.name }}. Grant one from a student's page.</p>
+      {% else %}
+        <section class="card card-flush" aria-label="Override records">
+          <div class="tabletop">
+            <h2>{{ term.name }}</h2>
+            <form data-search-form role="search">
+              {% call ui::search("q", "q", "Filter overrides", "Filter…", "") %}{% endcall %}
+            </form>
+          </div>
+          <div class="table-wrap">
+            <table class="table-dense">
+              <caption>Override records for the current term, newest first</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Granted</th>
+                  <th scope="col">Student</th>
+                  <th scope="col">Rule lifted</th>
+                  <th scope="col">Scope</th>
+                  <th scope="col">Granted by</th>
+                  <th scope="col">Reason</th>
+                  <th scope="col">Expires</th>
+                  <th scope="col">State</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for view in rows %}
+                  <tr data-search="{{ view.search_key() }}">
+                    <td class="num">{{ view.granted_on() }}</td>
+                    <td><span class="code">{{ view.row.student_number }}</span></td>
+                    <td>{{ view.row.override_type }}</td>
+                    <td>{{ view.scope() }}</td>
+                    <td>{{ view.row.granted_by }}</td>
+                    <td class="wrap-cell">{{ view.row.note }}</td>
+                    <td class="num">{{ view.expires() }}</td>
+                    <td><span class="badge {{ view.badge_class() }}">{{ view.state() }}</span></td>
+                  </tr>
+                {% endfor %}
+                <tr data-search-empty hidden>
+                  <td colspan="8" class="c-empty">No overrides match your filter.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      {% endif %}
+    {% else %}
+      {% call ui::alert("accent", "There is no active term right now.") %}{% endcall %}
+    {% endif %}
+  </div>
+{% endblock %}

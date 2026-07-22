@@ -2250,4 +2250,144 @@ mod ui {
         .await;
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
+
+    /// The override journey: a full section denies the student; the
+    /// registrar grants a capacity override from the student page (reason
+    /// required — the record IS the override); the same registration then
+    /// succeeds exactly once; and the review list shows who/rule/why/
+    /// expiry with the consumed state.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn registrar_grants_recorded_overrides_and_reviews_them(pool: PgPool) {
+        let fixture = seed_registration_fixture(&pool, 1).await;
+        let service =
+            crate::enrollment::EnrollmentService::new(pool.clone(), crate::audit::AuditWriter);
+
+        let username = credential_registrar(&pool, &fixture).await;
+        let app = ui_app!(&pool, fixture.registrar.institution_id);
+        let cookie = login(&app, &username, PASSWORD).await;
+
+        // Student A logs in while the seat is still open (a full section
+        // honestly renders no register form, so no csrf to scrape later).
+        let student_username = credential_student(&pool, &fixture).await;
+        let student_cookie = login(&app, &student_username, PASSWORD).await;
+        let catalog = get_page(&app, &student_cookie, "/ui/catalog").await;
+        let student_csrf = extract_input(&catalog, "csrf_token");
+
+        // Student B (via the registrar service path) takes the only seat;
+        // student A is then denied: the section is full.
+        service
+            .register_for(
+                &fixture.registrar,
+                fixture.student_b,
+                crate::enrollment::types::RegisterCommand {
+                    section_id: fixture.section_id,
+                    idempotency_key: Uuid::new_v4(),
+                },
+            )
+            .await
+            .unwrap();
+        let (status, body) =
+            post_add(&app, &student_cookie, &student_csrf, fixture.section_id).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(body.contains("section is full"));
+
+        let detail_uri = format!("/ui/registrar/students/{}", fixture.student_a);
+        let detail = get_page(&app, &cookie, &detail_uri).await;
+        assert!(detail.contains("Grant override"));
+        let csrf = extract_input(&detail, "csrf_token");
+
+        let post_form = |uri: String, form: serde_json::Value| {
+            let cookie = cookie.clone();
+            let app = &app;
+            async move {
+                let response = actix_test::call_service(
+                    app,
+                    actix_test::TestRequest::post()
+                        .uri(&uri)
+                        .cookie(cookie)
+                        .set_form(form)
+                        .to_request(),
+                )
+                .await;
+                let status = response.status();
+                let body =
+                    String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+                (status, body)
+            }
+        };
+
+        // No reason, no override — the record is not optional.
+        let (status, body) = post_form(
+            format!("{detail_uri}/overrides"),
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "term_id": fixture.term_id,
+                "section_id": fixture.section_id,
+                "override_type": "capacity",
+                "reason": "   ",
+                "expires_at": "",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(body.contains("an override requires a reason"));
+
+        // A crafted unknown rule name is refused, not stored.
+        let (status, body) = post_form(
+            format!("{detail_uri}/overrides"),
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "term_id": fixture.term_id,
+                "section_id": fixture.section_id,
+                "override_type": "be-nice",
+                "reason": "please",
+                "expires_at": "",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(body.contains("unknown override type"));
+
+        // The real grant, with an expiry.
+        let (status, _) = post_form(
+            format!("{detail_uri}/overrides"),
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "term_id": fixture.term_id,
+                "section_id": fixture.section_id,
+                "override_type": "capacity",
+                "reason": "graduating senior needs this section",
+                "expires_at": "2099-01-01T00:00",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+
+        // The denied registration now succeeds — once.
+        let (status, _) = post_add(&app, &student_cookie, &student_csrf, fixture.section_id).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "override admits the student");
+
+        // The review list carries the whole record: who, rule, why, expiry,
+        // and that this override was consumed.
+        let review = get_page(&app, &cookie, "/ui/registrar/overrides").await;
+        assert!(review.contains("capacity"), "rule lifted");
+        assert!(review.contains("graduating senior needs this section"));
+        assert!(review.contains(&username), "grantor recorded");
+        assert!(review.contains("2099"), "expiry shown");
+        assert!(
+            review.contains(">consumed</span>"),
+            "single-use state shown"
+        );
+
+        // Students cannot see the review list.
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/ui/registrar/overrides")
+                .cookie(student_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
 }

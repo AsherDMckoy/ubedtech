@@ -139,6 +139,13 @@ pub fn render_pages(out_dir: &str) -> std::io::Result<()> {
                 crate::enrollment::http::sample_registrar_student_detail_html(),
             ),
         ),
+        (
+            "registrar_overrides.html",
+            render(
+                "registrar_overrides",
+                crate::enrollment::http::sample_registrar_overrides_html(),
+            ),
+        ),
     ];
     for (name, html) in pages {
         let path = format!("{out_dir}/{name}");

@@ -428,6 +428,12 @@ async fn registrar_students_page(
     Ok(page_html(StatusCode::OK, body))
 }
 
+/// One option in the override section select.
+pub struct SectionOption {
+    pub id: Uuid,
+    pub label: String,
+}
+
 #[derive(Template)]
 #[template(path = "pages/registrar_student_detail.html")]
 struct RegistrarStudentPage<'a> {
@@ -435,6 +441,8 @@ struct RegistrarStudentPage<'a> {
     student: StudentHit,
     term: Option<TermSummary>,
     holds: Vec<String>,
+    sections: Vec<SectionOption>,
+    override_types: &'static [&'static str],
     notice: Option<&'a str>,
     error: Option<&'a str>,
 }
@@ -459,15 +467,28 @@ async fn render_student_detail(
         .await?
         .ok_or(AppError::NotFound)?;
     let term = academics.current_term(actor).await?;
-    let holds = match &term {
-        Some(term) => enrollment.student_holds(actor, student_id, term.id).await?,
-        None => Vec::new(),
+    let (holds, sections) = match &term {
+        Some(term) => (
+            enrollment.student_holds(actor, student_id, term.id).await?,
+            academics
+                .term_sections_overview(actor, term.id, None)
+                .await?
+                .into_iter()
+                .map(|s| SectionOption {
+                    id: s.section_id,
+                    label: format!("{} {}", s.course_code, s.section_code),
+                })
+                .collect(),
+        ),
+        None => (Vec::new(), Vec::new()),
     };
     Ok(RegistrarStudentPage {
         csrf_token: &current.csrf_token,
         student,
         term,
         holds,
+        sections,
+        override_types: &crate::enrollment::service::OVERRIDE_TYPES,
         notice,
         error,
     }
@@ -492,6 +513,7 @@ async fn registrar_student_detail_page(
         Some("status") => Some("Academic status updated."),
         Some("hold-placed") => Some("Hold placed."),
         Some("hold-released") => Some("Hold released."),
+        Some("override") => Some("Override granted and recorded."),
         _ => None,
     };
     let body = render_student_detail(
@@ -615,6 +637,217 @@ async fn release_hold_form(
     )))
 }
 
+#[derive(Deserialize)]
+pub struct GrantOverrideForm {
+    term_id: Uuid,
+    /// Empty string means the override covers the whole term.
+    section_id: String,
+    override_type: String,
+    reason: String,
+    expires_at: Option<String>,
+    csrf_token: String,
+}
+
+#[post("/ui/registrar/students/{student_id}/overrides")]
+async fn grant_override_form(
+    actor: Actor,
+    current: CurrentSession,
+    enrollment: web::Data<EnrollmentService>,
+    academics: web::Data<AcademicsService>,
+    student_id: web::Path<Uuid>,
+    form: web::Form<GrantOverrideForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let student_id = student_id.into_inner();
+    let outcome = async {
+        let section_id = match form.section_id.trim() {
+            "" => None,
+            raw => Some(raw.parse::<Uuid>().map_err(|_| {
+                AppError::Validation("the section choice was not recognized".into())
+            })?),
+        };
+        let command = GrantOverrideCommand {
+            term_id: form.term_id,
+            section_id,
+            override_type: form.override_type.clone(),
+            reason: form.reason.clone(),
+            expires_at: crate::academics::http::parse_optional_utc_local(
+                form.expires_at.as_deref(),
+                "override expiry",
+            )?,
+        };
+        enrollment.grant_override(&actor, student_id, command).await
+    }
+    .await;
+    match outcome {
+        Ok(_) => Ok(redirect(&format!(
+            "/ui/registrar/students/{student_id}?notice=override"
+        ))),
+        Err(AppError::Validation(message)) => {
+            let body = render_student_detail(
+                &actor,
+                &current,
+                &enrollment,
+                &academics,
+                student_id,
+                None,
+                Some(&message),
+            )
+            .await?;
+            Ok(page_html(StatusCode::UNPROCESSABLE_ENTITY, body))
+        }
+        Err(other) => Err(other),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Registrar: override review list.
+// ---------------------------------------------------------------------------
+
+use crate::enrollment::service::OverrideRow;
+
+/// One review row with its computed state — the record is the override.
+pub struct OverrideView {
+    pub row: OverrideRow,
+}
+
+impl OverrideView {
+    /// consumed > expired > active: a consumed override did its work even
+    /// if its expiry has since passed.
+    pub fn state(&self) -> &'static str {
+        if self.row.consumed_at.is_some() {
+            "consumed"
+        } else if self
+            .row
+            .expires_at
+            .is_some_and(|at| at <= chrono::Utc::now())
+        {
+            "expired"
+        } else {
+            "active"
+        }
+    }
+    pub fn badge_class(&self) -> &'static str {
+        crate::shared::assets::badge_class(self.state())
+    }
+    pub fn granted_on(&self) -> String {
+        self.row.created_at.format("%b %-d, %Y %H:%M").to_string()
+    }
+    pub fn expires(&self) -> String {
+        match self.row.expires_at {
+            Some(at) => at.format("%b %-d, %Y %H:%M").to_string(),
+            None => "—".to_owned(),
+        }
+    }
+    pub fn scope(&self) -> &str {
+        if self.row.section_label.is_empty() {
+            "whole term"
+        } else {
+            &self.row.section_label
+        }
+    }
+    pub fn search_key(&self) -> String {
+        format!(
+            "{} {} {}",
+            self.row.student_number, self.row.override_type, self.row.granted_by
+        )
+        .to_lowercase()
+    }
+}
+
+#[derive(Template)]
+#[template(path = "pages/registrar_overrides.html")]
+struct RegistrarOverridesPage {
+    term: Option<TermSummary>,
+    rows: Vec<OverrideView>,
+}
+
+#[get("/ui/registrar/overrides")]
+async fn registrar_overrides_page(
+    actor: Actor,
+    enrollment: web::Data<EnrollmentService>,
+    academics: web::Data<AcademicsService>,
+) -> Result<HttpResponse, AppError> {
+    crate::enrollment::policy::require_can_grant_override(&actor)?;
+    let term = academics.current_term(&actor).await?;
+    let rows = match &term {
+        Some(term) => enrollment
+            .list_overrides(&actor, term.id)
+            .await?
+            .into_iter()
+            .map(|row| OverrideView { row })
+            .collect(),
+        None => Vec::new(),
+    };
+    let body = RegistrarOverridesPage { term, rows }.render()?;
+    Ok(page_html(StatusCode::OK, body))
+}
+
+/// Renders the override review list with every state and no database, for
+/// the frontend axe harness.
+pub fn sample_registrar_overrides_html() -> Result<String, askama::Error> {
+    use chrono::{Duration, Utc};
+    let now = Utc::now();
+    let row = |number: &str,
+               kind: &str,
+               section: &str,
+               note: &str,
+               expires: Option<chrono::DateTime<Utc>>,
+               consumed: Option<chrono::DateTime<Utc>>| {
+        OverrideView {
+            row: OverrideRow {
+                student_number: number.into(),
+                override_type: kind.into(),
+                section_label: section.into(),
+                granted_by: "m.santos".into(),
+                note: note.into(),
+                created_at: now - Duration::days(2),
+                expires_at: expires,
+                consumed_at: consumed,
+            },
+        }
+    };
+    RegistrarOverridesPage {
+        term: Some(TermSummary {
+            id: Uuid::nil(),
+            code: "FA26".into(),
+            name: "Fall 2026".into(),
+            starts_on: now.date_naive(),
+            ends_on: (now + Duration::days(100)).date_naive(),
+            registration_opens_at: now - Duration::days(20),
+            add_drop_closes_at: now + Duration::days(14),
+            grade_entry_closes_at: None,
+        }),
+        rows: vec![
+            row(
+                "A-001",
+                "capacity",
+                "CMPS 2131 01",
+                "graduating senior needs this section",
+                Some(now + Duration::days(5)),
+                Some(now - Duration::days(1)),
+            ),
+            row(
+                "A-002",
+                "deadline",
+                "",
+                "medical leave during add/drop",
+                Some(now + Duration::days(3)),
+                None,
+            ),
+            row(
+                "A-003",
+                "prerequisite",
+                "MATH 3201 02",
+                "equivalent transfer credit under review",
+                Some(now - Duration::days(1)),
+                None,
+            ),
+        ],
+    }
+    .render()
+}
+
 fn page_html(status: StatusCode, body: String) -> HttpResponse {
     HttpResponse::build(status)
         .content_type("text/html; charset=utf-8")
@@ -675,6 +908,11 @@ pub fn sample_registrar_student_detail_html() -> Result<String, askama::Error> {
             grade_entry_closes_at: None,
         }),
         holds: vec!["financial".into(), "disciplinary".into()],
+        sections: vec![SectionOption {
+            id: Uuid::nil(),
+            label: "CMPS 2131 01".into(),
+        }],
+        override_types: &crate::enrollment::service::OVERRIDE_TYPES,
         notice: Some("Hold placed."),
         error: None,
     }
@@ -694,5 +932,7 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .service(registrar_student_detail_page)
         .service(set_status_form)
         .service(place_hold_form)
-        .service(release_hold_form);
+        .service(release_hold_form)
+        .service(grant_override_form)
+        .service(registrar_overrides_page);
 }

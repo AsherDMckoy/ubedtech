@@ -87,7 +87,9 @@ pub fn badge_class(status: &str) -> &'static str {
     match status {
         // "open" is a registration window that is accepting changes now.
         "ready" | "published" | "active" | "enrolled" | "approved" | "open" => "badge-ok",
-        "pending" | "generating" | "queued" | "upcoming" => "badge-info",
+        // "consumed" is an override that already admitted its enrollment —
+        // informational, not a success or failure.
+        "pending" | "generating" | "queued" | "upcoming" | "consumed" => "badge-info",
         // A draft grade is amber everywhere: entered, unpublished, invisible
         // to students (instructor-grades reference).
         "amended" | "suspended" | "draft" | "probation" => "badge-warn",
@@ -271,6 +273,10 @@ mod tests {
         assert_eq!(badge_class("open"), "badge-ok");
         assert_eq!(badge_class("upcoming"), "badge-info");
         assert_eq!(badge_class("closed"), "");
+        // Override review states.
+        assert_eq!(badge_class("active"), "badge-ok");
+        assert_eq!(badge_class("consumed"), "badge-info");
+        assert_eq!(badge_class("expired"), "badge-bad");
         assert_eq!(badge_class("something-new"), "");
     }
 
