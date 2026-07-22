@@ -1887,4 +1887,224 @@ mod ui {
             "the edited window is the enforced window: {body}"
         );
     }
+
+    /// Section, capacity, meeting, instructor, course, and prerequisite
+    /// management over plain forms — all through the SAME service functions
+    /// the JSON API uses, so every rule (capacity floor, meeting ordering,
+    /// self-prerequisite, institution scoping) holds on the staff pages too.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn registrar_manages_sections_meetings_instructors_and_courses(pool: PgPool) {
+        let fixture = seed_registration_fixture(&pool, 1).await;
+        let username = credential_registrar(&pool, &fixture).await;
+        let app = ui_app!(&pool, fixture.registrar.institution_id);
+        let cookie = login(&app, &username, PASSWORD).await;
+
+        let post_form = |uri: String, form: serde_json::Value| {
+            let cookie = cookie.clone();
+            let app = &app;
+            async move {
+                let response = actix_test::call_service(
+                    app,
+                    actix_test::TestRequest::post()
+                        .uri(&uri)
+                        .cookie(cookie)
+                        .set_form(form)
+                        .to_request(),
+                )
+                .await;
+                let status = response.status();
+                let body =
+                    String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+                (status, body)
+            }
+        };
+
+        // The sections list shows the fixture section with an Edit link.
+        let page = get_page(&app, &cookie, "/ui/registrar/sections").await;
+        assert!(page.contains("Concurrency Test"));
+        assert!(page.contains(&format!("/ui/registrar/sections/{}", fixture.section_id)));
+        let csrf = extract_input(&page, "csrf_token");
+
+        // Create a second section of the same course through the form.
+        let course_id: Uuid = sqlx::query_scalar("SELECT course_id FROM section WHERE id = $1")
+            .bind(fixture.section_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let (status, _) = post_form(
+            "/ui/registrar/sections".into(),
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "term_id": fixture.term_id,
+                "course_id": course_id,
+                "section_code": "02",
+                "capacity": 25,
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let page = get_page(
+            &app,
+            &cookie,
+            &format!(
+                "/ui/registrar/sections?term_id={}&notice=created",
+                fixture.term_id
+            ),
+        )
+        .await;
+        assert!(page.contains("Section created."));
+        assert!(page.contains(">02<") || page.contains("02</td>"), "{page}");
+
+        // Detail page: capacity saves, and the enrolled floor is enforced
+        // with the same named error the API gives.
+        let detail_uri = format!("/ui/registrar/sections/{}", fixture.section_id);
+        let detail = get_page(&app, &cookie, &detail_uri).await;
+        assert!(detail.contains("Capacity"));
+        let student = crate::shared::actor::Actor {
+            user_id: fixture.student_user_a,
+            institution_id: fixture.registrar.institution_id,
+            student_id: Some(fixture.student_a),
+            roles: std::collections::HashSet::from([crate::shared::actor::Role::Student]),
+        };
+        crate::enrollment::EnrollmentService::new(pool.clone(), crate::audit::AuditWriter)
+            .register_self(
+                &student,
+                crate::enrollment::types::RegisterCommand {
+                    section_id: fixture.section_id,
+                    idempotency_key: Uuid::new_v4(),
+                },
+            )
+            .await
+            .unwrap();
+        let (status, body) = post_form(
+            format!("{detail_uri}/capacity"),
+            serde_json::json!({ "csrf_token": &csrf, "capacity": 0 }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(body.contains("capacity cannot drop below current enrollment"));
+        let (status, _) = post_form(
+            format!("{detail_uri}/capacity"),
+            serde_json::json!({ "csrf_token": &csrf, "capacity": 5 }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+
+        // Meetings: a backwards meeting is refused inline; a valid one lands.
+        let (status, body) = post_form(
+            format!("{detail_uri}/meetings"),
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "day_of_week": 1,
+                "starts_at": "10:00",
+                "ends_at": "09:00",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(body.contains("meeting must start before it ends"));
+        let (status, _) = post_form(
+            format!("{detail_uri}/meetings"),
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "day_of_week": 1,
+                "starts_at": "09:00",
+                "ends_at": "10:15",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+
+        // Instructor: give a user the role, assign through the form.
+        let instructor_user = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO user_account (id, institution_id, username, email) \
+             VALUES ($1, $2, 'prof-nunez', 'nunez@test.invalid')",
+        )
+        .bind(instructor_user)
+        .bind(fixture.registrar.institution_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO user_role (institution_id, user_id, role_id) \
+             SELECT $1, $2, id FROM role WHERE code = 'instructor'",
+        )
+        .bind(fixture.registrar.institution_id)
+        .bind(instructor_user)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let (status, _) = post_form(
+            format!("{detail_uri}/instructors"),
+            serde_json::json!({ "csrf_token": &csrf, "instructor_user_id": instructor_user }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let detail = get_page(&app, &cookie, &format!("{detail_uri}?notice=instructor")).await;
+        assert!(detail.contains("Instructor assigned."));
+        assert!(detail.contains("prof-nunez"));
+        assert!(detail.contains("Monday"), "meeting listed by day name");
+
+        // A guessed/foreign section id is not found, not leaked.
+        let foreign = seed_registration_fixture(&pool, 3).await;
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri(&format!("/ui/registrar/sections/{}", foreign.section_id))
+                .cookie(cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        // Courses: create, then gate it behind the fixture course; a course
+        // can never require itself.
+        let (status, _) = post_form(
+            "/ui/registrar/courses".into(),
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "code": "ADV-401",
+                "title": "Advanced Concurrency",
+                "credit_hours": 3.0,
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let page = get_page(&app, &cookie, "/ui/registrar/courses?notice=created").await;
+        assert!(page.contains("Course created."));
+        assert!(page.contains("Advanced Concurrency"));
+        let new_course: Uuid = sqlx::query_scalar("SELECT id FROM course WHERE code = 'ADV-401'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let (status, body) = post_form(
+            "/ui/registrar/courses/prerequisites".into(),
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "course_id": new_course,
+                "prerequisite_course_id": new_course,
+                "minimum_grade_points": 2.0,
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(body.contains("a course cannot be its own prerequisite"));
+        let (status, _) = post_form(
+            "/ui/registrar/courses/prerequisites".into(),
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "course_id": new_course,
+                "prerequisite_course_id": course_id,
+                "minimum_grade_points": 2.0,
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let page = get_page(&app, &cookie, "/ui/registrar/courses").await;
+        assert!(
+            page.contains("(≥2)"),
+            "prerequisite listed on the course row: {page}"
+        );
+    }
 }

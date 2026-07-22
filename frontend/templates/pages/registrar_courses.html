@@ -1,0 +1,105 @@
+{% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
+{% block title %}Courses{% endblock %}
+{% block rail %}{% call ui::registrar_nav("courses") %}{% endcall %}{% endblock %}
+{% block content %}
+  <div class="wrap wrap-wide">
+    <div class="head">
+      <div>
+        <h1>Courses</h1>
+        <p class="sub">Prerequisites gate real registrations — a rule added here is enforced on the next attempt.</p>
+      </div>
+    </div>
+
+    {% if let Some(notice) = notice %}
+      {% call ui::alert("success", notice) %}{% endcall %}
+    {% endif %}
+    {% if let Some(error) = error %}
+      {% call ui::alert("danger", error) %}{% endcall %}
+    {% endif %}
+
+    <details class="drawer">
+      <summary>New course</summary>
+      <div class="drawer-panel">
+        <form method="post" action="/ui/registrar/courses">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="field">
+            <label for="nc-code">Code</label>
+            <input id="nc-code" name="code" required maxlength="20">
+          </div>
+          <div class="field">
+            <label for="nc-title">Title</label>
+            <input id="nc-title" name="title" required maxlength="200">
+          </div>
+          <div class="field">
+            <label for="nc-credits">Credit hours</label>
+            <input id="nc-credits" name="credit_hours" type="number" min="0.5" max="99" step="0.5" required>
+          </div>
+          {% call ui::busy_button("Create course", "Creating…", true) %}{% endcall %}
+        </form>
+      </div>
+    </details>
+
+    {% if courses.len() >= 2 %}
+      <details class="drawer">
+        <summary>Add prerequisite</summary>
+        <div class="drawer-panel">
+          <form method="post" action="/ui/registrar/courses/prerequisites">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <div class="field">
+              <label for="pr-course">Course</label>
+              <select id="pr-course" name="course_id">
+                {% for course in courses %}
+                  <option value="{{ course.id }}">{{ course.code }} · {{ course.title }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label for="pr-prereq">Requires</label>
+              <select id="pr-prereq" name="prerequisite_course_id">
+                {% for course in courses %}
+                  <option value="{{ course.id }}">{{ course.code }} · {{ course.title }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="field">
+              <label for="pr-points">Minimum grade points</label>
+              <input id="pr-points" name="minimum_grade_points" type="number" min="0" max="4" step="0.1" required value="2.0">
+              <p class="field-hint" id="pr-points-hint">On the 4.0 scale — 2.0 is a C.</p>
+            </div>
+            {% call ui::busy_button("Add prerequisite", "Adding…", true) %}{% endcall %}
+          </form>
+        </div>
+      </details>
+    {% endif %}
+
+    <section class="card card-flush" aria-label="Courses">
+      <div class="table-wrap">
+        <table class="table-dense">
+          <caption>All courses with credits and prerequisites</caption>
+          <thead>
+            <tr>
+              <th scope="col">Course</th>
+              <th scope="col" class="num">Credits</th>
+              <th scope="col">Prerequisites</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for course in courses %}
+              <tr>
+                <td><span class="code">{{ course.code }}</span> · {{ course.title }}</td>
+                <td class="num">{{ course.credit_hours }}</td>
+                <td>{% if course.prerequisites.is_empty() %}—{% else %}{{ course.prerequisites }}{% endif %}</td>
+                <td>{% if course.active %}{% call ui::badge("active") %}{% endcall %}{% else %}{% call ui::badge("inactive") %}{% endcall %}{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% if courses.is_empty() %}
+      <p class="c-empty">No courses exist yet. Create the first one above.</p>
+    {% endif %}
+  </div>
+{% endblock %}

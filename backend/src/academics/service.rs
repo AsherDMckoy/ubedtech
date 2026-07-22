@@ -51,6 +51,49 @@ pub struct AddMeetingCommand {
     pub room_id: Option<Uuid>,
 }
 
+#[derive(Debug, sqlx::FromRow)]
+pub struct CourseSummary {
+    pub id: Uuid,
+    pub code: String,
+    pub title: String,
+    pub credit_hours: f64,
+    pub active: bool,
+    /// "MATH 1101 (≥2), CMPS 1101 (≥2.5)" — aggregated for the courses table.
+    pub prerequisites: String,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct InstructorOption {
+    pub user_id: Uuid,
+    pub username: String,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct SectionAdminCore {
+    pub section_id: Uuid,
+    pub course_code: String,
+    pub course_title: String,
+    pub section_code: String,
+    pub status: String,
+    pub term_name: String,
+    pub capacity: i32,
+    pub enrolled_count: i32,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct MeetingRow {
+    pub day_of_week: i16,
+    pub starts_at: NaiveTime,
+    pub ends_at: NaiveTime,
+}
+
+#[derive(Debug)]
+pub struct SectionAdminView {
+    pub core: SectionAdminCore,
+    pub meetings: Vec<MeetingRow>,
+    pub instructors: Vec<String>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct UpdateWindowsCommand {
     pub registration_opens_at: DateTime<Utc>,
@@ -81,6 +124,7 @@ pub struct TermSummary {
 /// one query (no N+1).
 #[derive(Debug, sqlx::FromRow)]
 pub struct SectionOverviewRow {
+    pub section_id: Uuid,
     pub course_code: String,
     pub course_title: String,
     pub section_code: String,
@@ -641,6 +685,107 @@ impl AcademicsService {
         Ok(())
     }
 
+    /// All courses of the institution for management pages and selects.
+    pub async fn list_courses(&self, actor: &Actor) -> Result<Vec<CourseSummary>, AppError> {
+        require_can_manage_academics(actor)?;
+        Ok(sqlx::query_as::<_, CourseSummary>(
+            r#"
+            SELECT c.id, c.code, c.title, c.credit_hours::float8 AS credit_hours, c.active,
+                   COALESCE(p.summary, '') AS prerequisites
+            FROM course c
+            LEFT JOIN LATERAL (
+                SELECT string_agg(pc.code || ' (≥' || cp.minimum_grade_points || ')',
+                                  ', ' ORDER BY pc.code) AS summary
+                FROM course_prerequisite cp
+                JOIN course pc ON pc.id = cp.prerequisite_course_id
+                WHERE cp.course_id = c.id
+            ) p ON true
+            WHERE c.institution_id = $1
+            ORDER BY c.code
+            LIMIT 1000
+            "#,
+        )
+        .bind(actor.institution_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Users holding the instructor role — the assign-instructor select.
+    pub async fn list_instructors(&self, actor: &Actor) -> Result<Vec<InstructorOption>, AppError> {
+        require_can_manage_academics(actor)?;
+        Ok(sqlx::query_as::<_, InstructorOption>(
+            r#"
+            SELECT DISTINCT ua.id AS user_id, ua.username
+            FROM user_account ua
+            JOIN user_role ur ON ur.user_id = ua.id AND ur.institution_id = $1
+            JOIN role r ON r.id = ur.role_id AND r.code = 'instructor'
+            WHERE ua.institution_id = $1
+            ORDER BY ua.username
+            LIMIT 1000
+            "#,
+        )
+        .bind(actor.institution_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// One section for the registrar's detail page: core row, meetings, and
+    /// assigned instructors. `None` when the section is not in the actor's
+    /// institution (a guessed id 404s).
+    pub async fn section_admin(
+        &self,
+        actor: &Actor,
+        section_id: Uuid,
+    ) -> Result<Option<SectionAdminView>, AppError> {
+        require_can_manage_academics(actor)?;
+        let Some(core) = sqlx::query_as::<_, SectionAdminCore>(
+            r#"
+            SELECT s.id AS section_id, c.code AS course_code, c.title AS course_title,
+                   s.section_code, s.status, t.name AS term_name,
+                   cap.capacity, cap.enrolled_count
+            FROM section s
+            JOIN course c ON c.id = s.course_id
+            JOIN academic_term t ON t.id = s.term_id
+            JOIN section_capacity cap ON cap.section_id = s.id
+            WHERE s.id = $1 AND s.institution_id = $2
+            "#,
+        )
+        .bind(section_id)
+        .bind(actor.institution_id)
+        .fetch_optional(&self.pool)
+        .await?
+        else {
+            return Ok(None);
+        };
+
+        let meetings = sqlx::query_as::<_, MeetingRow>(
+            "SELECT day_of_week, starts_at, ends_at FROM section_meeting \
+             WHERE section_id = $1 ORDER BY day_of_week, starts_at",
+        )
+        .bind(section_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let instructors: Vec<String> = sqlx::query_scalar(
+            r#"
+            SELECT ua.username
+            FROM instructor_assignment ia
+            JOIN user_account ua ON ua.id = ia.instructor_user_id
+            WHERE ia.section_id = $1
+            ORDER BY ua.username
+            "#,
+        )
+        .bind(section_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(Some(SectionAdminView {
+            core,
+            meetings,
+            instructors,
+        }))
+    }
+
     /// The term whose dates contain today (ties: the latest start).
     pub async fn current_term(&self, actor: &Actor) -> Result<Option<TermSummary>, AppError> {
         let term = sqlx::query_as::<_, TermSummary>(
@@ -794,6 +939,7 @@ impl AcademicsService {
         let rows = sqlx::query_as::<_, SectionOverviewRow>(
             r#"
             SELECT
+                s.id AS section_id,
                 c.code AS course_code,
                 c.title AS course_title,
                 s.section_code,

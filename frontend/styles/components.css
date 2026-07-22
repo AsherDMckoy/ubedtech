@@ -1311,6 +1311,40 @@ th[aria-sort="descending"] .sortbtn::after {
   color: var(--text-danger);
 }
 
+/* Section management: compact inline forms (label + control + button on
+   one line) and the per-row Edit link in the dense table. */
+.inline-form {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin: var(--space-2) 0 0;
+}
+
+.inline-form input[type="number"] {
+  width: 90px;
+}
+
+.termpick {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.rowlink {
+  font-size: 12px;
+}
+
+.detail-card {
+  margin-bottom: var(--space-3);
+}
+
+.detail-card h2 {
+  font-size: 15px;
+  font-weight: 500;
+  margin: 0 0 var(--space-2);
+}
+
 /* Term panels (terms & windows): the per-term windows form sits behind a
    native disclosure so the list stays scannable. */
 .term-panel {

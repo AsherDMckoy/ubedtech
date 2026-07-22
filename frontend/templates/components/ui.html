@@ -25,6 +25,8 @@
 {% macro registrar_nav_links(current) %}
   <a class="navlink" href="/ui/registrar" {% if current == "overview" %}aria-current="page"{% endif %}>Overview</a>
   <a class="navlink" href="/ui/registrar/terms" {% if current == "terms" %}aria-current="page"{% endif %}>Terms &amp; windows</a>
+  <a class="navlink" href="/ui/registrar/sections" {% if current == "sections" %}aria-current="page"{% endif %}>Sections</a>
+  <a class="navlink" href="/ui/registrar/courses" {% if current == "courses" %}aria-current="page"{% endif %}>Courses</a>
 {% endmacro %}
 
 {% macro registrar_nav(current) %}

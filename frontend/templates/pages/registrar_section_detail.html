@@ -1,0 +1,98 @@
+{% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
+{% block title %}{{ core.course_code }} {{ core.section_code }} — section management{% endblock %}
+{% block rail %}{% call ui::registrar_nav("sections") %}{% endcall %}{% endblock %}
+{% block content %}
+  <div class="wrap">
+    <p class="crumb"><a href="/ui/registrar/sections">Sections</a> · {{ core.term_name }}</p>
+    <div class="ctx">
+      <div>
+        <h1>{{ core.course_code }} · {{ core.course_title }}</h1>
+        <p class="ctx-detail">
+          Section {{ core.section_code }}
+          {% if core.status != "open" %}
+            · {% call ui::badge(core.status) %}{% endcall %}
+          {% endif %}
+          · {{ core.enrolled_count }} of {{ core.capacity }} seats taken
+        </p>
+      </div>
+    </div>
+
+    {% if let Some(notice) = notice %}
+      {% call ui::alert("success", notice) %}{% endcall %}
+    {% endif %}
+    {% if let Some(error) = error %}
+      {% call ui::alert("danger", error) %}{% endcall %}
+    {% endif %}
+
+    <section class="card detail-card" aria-labelledby="cap-h">
+      <h2 id="cap-h">Capacity</h2>
+      <form method="post" action="/ui/registrar/sections/{{ core.section_id }}/capacity" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label for="cap-input">Seats</label>
+        <input id="cap-input" name="capacity" type="number" min="0" max="10000"
+               required value="{{ core.capacity }}">
+        {% call ui::busy_button("Save capacity", "Saving…", false) %}{% endcall %}
+      </form>
+      <p class="field-hint">Capacity cannot drop below the {{ core.enrolled_count }} students already enrolled.</p>
+    </section>
+
+    <section class="card detail-card" aria-labelledby="meet-h">
+      <h2 id="meet-h">Meetings</h2>
+      {% if meetings.is_empty() %}
+        <p class="c-empty">No meetings scheduled yet.</p>
+      {% else %}
+        <ul class="strip">
+          {% for meeting in meetings %}
+            <li><span>{{ meeting.day }}</span><span>{{ meeting.time }}</span></li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      <form method="post" action="/ui/registrar/sections/{{ core.section_id }}/meetings" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label for="meet-day">Day</label>
+        <select id="meet-day" name="day_of_week">
+          <option value="1">Monday</option>
+          <option value="2">Tuesday</option>
+          <option value="3">Wednesday</option>
+          <option value="4">Thursday</option>
+          <option value="5">Friday</option>
+          <option value="6">Saturday</option>
+          <option value="7">Sunday</option>
+        </select>
+        <label for="meet-start">Starts</label>
+        <input id="meet-start" name="starts_at" type="time" required>
+        <label for="meet-end">Ends</label>
+        <input id="meet-end" name="ends_at" type="time" required>
+        {% call ui::busy_button("Add meeting", "Adding…", false) %}{% endcall %}
+      </form>
+    </section>
+
+    <section class="card detail-card" aria-labelledby="inst-h">
+      <h2 id="inst-h">Instructors</h2>
+      {% if instructors.is_empty() %}
+        <p class="c-empty"><span class="unassigned">Unassigned</span> — students see this section without a teacher.</p>
+      {% else %}
+        <ul class="strip">
+          {% for instructor in instructors %}
+            <li><span>{{ instructor }}</span></li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+      {% if instructor_options.is_empty() %}
+        <p class="c-empty">No users hold the instructor role yet.</p>
+      {% else %}
+        <form method="post" action="/ui/registrar/sections/{{ core.section_id }}/instructors" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label for="inst-select">Assign</label>
+          <select id="inst-select" name="instructor_user_id">
+            {% for option in instructor_options %}
+              <option value="{{ option.user_id }}">{{ option.username }}</option>
+            {% endfor %}
+          </select>
+          {% call ui::busy_button("Assign instructor", "Assigning…", false) %}{% endcall %}
+        </form>
+      {% endif %}
+    </section>
+  </div>
+{% endblock %}

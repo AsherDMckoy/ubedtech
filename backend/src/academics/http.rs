@@ -580,6 +580,7 @@ pub fn sample_registrar_overview_html() -> Result<String, askama::Error> {
     let now = Utc::now();
     let section = |code: &str, title: &str, sec: &str, who: &str, capacity, enrolled| OverviewRow {
         section: SectionOverviewRow {
+            section_id: Uuid::nil(),
             course_code: code.to_owned(),
             course_title: title.to_owned(),
             section_code: sec.to_owned(),
@@ -854,6 +855,537 @@ async fn update_windows_form(
     }
 }
 
+// ---- Sections management ---------------------------------------------------
+
+#[derive(Template)]
+#[template(path = "pages/registrar_sections.html")]
+struct RegistrarSectionsPage<'a> {
+    csrf_token: &'a str,
+    terms: Vec<TermSummary>,
+    selected_term: Option<Uuid>,
+    courses: Vec<crate::academics::service::CourseSummary>,
+    rows: Vec<OverviewRow>,
+    q: String,
+    notice: Option<&'a str>,
+    error: Option<&'a str>,
+}
+
+impl RegistrarSectionsPage<'_> {
+    /// Askama passes field references, so the Option compare lives here.
+    pub fn is_selected(&self, term_id: &Uuid) -> bool {
+        self.selected_term == Some(*term_id)
+    }
+}
+
+async fn render_sections(
+    actor: &Actor,
+    current: &CurrentSession,
+    service: &AcademicsService,
+    term_id: Option<Uuid>,
+    q: &str,
+    notice: Option<&str>,
+    error: Option<&str>,
+) -> Result<String, AppError> {
+    let terms = service.list_terms(actor).await?;
+    let selected_term = term_id.or_else(|| {
+        let now = chrono::Utc::now().date_naive();
+        terms
+            .iter()
+            .find(|t| t.starts_on <= now && now <= t.ends_on)
+            .or(terms.first())
+            .map(|t| t.id)
+    });
+    let rows = match selected_term {
+        Some(term_id) => service
+            .term_sections_overview(actor, term_id, Some(q))
+            .await?
+            .into_iter()
+            .map(|section| OverviewRow { section })
+            .collect(),
+        None => Vec::new(),
+    };
+    let courses = service.list_courses(actor).await?;
+    Ok(RegistrarSectionsPage {
+        csrf_token: &current.csrf_token,
+        terms,
+        selected_term,
+        courses,
+        rows,
+        q: q.to_owned(),
+        notice,
+        error,
+    }
+    .render()?)
+}
+
+#[derive(Deserialize)]
+struct SectionsQuery {
+    term_id: Option<Uuid>,
+    q: Option<String>,
+    notice: Option<String>,
+}
+
+#[get("/ui/registrar/sections")]
+async fn registrar_sections_page(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<AcademicsService>,
+    query: web::Query<SectionsQuery>,
+) -> Result<HttpResponse, AppError> {
+    crate::academics::policy::require_can_manage_academics(&actor)?;
+    let notice = match query.notice.as_deref() {
+        Some("created") => Some("Section created."),
+        _ => None,
+    };
+    let body = render_sections(
+        &actor,
+        &current,
+        &service,
+        query.term_id,
+        query.q.as_deref().unwrap_or(""),
+        notice,
+        None,
+    )
+    .await?;
+    Ok(html(StatusCode::OK, body))
+}
+
+#[derive(Deserialize)]
+struct CreateSectionForm {
+    term_id: Uuid,
+    course_id: Uuid,
+    section_code: String,
+    capacity: i32,
+    csrf_token: String,
+}
+
+#[post("/ui/registrar/sections")]
+async fn create_section_form(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<AcademicsService>,
+    form: web::Form<CreateSectionForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let outcome = service
+        .create_section(
+            &actor,
+            CreateSectionCommand {
+                term_id: form.term_id,
+                course_id: form.course_id,
+                section_code: form.section_code.clone(),
+                capacity: form.capacity,
+            },
+        )
+        .await;
+    match outcome {
+        Ok(_) => Ok(see_other(&format!(
+            "/ui/registrar/sections?term_id={}&notice=created",
+            form.term_id
+        ))),
+        Err(AppError::Validation(message)) => {
+            let body = render_sections(
+                &actor,
+                &current,
+                &service,
+                Some(form.term_id),
+                "",
+                None,
+                Some(&message),
+            )
+            .await?;
+            Ok(html(StatusCode::UNPROCESSABLE_ENTITY, body))
+        }
+        Err(AppError::Conflict(message)) => {
+            let body = render_sections(
+                &actor,
+                &current,
+                &service,
+                Some(form.term_id),
+                "",
+                None,
+                Some(&message),
+            )
+            .await?;
+            Ok(html(StatusCode::CONFLICT, body))
+        }
+        Err(other) => Err(other),
+    }
+}
+
+/// A meeting formatted for the detail page.
+pub struct MeetingDisplay {
+    pub day: &'static str,
+    pub time: String,
+}
+
+fn day_name(day: i16) -> &'static str {
+    match day {
+        1 => "Monday",
+        2 => "Tuesday",
+        3 => "Wednesday",
+        4 => "Thursday",
+        5 => "Friday",
+        6 => "Saturday",
+        _ => "Sunday",
+    }
+}
+
+#[derive(Template)]
+#[template(path = "pages/registrar_section_detail.html")]
+struct RegistrarSectionPage<'a> {
+    csrf_token: &'a str,
+    core: crate::academics::service::SectionAdminCore,
+    meetings: Vec<MeetingDisplay>,
+    instructors: Vec<String>,
+    instructor_options: Vec<crate::academics::service::InstructorOption>,
+    notice: Option<&'a str>,
+    error: Option<&'a str>,
+}
+
+async fn render_section_detail(
+    actor: &Actor,
+    current: &CurrentSession,
+    service: &AcademicsService,
+    section_id: Uuid,
+    notice: Option<&str>,
+    error: Option<&str>,
+) -> Result<String, AppError> {
+    let view = service
+        .section_admin(actor, section_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let meetings = view
+        .meetings
+        .into_iter()
+        .map(|m| MeetingDisplay {
+            day: day_name(m.day_of_week),
+            time: format!(
+                "{}–{}",
+                m.starts_at.format("%H:%M"),
+                m.ends_at.format("%H:%M")
+            ),
+        })
+        .collect();
+    let instructor_options = service.list_instructors(actor).await?;
+    Ok(RegistrarSectionPage {
+        csrf_token: &current.csrf_token,
+        core: view.core,
+        meetings,
+        instructors: view.instructors,
+        instructor_options,
+        notice,
+        error,
+    }
+    .render()?)
+}
+
+#[derive(Deserialize)]
+struct SectionNoticeQuery {
+    notice: Option<String>,
+}
+
+#[get("/ui/registrar/sections/{section_id}")]
+async fn registrar_section_detail_page(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<AcademicsService>,
+    section_id: web::Path<Uuid>,
+    query: web::Query<SectionNoticeQuery>,
+) -> Result<HttpResponse, AppError> {
+    let notice = match query.notice.as_deref() {
+        Some("capacity") => Some("Capacity updated."),
+        Some("meeting") => Some("Meeting added."),
+        Some("instructor") => Some("Instructor assigned."),
+        _ => None,
+    };
+    let body = render_section_detail(
+        &actor,
+        &current,
+        &service,
+        section_id.into_inner(),
+        notice,
+        None,
+    )
+    .await?;
+    Ok(html(StatusCode::OK, body))
+}
+
+#[derive(Deserialize)]
+struct CapacityForm {
+    capacity: i32,
+    csrf_token: String,
+}
+
+#[post("/ui/registrar/sections/{section_id}/capacity")]
+async fn set_capacity_form(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<AcademicsService>,
+    section_id: web::Path<Uuid>,
+    form: web::Form<CapacityForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let section_id = section_id.into_inner();
+    match service
+        .set_section_capacity(&actor, section_id, form.capacity)
+        .await
+    {
+        Ok(()) => Ok(see_other(&format!(
+            "/ui/registrar/sections/{section_id}?notice=capacity"
+        ))),
+        Err(AppError::Validation(message)) => {
+            let body =
+                render_section_detail(&actor, &current, &service, section_id, None, Some(&message))
+                    .await?;
+            Ok(html(StatusCode::UNPROCESSABLE_ENTITY, body))
+        }
+        Err(AppError::Conflict(message)) => {
+            let body =
+                render_section_detail(&actor, &current, &service, section_id, None, Some(&message))
+                    .await?;
+            Ok(html(StatusCode::CONFLICT, body))
+        }
+        Err(other) => Err(other),
+    }
+}
+
+/// `<input type="time">` values ("09:00", sometimes with seconds).
+fn parse_time(value: &str, field: &str) -> Result<chrono::NaiveTime, AppError> {
+    let value = value.trim();
+    chrono::NaiveTime::parse_from_str(value, "%H:%M")
+        .or_else(|_| chrono::NaiveTime::parse_from_str(value, "%H:%M:%S"))
+        .map_err(|_| AppError::Validation(format!("{field} must be a time")))
+}
+
+#[derive(Deserialize)]
+struct MeetingForm {
+    day_of_week: i16,
+    starts_at: String,
+    ends_at: String,
+    csrf_token: String,
+}
+
+#[post("/ui/registrar/sections/{section_id}/meetings")]
+async fn add_meeting_form(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<AcademicsService>,
+    section_id: web::Path<Uuid>,
+    form: web::Form<MeetingForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let section_id = section_id.into_inner();
+    let outcome = async {
+        let command = AddMeetingCommand {
+            day_of_week: form.day_of_week,
+            starts_at: parse_time(&form.starts_at, "meeting start")?,
+            ends_at: parse_time(&form.ends_at, "meeting end")?,
+            room_id: None,
+        };
+        service.add_meeting(&actor, section_id, command).await
+    }
+    .await;
+    match outcome {
+        Ok(_) => Ok(see_other(&format!(
+            "/ui/registrar/sections/{section_id}?notice=meeting"
+        ))),
+        Err(AppError::Validation(message)) => {
+            let body =
+                render_section_detail(&actor, &current, &service, section_id, None, Some(&message))
+                    .await?;
+            Ok(html(StatusCode::UNPROCESSABLE_ENTITY, body))
+        }
+        Err(other) => Err(other),
+    }
+}
+
+#[derive(Deserialize)]
+struct AssignInstructorForm {
+    instructor_user_id: Uuid,
+    csrf_token: String,
+}
+
+#[post("/ui/registrar/sections/{section_id}/instructors")]
+async fn assign_instructor_form(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<AcademicsService>,
+    section_id: web::Path<Uuid>,
+    form: web::Form<AssignInstructorForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let section_id = section_id.into_inner();
+    match service
+        .assign_instructor(&actor, section_id, form.instructor_user_id)
+        .await
+    {
+        Ok(()) => Ok(see_other(&format!(
+            "/ui/registrar/sections/{section_id}?notice=instructor"
+        ))),
+        Err(AppError::Validation(message)) => {
+            let body =
+                render_section_detail(&actor, &current, &service, section_id, None, Some(&message))
+                    .await?;
+            Ok(html(StatusCode::UNPROCESSABLE_ENTITY, body))
+        }
+        Err(other) => Err(other),
+    }
+}
+
+// ---- Courses & prerequisites management ------------------------------------
+
+#[derive(Template)]
+#[template(path = "pages/registrar_courses.html")]
+struct RegistrarCoursesPage<'a> {
+    csrf_token: &'a str,
+    courses: Vec<crate::academics::service::CourseSummary>,
+    notice: Option<&'a str>,
+    error: Option<&'a str>,
+}
+
+async fn render_courses(
+    actor: &Actor,
+    current: &CurrentSession,
+    service: &AcademicsService,
+    notice: Option<&str>,
+    error: Option<&str>,
+) -> Result<String, AppError> {
+    Ok(RegistrarCoursesPage {
+        csrf_token: &current.csrf_token,
+        courses: service.list_courses(actor).await?,
+        notice,
+        error,
+    }
+    .render()?)
+}
+
+#[derive(Deserialize)]
+struct CoursesNoticeQuery {
+    notice: Option<String>,
+}
+
+#[get("/ui/registrar/courses")]
+async fn registrar_courses_page(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<AcademicsService>,
+    query: web::Query<CoursesNoticeQuery>,
+) -> Result<HttpResponse, AppError> {
+    crate::academics::policy::require_can_manage_academics(&actor)?;
+    let notice = match query.notice.as_deref() {
+        Some("created") => Some("Course created."),
+        Some("prerequisite") => Some("Prerequisite added."),
+        _ => None,
+    };
+    let body = render_courses(&actor, &current, &service, notice, None).await?;
+    Ok(html(StatusCode::OK, body))
+}
+
+#[derive(Deserialize)]
+struct CreateCourseForm {
+    code: String,
+    title: String,
+    credit_hours: f64,
+    csrf_token: String,
+}
+
+#[post("/ui/registrar/courses")]
+async fn create_course_form(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<AcademicsService>,
+    form: web::Form<CreateCourseForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let outcome = service
+        .create_course(
+            &actor,
+            CreateCourseCommand {
+                code: form.code.clone(),
+                title: form.title.clone(),
+                credit_hours: form.credit_hours,
+            },
+        )
+        .await;
+    match outcome {
+        Ok(_) => Ok(see_other("/ui/registrar/courses?notice=created")),
+        Err(AppError::Validation(message)) => {
+            let body = render_courses(&actor, &current, &service, None, Some(&message)).await?;
+            Ok(html(StatusCode::UNPROCESSABLE_ENTITY, body))
+        }
+        Err(AppError::Conflict(message)) => {
+            let body = render_courses(&actor, &current, &service, None, Some(&message)).await?;
+            Ok(html(StatusCode::CONFLICT, body))
+        }
+        Err(other) => Err(other),
+    }
+}
+
+#[derive(Deserialize)]
+struct AddPrerequisiteForm {
+    course_id: Uuid,
+    prerequisite_course_id: Uuid,
+    minimum_grade_points: f64,
+    csrf_token: String,
+}
+
+#[post("/ui/registrar/courses/prerequisites")]
+async fn add_prerequisite_form(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<AcademicsService>,
+    form: web::Form<AddPrerequisiteForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let outcome = service
+        .add_prerequisite(
+            &actor,
+            form.course_id,
+            AddPrerequisiteCommand {
+                prerequisite_course_id: form.prerequisite_course_id,
+                minimum_grade_points: form.minimum_grade_points,
+            },
+        )
+        .await;
+    match outcome {
+        Ok(()) => Ok(see_other("/ui/registrar/courses?notice=prerequisite")),
+        Err(AppError::Validation(message)) => {
+            let body = render_courses(&actor, &current, &service, None, Some(&message)).await?;
+            Ok(html(StatusCode::UNPROCESSABLE_ENTITY, body))
+        }
+        Err(AppError::Conflict(message)) => {
+            let body = render_courses(&actor, &current, &service, None, Some(&message)).await?;
+            Ok(html(StatusCode::CONFLICT, body))
+        }
+        Err(other) => Err(other),
+    }
+}
+
+/// Renders the courses page with prerequisites and no database, for the
+/// frontend axe harness.
+pub fn sample_registrar_courses_html() -> Result<String, askama::Error> {
+    let course =
+        |code: &str, title: &str, prerequisites: &str| crate::academics::service::CourseSummary {
+            id: Uuid::nil(),
+            code: code.into(),
+            title: title.into(),
+            credit_hours: 3.0,
+            active: true,
+            prerequisites: prerequisites.into(),
+        };
+    RegistrarCoursesPage {
+        csrf_token: "sample",
+        courses: vec![
+            course("CMPS 1101", "Intro to programming", ""),
+            course("CMPS 2131", "Data structures", "CMPS 1101 (≥2)"),
+        ],
+        notice: None,
+        error: None,
+    }
+    .render()
+}
+
 fn html(status: StatusCode, body: String) -> HttpResponse {
     HttpResponse::build(status)
         .content_type("text/html; charset=utf-8")
@@ -894,6 +1426,91 @@ pub fn sample_registrar_terms_html() -> Result<String, askama::Error> {
     .render()
 }
 
+/// Renders the sections-management pages with representative data and no
+/// database, for the frontend axe harness.
+pub fn sample_registrar_sections_html() -> Result<String, askama::Error> {
+    use chrono::{Duration, Utc};
+    let now = Utc::now();
+    let term = TermSummary {
+        id: Uuid::nil(),
+        code: "FA26".into(),
+        name: "Fall 2026".into(),
+        starts_on: now.date_naive(),
+        ends_on: (now + Duration::days(100)).date_naive(),
+        registration_opens_at: now - Duration::days(20),
+        add_drop_closes_at: now + Duration::days(14),
+        grade_entry_closes_at: None,
+    };
+    let section = |code: &str, title: &str, sec: &str, who: &str, capacity, enrolled| OverviewRow {
+        section: SectionOverviewRow {
+            section_id: Uuid::nil(),
+            course_code: code.to_owned(),
+            course_title: title.to_owned(),
+            section_code: sec.to_owned(),
+            status: "open".to_owned(),
+            meetings: "1 09:00-10:15".to_owned(),
+            instructors: who.to_owned(),
+            capacity,
+            enrolled_count: enrolled,
+        },
+    };
+    RegistrarSectionsPage {
+        csrf_token: "sample",
+        selected_term: Some(term.id),
+        terms: vec![term],
+        courses: vec![crate::academics::service::CourseSummary {
+            id: Uuid::nil(),
+            code: "CMPS 2131".into(),
+            title: "Data structures".into(),
+            credit_hours: 3.0,
+            active: true,
+            prerequisites: String::new(),
+        }],
+        rows: vec![
+            section("CMPS 2131", "Data structures", "01", "alvarez", 40, 40),
+            section("ENGL 1101", "Composition", "03", "", 35, 18),
+        ],
+        q: String::new(),
+        notice: Some("Section created."),
+        error: None,
+    }
+    .render()
+}
+
+pub fn sample_registrar_section_detail_html() -> Result<String, askama::Error> {
+    RegistrarSectionPage {
+        csrf_token: "sample",
+        core: crate::academics::service::SectionAdminCore {
+            section_id: Uuid::nil(),
+            course_code: "CMPS 2131".into(),
+            course_title: "Data structures".into(),
+            section_code: "01".into(),
+            status: "open".into(),
+            term_name: "Fall 2026".into(),
+            capacity: 40,
+            enrolled_count: 22,
+        },
+        meetings: vec![
+            MeetingDisplay {
+                day: "Monday",
+                time: "09:00–10:15".into(),
+            },
+            MeetingDisplay {
+                day: "Wednesday",
+                time: "09:00–10:15".into(),
+            },
+        ],
+        instructors: vec!["alvarez".into()],
+        instructor_options: vec![crate::academics::service::InstructorOption {
+            user_id: Uuid::nil(),
+            username: "alvarez".into(),
+        }],
+        notice: None,
+        error: Some("capacity cannot drop below current enrollment"),
+    }
+    .render()
+}
+
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(create_term)
         .service(current_term)
@@ -908,5 +1525,14 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .service(registrar_overview_page)
         .service(registrar_terms_page)
         .service(create_term_form)
-        .service(update_windows_form);
+        .service(update_windows_form)
+        .service(registrar_sections_page)
+        .service(create_section_form)
+        .service(registrar_section_detail_page)
+        .service(set_capacity_form)
+        .service(add_meeting_form)
+        .service(assign_instructor_form)
+        .service(registrar_courses_page)
+        .service(create_course_form)
+        .service(add_prerequisite_form);
 }

@@ -1,0 +1,122 @@
+{% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
+{% block title %}Sections{% endblock %}
+{% block rail %}{% call ui::registrar_nav("sections") %}{% endcall %}{% endblock %}
+{% block content %}
+  <div class="wrap wrap-wide">
+    <div class="head">
+      <div>
+        <h1>Sections</h1>
+        <p class="sub">Every edit opens a form that commits on the server — no change is shown as saved before it is.</p>
+      </div>
+    </div>
+
+    {% if let Some(notice) = notice %}
+      {% call ui::alert("success", notice) %}{% endcall %}
+    {% endif %}
+    {% if let Some(error) = error %}
+      {% call ui::alert("danger", error) %}{% endcall %}
+    {% endif %}
+
+    {# New section — the real form in a drawer, JS-off capable. #}
+    <details class="drawer">
+      <summary>New section</summary>
+      <div class="drawer-panel">
+        <form method="post" action="/ui/registrar/sections">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="field">
+            <label for="ns-term">Term</label>
+            <select id="ns-term" name="term_id" required>
+              {% for term in terms %}
+                <option value="{{ term.id }}" {% if self.is_selected(term.id) %}selected{% endif %}>{{ term.code }} · {{ term.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="ns-course">Course</label>
+            <select id="ns-course" name="course_id" required>
+              {% for course in courses %}
+                <option value="{{ course.id }}">{{ course.code }} · {{ course.title }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label for="ns-code">Section code</label>
+            <input id="ns-code" name="section_code" required maxlength="10">
+          </div>
+          <div class="field">
+            <label for="ns-capacity">Capacity</label>
+            <input id="ns-capacity" name="capacity" type="number" min="0" max="10000" required>
+          </div>
+          {% call ui::busy_button("Create section", "Creating…", true) %}{% endcall %}
+        </form>
+      </div>
+    </details>
+
+    <section class="card card-flush" aria-label="Sections">
+      <div class="tabletop">
+        {# Term picker + filter: both plain GET controls; the filter also
+           narrows instantly in-page. #}
+        <form method="get" action="/ui/registrar/sections" class="termpick">
+          <label for="sec-term" class="sr-only">Term</label>
+          <select id="sec-term" name="term_id">
+            {% for term in terms %}
+              <option value="{{ term.id }}" {% if self.is_selected(term.id) %}selected{% endif %}>{{ term.code }} · {{ term.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit">Show</button>
+        </form>
+        <form data-search-form role="search" method="get" action="/ui/registrar/sections">
+          {% if let Some(term_id) = selected_term %}
+            <input type="hidden" name="term_id" value="{{ term_id }}">
+          {% endif %}
+          {% call ui::search("q", "q", "Filter sections", "Filter…", q) %}{% endcall %}
+        </form>
+      </div>
+      <div class="table-wrap">
+        <table class="table-dense">
+          <caption>Sections of the selected term with seats, meetings, and instructors</caption>
+          <thead>
+            <tr>
+              <th scope="col"><button type="button" class="sortbtn" data-sort>Course</button></th>
+              <th scope="col">Sec</th>
+              <th scope="col">Meets</th>
+              <th scope="col"><button type="button" class="sortbtn" data-sort>Instructor</button></th>
+              <th scope="col" class="num"><button type="button" class="sortbtn" data-sort>Enrolled</button></th>
+              <th scope="col"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+              <tr data-search="{{ row.search_key() }}">
+                <td>
+                  <span class="code">{{ row.section.course_code }}</span> · {{ row.section.course_title }}
+                  {% if row.section.status != "open" %}
+                    {% call ui::badge(row.section.status) %}{% endcall %}
+                  {% endif %}
+                </td>
+                <td>{{ row.section.section_code }}</td>
+                <td>{{ row.section.meetings }}</td>
+                <td>
+                  {% if row.unassigned() %}
+                    <span class="unassigned">Unassigned</span>
+                  {% else %}
+                    {{ row.section.instructors }}
+                  {% endif %}
+                </td>
+                <td class="num">{{ row.section.enrolled_count }} / {{ row.section.capacity }}</td>
+                <td><a class="rowlink" href="/ui/registrar/sections/{{ row.section.section_id }}">Edit</a></td>
+              </tr>
+            {% endfor %}
+            <tr data-search-empty hidden>
+              <td colspan="6" class="c-empty">No sections match your filter.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+    {% if rows.is_empty() %}
+      <p class="c-empty">No sections in this term yet. Create one above.</p>
+    {% endif %}
+  </div>
+{% endblock %}
