@@ -1,0 +1,151 @@
+{% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
+{% block title %}Registrar overview{% endblock %}
+{% block rail %}{% call ui::registrar_nav("overview") %}{% endcall %}{% endblock %}
+{% block content %}
+  <div class="wrap wrap-wide">
+    {% if let Some(term) = term %}
+      <div class="head">
+        <div>
+          <h1>{{ term.name }} overview</h1>
+          {% if let Some(window) = windows.first() %}
+            <p class="sub">{{ window.label }} · {{ window.detail|lower }}</p>
+          {% endif %}
+        </div>
+      </div>
+
+      {# The four numbers a registrar checks first thing, derived from the
+         same committed rows the table below shows. #}
+      <section class="tiles" aria-label="Term summary">
+        <div class="tile">
+          <p class="k">Sections</p>
+          <p class="v">{{ rows.len() }}</p>
+          <p class="h">across {{ course_count }} course{% if course_count != 1 %}s{% endif %}</p>
+        </div>
+        <div class="tile">
+          <p class="k">Seats filled</p>
+          <p class="v">{{ self.seats_pct() }}%</p>
+          <p class="h">{{ seats_filled }} of {{ seats_total }}</p>
+        </div>
+        <div class="tile {% if !attention.is_empty() %}tile-warn{% endif %}">
+          <p class="k">Needs attention</p>
+          <p class="v">{{ attention.len() }}</p>
+          <p class="h">full sections, missing instructors</p>
+        </div>
+        <div class="tile">
+          <p class="k">Active holds</p>
+          <p class="v">{{ holds_total }}</p>
+          {% if !holds_detail.is_empty() %}<p class="h">{{ holds_detail }}</p>{% endif %}
+        </div>
+      </section>
+
+      <div class="cols">
+        <section class="panel" aria-label="Needs attention">
+          <h2>Needs attention
+            {% if !attention.is_empty() %}<span class="count">{{ attention.len() }}</span>{% endif %}
+          </h2>
+          {% if attention.is_empty() %}
+            <p class="panel-empty">Nothing needs attention right now.</p>
+          {% else %}
+            <ul class="queue">
+              {% for item in attention %}
+                <li>
+                  <span class="dot dot-{{ item.severity }}" aria-hidden="true"></span>
+                  <div class="q-main">
+                    <p class="q-t">{{ item.title }}</p>
+                    <p class="q-d">{{ item.detail }}</p>
+                  </div>
+                </li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        </section>
+
+        <section class="panel" aria-label="Registration windows">
+          <h2>Windows</h2>
+          <ul class="win">
+            {% for window in windows %}
+              <li>
+                <div>
+                  <p class="w-t">{{ window.label }}</p>
+                  <p class="w-d">{{ window.range }}</p>
+                </div>
+                <span class="badge {{ window.badge_class() }}">{{ window.detail }}</span>
+              </li>
+            {% endfor %}
+          </ul>
+        </section>
+      </div>
+
+      {# The scanning workhorse: every section of the term, sortable and
+         filterable in-page (read path — zero round trips with JS; the same
+         form GETs and the server filters without it). #}
+      <section class="card card-flush" aria-label="Sections">
+        <div class="tabletop">
+          <h2>Sections</h2>
+          <form data-search-form role="search" method="get" action="/ui/registrar">
+            {% call ui::search("q", "q", "Filter sections", "Filter…", q) %}{% endcall %}
+          </form>
+        </div>
+        <div class="table-wrap">
+          <table class="table-dense">
+            <caption>Sections of {{ term.name }} with seats, meetings, and instructors</caption>
+            <thead>
+              <tr>
+                <th scope="col"><button type="button" class="sortbtn" data-sort>Course</button></th>
+                <th scope="col">Sec</th>
+                <th scope="col">Meets</th>
+                <th scope="col"><button type="button" class="sortbtn" data-sort>Instructor</button></th>
+                <th scope="col" class="num"><button type="button" class="sortbtn" data-sort>Enrolled</button></th>
+                <th scope="col" class="num"><button type="button" class="sortbtn" data-sort>Fill</button></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in rows %}
+                <tr data-search="{{ row.search_key() }}">
+                  <td>
+                    <span class="code">{{ row.section.course_code }}</span> · {{ row.section.course_title }}
+                    {% if row.section.status != "open" %}
+                      {% call ui::badge(row.section.status) %}{% endcall %}
+                    {% endif %}
+                  </td>
+                  <td>{{ row.section.section_code }}</td>
+                  <td>{{ row.section.meetings }}</td>
+                  <td>
+                    {% if row.unassigned() %}
+                      <span class="unassigned">Unassigned</span>
+                    {% else %}
+                      {{ row.section.instructors }}
+                    {% endif %}
+                  </td>
+                  <td class="num">{{ row.section.enrolled_count }} / {{ row.section.capacity }}</td>
+                  <td class="num"><span class="pct pct-{{ row.fill_state() }}">{{ row.fill_pct() }}%</span></td>
+                </tr>
+              {% endfor %}
+              <tr data-search-empty hidden>
+                <td colspan="6" class="c-empty">No sections match your filter.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      {% if rows.is_empty() %}
+        {% if q.is_empty() %}
+          <p class="c-empty">No sections exist for this term yet.</p>
+        {% else %}
+          <p class="c-empty">No sections match.</p>
+        {% endif %}
+      {% endif %}
+      {% if truncated %}
+        <p class="foot">Showing the first 500 sections — narrow the filter to see the rest.</p>
+      {% endif %}
+
+      <p class="foot"><span data-search-count>Showing all {{ rows.len() }} sections</span> · sorted views and filters run in-page. Every edit opens a form that commits on the server — no change is shown as saved before it is.</p>
+    {% else %}
+      <div class="head">
+        <div><h1>Registrar overview</h1></div>
+      </div>
+      {% call ui::alert("accent", "There is no active term right now.") %}{% endcall %}
+    {% endif %}
+  </div>
+{% endblock %}

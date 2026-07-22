@@ -1670,4 +1670,127 @@ mod ui {
         let (status, body) = post_add(&app, &cookie, &csrf, gated).await;
         expect_inline(status, body, "prerequisite requirements are not satisfied");
     }
+
+    /// Give the fixture's registrar a login credential and the registrar
+    /// role, mirroring `credential_student`.
+    async fn credential_registrar(pool: &PgPool, fixture: &Fixture) -> String {
+        let username = format!("reg-{}", &fixture.registrar.user_id.to_string()[..8]);
+        sqlx::query("UPDATE user_account SET username = $2 WHERE id = $1")
+            .bind(fixture.registrar.user_id)
+            .bind(&username)
+            .execute(pool)
+            .await
+            .unwrap();
+        let hash = PasswordService::new(8, 1, 1)
+            .unwrap()
+            .hash(PASSWORD)
+            .unwrap();
+        sqlx::query("INSERT INTO password_credential (user_id, password_hash) VALUES ($1, $2)")
+            .bind(fixture.registrar.user_id)
+            .bind(hash)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO user_role (institution_id, user_id, role_id) \
+             SELECT $1, $2, id FROM role WHERE code = 'registrar'",
+        )
+        .bind(fixture.registrar.institution_id)
+        .bind(fixture.registrar.user_id)
+        .execute(pool)
+        .await
+        .unwrap();
+        username
+    }
+
+    /// The registrar overview reads the term at scanning density: tiles,
+    /// the needs-attention worklist, window badges, and the dense sections
+    /// table — every number derived from the same committed rows, scoped to
+    /// the institution, denied to students.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn registrar_overview_scans_the_term_and_denies_students(pool: PgPool) {
+        use crate::shared::actor::{Actor, Role};
+        use std::collections::HashSet;
+
+        let fixture = seed_registration_fixture(&pool, 1).await;
+        let service =
+            crate::enrollment::EnrollmentService::new(pool.clone(), crate::audit::AuditWriter);
+
+        // Student A takes the only seat, so the fixture section is both full
+        // and instructor-less — two worklist reasons. Student B's hold feeds
+        // the holds tile.
+        let student = Actor {
+            user_id: fixture.student_user_a,
+            institution_id: fixture.registrar.institution_id,
+            student_id: Some(fixture.student_a),
+            roles: HashSet::from([Role::Student]),
+        };
+        service
+            .register_self(
+                &student,
+                crate::enrollment::types::RegisterCommand {
+                    section_id: fixture.section_id,
+                    idempotency_key: Uuid::new_v4(),
+                },
+            )
+            .await
+            .unwrap();
+        service
+            .place_hold(
+                &fixture.registrar,
+                fixture.student_b,
+                fixture.term_id,
+                "financial",
+                "unpaid balance",
+            )
+            .await
+            .unwrap();
+
+        // A second institution's distinctly named course must never appear.
+        let foreign = seed_registration_fixture(&pool, 3).await;
+        sqlx::query("UPDATE course SET title = 'Foreign Course' WHERE institution_id = $1")
+            .bind(foreign.registrar.institution_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let username = credential_registrar(&pool, &fixture).await;
+        let app = ui_app!(&pool, fixture.registrar.institution_id);
+        let cookie = login(&app, &username, PASSWORD).await;
+
+        let page = get_page(&app, &cookie, "/ui/registrar").await;
+        assert!(page.contains("Concurrency Test"), "term sections listed");
+        assert!(!page.contains("Foreign Course"), "institution-scoped");
+        assert!(
+            page.contains("Section full"),
+            "full section in the worklist"
+        );
+        assert!(page.contains("No instructor assigned"), "worklist names it");
+        assert!(page.contains("Unassigned"), "table flags it");
+        assert!(
+            page.contains("Registration and add/drop"),
+            "the single shared window is shown"
+        );
+        assert!(page.contains("financial"), "hold flag counted in its tile");
+        assert!(page.contains("100%"), "fill percentage shown");
+
+        // The JS-off floor of the filter: the same form GETs and the server
+        // narrows the rows.
+        let filtered = get_page(&app, &cookie, "/ui/registrar?q=NO-SUCH-COURSE").await;
+        assert!(!filtered.contains("Concurrency Test"));
+        assert!(filtered.contains("No sections match."));
+
+        // Students never see the registrar surface.
+        let student_username = credential_student(&pool, &fixture).await;
+        let student_cookie = login(&app, &student_username, PASSWORD).await;
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/ui/registrar")
+                .cookie(student_cookie)
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
 }

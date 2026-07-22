@@ -553,6 +553,7 @@ pub fn sample_schedule_html() -> Result<String, askama::Error> {
             ends_on: (now + Duration::days(100)).date_naive(),
             registration_opens_at: now - Duration::days(20),
             add_drop_closes_at: now + Duration::days(14),
+            grade_entry_closes_at: None,
         }),
         days,
         empty: false,
@@ -580,6 +581,7 @@ fn sample_term() -> TermSummary {
         ends_on: (now + Duration::days(100)).date_naive(),
         registration_opens_at: now - Duration::days(20),
         add_drop_closes_at: now + Duration::days(14),
+        grade_entry_closes_at: None,
     }
 }
 

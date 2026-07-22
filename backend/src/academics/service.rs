@@ -66,6 +66,24 @@ pub struct TermSummary {
     pub ends_on: NaiveDate,
     pub registration_opens_at: DateTime<Utc>,
     pub add_drop_closes_at: DateTime<Utc>,
+    pub grade_entry_closes_at: Option<DateTime<Utc>>,
+}
+
+/// One row of the registrar's scanning table: a section with its course,
+/// seats, meeting summary, and assigned instructors — the whole term from
+/// one query (no N+1).
+#[derive(Debug, sqlx::FromRow)]
+pub struct SectionOverviewRow {
+    pub course_code: String,
+    pub course_title: String,
+    pub section_code: String,
+    pub status: String,
+    pub meetings: String,
+    /// Comma-joined instructor usernames; empty means unassigned — the
+    /// overview flags that, it never hides it.
+    pub instructors: String,
+    pub capacity: i32,
+    pub enrolled_count: i32,
 }
 
 /// One catalog row: a section with its course, seats, and meeting summary —
@@ -544,7 +562,7 @@ impl AcademicsService {
         let term = sqlx::query_as::<_, TermSummary>(
             r#"
             SELECT id, code, name, starts_on, ends_on,
-                   registration_opens_at, add_drop_closes_at
+                   registration_opens_at, add_drop_closes_at, grade_entry_closes_at
             FROM academic_term
             WHERE institution_id = $1
               AND CURRENT_DATE BETWEEN starts_on AND ends_on
@@ -668,6 +686,72 @@ impl AcademicsService {
         .bind(actor.student_id)
         .fetch_optional(&self.pool)
         .await?)
+    }
+
+    /// Every section of a term for the registrar's scanning table, with
+    /// seats, meetings, and instructors. Optional server-side filter for the
+    /// JS-off search floor; the in-page filter handles the rest.
+    pub async fn term_sections_overview(
+        &self,
+        actor: &Actor,
+        term_id: Uuid,
+        query: Option<&str>,
+    ) -> Result<Vec<SectionOverviewRow>, AppError> {
+        require_can_manage_academics(actor)?;
+        // ponytail: one term's sections fit on one scanning page (reference:
+        // ~300 rows); the cap is a runaway guard, paginate if a real term
+        // ever exceeds it.
+        const CAP: i64 = 500;
+        let pattern = query
+            .map(str::trim)
+            .filter(|q| !q.is_empty())
+            .map(|q| format!("%{}%", q.replace('%', "\\%").replace('_', "\\_")));
+
+        let rows = sqlx::query_as::<_, SectionOverviewRow>(
+            r#"
+            SELECT
+                c.code AS course_code,
+                c.title AS course_title,
+                s.section_code,
+                s.status,
+                COALESCE(m.summary, '') AS meetings,
+                COALESCE(i.names, '') AS instructors,
+                cap.capacity,
+                cap.enrolled_count
+            FROM section s
+            JOIN course c ON c.id = s.course_id
+            JOIN section_capacity cap ON cap.section_id = s.id
+            LEFT JOIN LATERAL (
+                SELECT string_agg(
+                           day_of_week || ' ' || to_char(starts_at, 'HH24:MI')
+                           || '-' || to_char(ends_at, 'HH24:MI'),
+                           ', ' ORDER BY day_of_week, starts_at
+                       ) AS summary
+                FROM section_meeting
+                WHERE section_id = s.id
+            ) m ON true
+            LEFT JOIN LATERAL (
+                SELECT string_agg(ua.username, ', ' ORDER BY ua.username) AS names
+                FROM instructor_assignment ia
+                JOIN user_account ua ON ua.id = ia.instructor_user_id
+                WHERE ia.section_id = s.id
+            ) i ON true
+            WHERE s.institution_id = $1
+              AND s.term_id = $2
+              AND ($3::text IS NULL
+                   OR c.code ILIKE $3 OR c.title ILIKE $3
+                   OR COALESCE(i.names, '') ILIKE $3)
+            ORDER BY c.code, s.section_code
+            LIMIT $4
+            "#,
+        )
+        .bind(actor.institution_id)
+        .bind(term_id)
+        .bind(pattern)
+        .bind(CAP)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
     }
 }
 

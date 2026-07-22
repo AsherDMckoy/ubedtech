@@ -915,6 +915,32 @@ impl EnrollmentService {
         Ok(flags.unwrap_or_default())
     }
 
+    /// Active holds for a term, counted per flag — the registrar overview
+    /// tile. Registrar-only, like every other cross-student hold read.
+    pub async fn term_hold_counts(
+        &self,
+        actor: &Actor,
+        term_id: Uuid,
+    ) -> Result<Vec<(String, i64)>, AppError> {
+        crate::enrollment::policy::require_can_manage_holds(actor)?;
+        let counts: Vec<(String, i64)> = sqlx::query_as(
+            r#"
+            SELECT flag, count(*) AS students
+            FROM student_term_registration str
+            JOIN academic_term t ON t.id = str.term_id AND t.institution_id = $1,
+                 unnest(str.hold_flags) AS flag
+            WHERE str.term_id = $2
+            GROUP BY flag
+            ORDER BY students DESC, flag
+            "#,
+        )
+        .bind(actor.institution_id)
+        .bind(term_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(counts)
+    }
+
     async fn check_hold_target(
         &self,
         tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,

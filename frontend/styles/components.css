@@ -1080,6 +1080,247 @@ details.drawer[open] > .drawer-panel {
   }
 }
 
+/* ---------- registrar overview (registrar-dashboard reference): a
+   scanning surface — metric tiles, the needs-attention worklist, window
+   badges, and the dense sections table. Same tokens, expert density. */
+
+main > .wrap-wide {
+  max-width: 1200px;
+}
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.head .sub {
+  margin: 2px 0 0;
+  font-size: 13px;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.tile {
+  background: var(--surface-1);
+  border-radius: var(--radius);
+  padding: var(--space-3);
+}
+
+.tile .k {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0 0 4px;
+}
+
+.tile .v {
+  font-size: 22px;
+  font-weight: 500;
+  margin: 0;
+  line-height: 1.1;
+}
+
+.tile .h {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 3px 0 0;
+}
+
+.tile-warn {
+  background: var(--bg-warning);
+}
+
+.tile-warn .k,
+.tile-warn .v,
+.tile-warn .h {
+  color: var(--text-warning);
+}
+
+.cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.panel {
+  background: var(--surface-2);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-card);
+}
+
+.panel h2 {
+  font-size: 15px;
+  font-weight: 500;
+  margin: 0;
+  padding: var(--space-3);
+  border-bottom: 0.5px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panel .count {
+  font-size: 12px;
+  color: var(--text-warning);
+  background: var(--bg-warning);
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-weight: 500;
+}
+
+.panel-empty {
+  padding: var(--space-3);
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.queue,
+.win {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.queue li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0.7rem var(--space-3);
+  border-top: 0.5px solid var(--border);
+}
+
+.queue li:first-child,
+.win li:first-child {
+  border-top: none;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-danger {
+  background: var(--border-danger);
+}
+
+.dot-warn {
+  background: var(--border-warning);
+}
+
+.q-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.q-t {
+  font-size: 13px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.q-d {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 1px 0 0;
+}
+
+.win li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0.7rem var(--space-3);
+  border-top: 0.5px solid var(--border);
+}
+
+.win .w-t {
+  font-size: 13px;
+  margin: 0;
+}
+
+.win .w-d {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 1px 0 0;
+}
+
+.tabletop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 0.5px solid var(--border);
+}
+
+.tabletop h2 {
+  font-size: 15px;
+  font-weight: 500;
+  margin: 0;
+}
+
+/* Sortable column headers: real buttons (keyboard-first), styled as the
+   header text; aria-sort marks the active column. */
+.sortbtn {
+  border: none;
+  background: none;
+  padding: 0;
+  height: auto;
+  font: inherit;
+  font-weight: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+th[aria-sort] .sortbtn {
+  color: var(--text-accent);
+}
+
+th[aria-sort="ascending"] .sortbtn::after {
+  content: " ↑";
+}
+
+th[aria-sort="descending"] .sortbtn::after {
+  content: " ↓";
+}
+
+.code {
+  font-weight: 500;
+}
+
+.unassigned {
+  color: var(--text-danger);
+}
+
+.pct-low {
+  color: var(--text-warning);
+}
+
+.pct-full {
+  color: var(--text-danger);
+}
+
+@media (max-width: 860px) {
+  .tiles {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .cols {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* ---------- shared keyframes (enter only; exit is instant) */
 
 @keyframes enter-down {

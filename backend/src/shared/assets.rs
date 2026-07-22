@@ -85,12 +85,14 @@ pub fn js_href() -> &'static str {
 /// map for every page so the same status never gets two colors.
 pub fn badge_class(status: &str) -> &'static str {
     match status {
-        "ready" | "published" | "active" | "enrolled" | "approved" => "badge-ok",
-        "pending" | "generating" | "queued" => "badge-info",
+        // "open" is a registration window that is accepting changes now.
+        "ready" | "published" | "active" | "enrolled" | "approved" | "open" => "badge-ok",
+        "pending" | "generating" | "queued" | "upcoming" => "badge-info",
         // A draft grade is amber everywhere: entered, unpublished, invisible
         // to students (instructor-grades reference).
         "amended" | "suspended" | "draft" => "badge-warn",
         "rejected" | "failed" | "expired" => "badge-bad",
+        // "closed" (a finished window) stays neutral: routine, not an error.
         _ => "",
     }
 }
@@ -264,6 +266,10 @@ mod tests {
         assert_eq!(badge_class("amended"), "badge-warn");
         assert_eq!(badge_class("failed"), "badge-bad");
         assert_eq!(badge_class("suspended"), "badge-warn");
+        // Registration-window states (registrar overview).
+        assert_eq!(badge_class("open"), "badge-ok");
+        assert_eq!(badge_class("upcoming"), "badge-info");
+        assert_eq!(badge_class("closed"), "");
         assert_eq!(badge_class("something-new"), "");
     }
 

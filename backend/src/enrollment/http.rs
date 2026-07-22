@@ -36,6 +36,7 @@ pub fn sample_dashboard_html() -> Result<String, askama::Error> {
             ends_on: (now + Duration::days(100)).date_naive(),
             registration_opens_at: now - Duration::days(20),
             add_drop_closes_at: now + Duration::days(14),
+            grade_entry_closes_at: None,
         }),
         holds: vec!["financial".into()],
         enrollments: vec![EnrolledSection {

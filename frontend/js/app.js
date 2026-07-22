@@ -160,6 +160,33 @@ addEventListener("input", (event) => {
   }
 });
 
+// Read path: sortable scanning tables (registrar overview). A th button
+// carrying data-sort reorders the already-loaded rows by that column,
+// numeric-aware; aria-sort on the th announces the direction. With JS off
+// the server's default order stands — sorting is presentation, not data.
+addEventListener("click", (event) => {
+  const button = event.target.closest("th button[data-sort]");
+  if (!button) return;
+  const th = button.closest("th");
+  const table = th.closest("table");
+  const index = [...th.parentNode.children].indexOf(th);
+  const ascending = th.getAttribute("aria-sort") !== "ascending";
+  for (const header of table.querySelectorAll("th[aria-sort]")) {
+    header.removeAttribute("aria-sort");
+  }
+  th.setAttribute("aria-sort", ascending ? "ascending" : "descending");
+  const body = table.tBodies[0];
+  const rows = [...body.querySelectorAll("tr[data-search]")];
+  const key = (row) => {
+    const text = row.children[index].textContent.trim();
+    const number = Number.parseFloat(text.replace("%", ""));
+    return Number.isNaN(number) ? text.toLowerCase() : number;
+  };
+  rows.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0));
+  if (!ascending) rows.reverse();
+  body.prepend(...rows);
+});
+
 // Write path: register/drop go to the server and reflect the committed
 // outcome via a single-row swap — never an optimistic success (FRONTEND.md
 // §3). A drop is destructive, so it confirms first. Capture phase, so a

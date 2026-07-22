@@ -18,6 +18,33 @@
   <a class="navlink" href="/ui/documents">Documents</a>
 {% endmacro %}
 
+{#- Registrar shell: the same topbar + rail structure as base.html's default
+    rail block, with the registrar's own sections. Pages override the rail
+    block with `{% call ui::registrar_nav("overview") %}{% endcall %}`;
+    `current` marks the active link (aria-current, styled once). -#}
+{% macro registrar_nav_links(current) %}
+  <a class="navlink" href="/ui/registrar" {% if current == "overview" %}aria-current="page"{% endif %}>Overview</a>
+{% endmacro %}
+
+{% macro registrar_nav(current) %}
+  <header class="topbar">
+    <span class="brand">UB Registrar</span>
+    <details class="nav-sheet">
+      <summary>Menu</summary>
+      <nav class="sheet-panel" aria-label="Registrar">
+        {% call registrar_nav_links(current) %}{% endcall %}
+      </nav>
+    </details>
+  </header>
+  <nav class="rail" aria-label="Registrar">
+    <span class="brand">UB Registrar</span>
+    {% call registrar_nav_links(current) %}{% endcall %}
+    <div class="rail-foot">
+      <a href="/ui/signout">Sign out</a>
+    </div>
+  </nav>
+{% endmacro %}
+
 {#- Submit button with an honest in-progress label ("Checking…",
     "Submitting…") swapped in by the submit-once enhancement. Never an
     optimistic success label (FRONTEND.md §3). -#}
