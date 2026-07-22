@@ -153,6 +153,13 @@ pub fn render_pages(out_dir: &str) -> std::io::Result<()> {
                 crate::institution::http::sample_calendar_admin_html(),
             ),
         ),
+        (
+            "institution_settings.html",
+            render(
+                "institution_settings",
+                crate::institution::http::sample_settings_html(),
+            ),
+        ),
     ];
     for (name, html) in pages {
         let path = format!("{out_dir}/{name}");

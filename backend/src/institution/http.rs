@@ -186,6 +186,168 @@ pub fn sample_calendar_admin_html() -> Result<String, askama::Error> {
 }
 
 // ---------------------------------------------------------------------------
+// Settings page (name, timezone, document types) — plain forms over the
+// same service functions as the JSON API below.
+// ---------------------------------------------------------------------------
+
+/// One document type row with its display label.
+pub struct DocumentTypeView {
+    pub document_type: String,
+    pub label: &'static str,
+    pub enabled: bool,
+}
+
+fn document_type_label(document_type: &str) -> &'static str {
+    match document_type {
+        "official_transcript" => "Official transcript",
+        "enrollment_letter" => "Enrollment letter",
+        _ => "Signed document",
+    }
+}
+
+#[derive(Template)]
+#[template(path = "pages/institution_settings.html")]
+struct SettingsPage<'a> {
+    csrf_token: &'a str,
+    name: String,
+    timezone: String,
+    document_types: Vec<DocumentTypeView>,
+    notice: Option<&'a str>,
+    error: Option<&'a str>,
+}
+
+async fn render_settings(
+    actor: &Actor,
+    current: &CurrentSession,
+    service: &InstitutionService,
+    notice: Option<&str>,
+    error: Option<&str>,
+) -> Result<String, AppError> {
+    let settings = service.settings(actor).await?;
+    let document_types = service
+        .document_type_settings(actor)
+        .await?
+        .into_iter()
+        .map(|setting| DocumentTypeView {
+            label: document_type_label(&setting.document_type),
+            document_type: setting.document_type,
+            enabled: setting.enabled,
+        })
+        .collect();
+    Ok(SettingsPage {
+        csrf_token: &current.csrf_token,
+        name: settings.name,
+        timezone: settings.timezone,
+        document_types,
+        notice,
+        error,
+    }
+    .render()?)
+}
+
+#[get("/ui/admin/settings")]
+pub async fn settings_page(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<InstitutionService>,
+    query: web::Query<NoticeQuery>,
+) -> Result<HttpResponse, AppError> {
+    let notice = match query.notice.as_deref() {
+        Some("saved") => Some("Settings saved."),
+        Some("document-type") => Some("Document type updated."),
+        _ => None,
+    };
+    let body = render_settings(&actor, &current, &service, notice, None).await?;
+    Ok(html(StatusCode::OK, body))
+}
+
+#[derive(Deserialize)]
+pub struct SettingsForm {
+    name: String,
+    timezone: String,
+    csrf_token: String,
+}
+
+#[post("/ui/admin/settings")]
+pub async fn settings_form(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<InstitutionService>,
+    form: web::Form<SettingsForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    match service
+        .update_settings(&actor, &form.name, &form.timezone)
+        .await
+    {
+        Ok(()) => Ok(see_other("/ui/admin/settings?notice=saved")),
+        Err(AppError::Validation(message)) => {
+            let body = render_settings(&actor, &current, &service, None, Some(&message)).await?;
+            Ok(html(StatusCode::UNPROCESSABLE_ENTITY, body))
+        }
+        Err(other) => Err(other),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct DocumentTypeForm {
+    document_type: String,
+    enable: bool,
+    csrf_token: String,
+}
+
+#[post("/ui/admin/settings/document-types")]
+pub async fn document_type_form(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<InstitutionService>,
+    form: web::Form<DocumentTypeForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    match service
+        .set_document_type_enabled(&actor, &form.document_type, form.enable)
+        .await
+    {
+        Ok(()) => Ok(see_other("/ui/admin/settings?notice=document-type")),
+        Err(AppError::Validation(message)) => {
+            let body = render_settings(&actor, &current, &service, None, Some(&message)).await?;
+            Ok(html(StatusCode::UNPROCESSABLE_ENTITY, body))
+        }
+        Err(other) => Err(other),
+    }
+}
+
+/// Renders the settings page with representative data and no database, for
+/// the frontend axe harness.
+pub fn sample_settings_html() -> Result<String, askama::Error> {
+    SettingsPage {
+        csrf_token: "sample",
+        name: "University of Belize".into(),
+        timezone: "America/Belize".into(),
+        document_types: vec![
+            DocumentTypeView {
+                document_type: "official_transcript".into(),
+                label: "Official transcript",
+                enabled: true,
+            },
+            DocumentTypeView {
+                document_type: "enrollment_letter".into(),
+                label: "Enrollment letter",
+                enabled: true,
+            },
+            DocumentTypeView {
+                document_type: "signed_document".into(),
+                label: "Signed document",
+                enabled: false,
+            },
+        ],
+        notice: None,
+        error: Some("unknown timezone"),
+    }
+    .render()
+}
+
+// ---------------------------------------------------------------------------
 // Settings + document-type configuration (JSON, institution admin only).
 // ---------------------------------------------------------------------------
 
@@ -255,6 +417,9 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(calendar_page)
         .service(create_event_form)
         .service(delete_event_form)
+        .service(settings_page)
+        .service(settings_form)
+        .service(document_type_form)
         .service(get_settings)
         .service(put_settings)
         .service(put_document_type);

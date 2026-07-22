@@ -86,7 +86,9 @@ pub fn js_href() -> &'static str {
 pub fn badge_class(status: &str) -> &'static str {
     match status {
         // "open" is a registration window that is accepting changes now.
-        "ready" | "published" | "active" | "enrolled" | "approved" | "open" => "badge-ok",
+        "ready" | "published" | "active" | "enrolled" | "approved" | "open" | "enabled" => {
+            "badge-ok"
+        }
         // "consumed" is an override that already admitted its enrollment —
         // informational, not a success or failure.
         "pending" | "generating" | "queued" | "upcoming" | "consumed" => "badge-info",
@@ -277,6 +279,9 @@ mod tests {
         assert_eq!(badge_class("active"), "badge-ok");
         assert_eq!(badge_class("consumed"), "badge-info");
         assert_eq!(badge_class("expired"), "badge-bad");
+        // Document-type configuration ("disabled" stays neutral — routine).
+        assert_eq!(badge_class("enabled"), "badge-ok");
+        assert_eq!(badge_class("disabled"), "");
         assert_eq!(badge_class("something-new"), "");
     }
 

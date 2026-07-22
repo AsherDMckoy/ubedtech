@@ -644,4 +644,166 @@ mod ui {
         let body = String::from_utf8(actix_test::read_body(page).await.to_vec()).unwrap();
         assert!(body.contains("No events yet."));
     }
+
+    /// Settings over plain forms: an unknown timezone is refused inline and
+    /// writes nothing; a valid save lands; a document type toggled here is
+    /// the same configuration the documents feature enforces (A24).
+    #[sqlx::test(migrations = "./migrations")]
+    async fn settings_page_works_as_plain_forms(pool: PgPool) {
+        let fx: AdminFixture = seed_admin_fixture(&pool).await;
+        let institution = fx.admin.institution_id;
+        let admin_login =
+            credential(&pool, fx.admin.user_id, institution, "institution_admin").await;
+        let student_login = credential(&pool, fx.student.user_id, institution, "student").await;
+
+        let sessions = SessionService::new(pool.clone(), 1800, 43200);
+        let auth = AuthService::new(
+            pool.clone(),
+            PasswordService::new(8, 1, 1).unwrap(),
+            sessions.clone(),
+            crate::audit::AuditWriter,
+            10,
+            900,
+        )
+        .unwrap();
+        let app = actix_test::init_service(
+            actix_web::App::new()
+                .app_data(web::Data::new(sessions))
+                .app_data(web::Data::new(auth))
+                .app_data(web::Data::new(SessionCookiePolicy {
+                    secure: false,
+                    max_age_secs: 43200,
+                }))
+                .app_data(web::Data::new(active_gate(institution)))
+                .app_data(web::Data::new(super::service(&pool)))
+                .wrap(actix_web::middleware::from_fn(
+                    crate::identity_access::csrf::csrf_middleware,
+                ))
+                .wrap(actix_web::middleware::from_fn(
+                    crate::identity_access::middleware::session_middleware,
+                ))
+                .configure(crate::identity_access::http::routes)
+                .configure(crate::institution::http::routes),
+        )
+        .await;
+
+        let login = |username: String| {
+            actix_test::TestRequest::post()
+                .uri("/ui/login")
+                .peer_addr("127.0.0.1:9999".parse().unwrap())
+                .set_form(serde_json::json!({ "username": username, "password": PASSWORD }))
+                .to_request()
+        };
+        let cookie_of = |response: actix_web::dev::ServiceResponse<_>| {
+            response
+                .response()
+                .cookies()
+                .find(|cookie| cookie.name() == "ub_session")
+                .unwrap()
+                .into_owned()
+        };
+        let admin_cookie = cookie_of(actix_test::call_service(&app, login(admin_login)).await);
+        let student_cookie = cookie_of(actix_test::call_service(&app, login(student_login)).await);
+
+        // Students never see the settings surface.
+        let denied = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/ui/admin/settings")
+                .cookie(student_cookie)
+                .to_request(),
+        )
+        .await;
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+
+        let page = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/ui/admin/settings")
+                .cookie(admin_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(page.status(), StatusCode::OK);
+        let body = String::from_utf8(actix_test::read_body(page).await.to_vec()).unwrap();
+        crate::shared::assets::assert_page_a11y(&body);
+        assert!(body.contains("Official transcript"));
+        let csrf = extract_input(&body, "csrf_token");
+
+        // An unknown timezone is refused inline and nothing changes.
+        let invalid = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/ui/admin/settings")
+                .cookie(admin_cookie.clone())
+                .set_form(serde_json::json!({
+                    "csrf_token": &csrf,
+                    "name": "Renamed U",
+                    "timezone": "Mars/Olympus_Mons",
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(invalid.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = String::from_utf8(actix_test::read_body(invalid).await.to_vec()).unwrap();
+        assert!(body.contains("unknown timezone"));
+        let name: String = sqlx::query_scalar("SELECT name FROM institution WHERE id = $1")
+            .bind(institution)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_ne!(name, "Renamed U", "refused save wrote nothing");
+
+        // A valid save lands and renders back.
+        let saved = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/ui/admin/settings")
+                .cookie(admin_cookie.clone())
+                .set_form(serde_json::json!({
+                    "csrf_token": &csrf,
+                    "name": "University of Belize",
+                    "timezone": "America/Belize",
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(saved.status(), StatusCode::SEE_OTHER);
+
+        // Disable a document type through its per-row form.
+        let toggled = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/ui/admin/settings/document-types")
+                .cookie(admin_cookie.clone())
+                .set_form(serde_json::json!({
+                    "csrf_token": &csrf,
+                    "document_type": "signed_document",
+                    "enable": false,
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(toggled.status(), StatusCode::SEE_OTHER);
+        let enabled: bool = sqlx::query_scalar(
+            "SELECT enabled FROM institution_document_type \
+             WHERE institution_id = $1 AND document_type = 'signed_document'",
+        )
+        .bind(institution)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(!enabled, "the toggle committed");
+        let page = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/ui/admin/settings")
+                .cookie(admin_cookie)
+                .to_request(),
+        )
+        .await;
+        let body = String::from_utf8(actix_test::read_body(page).await.to_vec()).unwrap();
+        assert!(body.contains(">disabled</span>"), "state shown as text");
+        assert!(body.contains("America/Belize"));
+    }
 }

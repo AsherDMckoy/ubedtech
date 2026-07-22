@@ -34,6 +34,7 @@
 {#- Institution-admin shell, same shape as registrar_nav. -#}
 {% macro admin_nav_links(current) %}
   <a class="navlink" href="/ui/admin/calendar" {% if current == "calendar" %}aria-current="page"{% endif %}>Calendar</a>
+  <a class="navlink" href="/ui/admin/settings" {% if current == "settings" %}aria-current="page"{% endif %}>Settings</a>
 {% endmacro %}
 
 {% macro admin_nav(current) %}

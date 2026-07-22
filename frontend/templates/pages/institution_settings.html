@@ -1,0 +1,68 @@
+{% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
+{% block title %}Institution settings{% endblock %}
+{% block rail %}{% call ui::admin_nav("settings") %}{% endcall %}{% endblock %}
+{% block content %}
+  <div class="wrap">
+    <div class="head">
+      <div>
+        <h1>Institution settings</h1>
+      </div>
+    </div>
+
+    {% if let Some(notice) = notice %}
+      {% call ui::alert("success", notice) %}{% endcall %}
+    {% endif %}
+    {% if let Some(error) = error %}
+      {% call ui::alert("danger", error) %}{% endcall %}
+    {% endif %}
+
+    <section class="card detail-card" aria-labelledby="ident-h">
+      <h2 id="ident-h">Identity and timezone</h2>
+      <form method="post" action="/ui/admin/settings">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="field">
+          <label for="set-name">Institution name</label>
+          <input id="set-name" name="name" required maxlength="200" value="{{ name }}">
+        </div>
+        <div class="field">
+          <label for="set-tz">Timezone</label>
+          <input id="set-tz" name="timezone" required value="{{ timezone }}"
+                 aria-describedby="set-tz-hint">
+          <p class="field-hint" id="set-tz-hint">An IANA zone name like America/Belize — it governs how deadlines are shown, never how they are stored.</p>
+        </div>
+        {% call ui::busy_button("Save settings", "Saving…", true) %}{% endcall %}
+      </form>
+    </section>
+
+    <section class="card detail-card" aria-labelledby="dt-h">
+      <h2 id="dt-h">Document types</h2>
+      <p class="field-hint">Disabling a type blocks new requests only — documents already requested or approved continue through the pipeline.</p>
+      <ul class="strip">
+        {% for setting in document_types %}
+          <li>
+            <span>
+              {{ setting.label }}
+              {% if setting.enabled %}
+                {% call ui::badge("enabled") %}{% endcall %}
+              {% else %}
+                {% call ui::badge("disabled") %}{% endcall %}
+              {% endif %}
+            </span>
+            <form method="post" action="/ui/admin/settings/document-types">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="document_type" value="{{ setting.document_type }}">
+              {% if setting.enabled %}
+                <input type="hidden" name="enable" value="false">
+                {% call ui::busy_button("Disable", "Disabling…", false) %}{% endcall %}
+              {% else %}
+                <input type="hidden" name="enable" value="true">
+                {% call ui::busy_button("Enable", "Enabling…", false) %}{% endcall %}
+              {% endif %}
+            </form>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  </div>
+{% endblock %}
