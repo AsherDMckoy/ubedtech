@@ -393,6 +393,294 @@ pub struct DropForm {
     csrf_token: String,
 }
 
+// ---------------------------------------------------------------------------
+// Registrar: student lookup, holds, academic status (scanning pages).
+// ---------------------------------------------------------------------------
+
+use crate::enrollment::service::StudentHit;
+
+#[derive(Template)]
+#[template(path = "pages/registrar_students.html")]
+struct RegistrarStudentsPage {
+    q: String,
+    rows: Vec<StudentHit>,
+}
+
+#[derive(Deserialize)]
+pub struct StudentSearchQuery {
+    q: Option<String>,
+}
+
+#[get("/ui/registrar/students")]
+async fn registrar_students_page(
+    actor: Actor,
+    service: web::Data<EnrollmentService>,
+    query: web::Query<StudentSearchQuery>,
+) -> Result<HttpResponse, AppError> {
+    crate::enrollment::policy::require_can_manage_holds(&actor)?;
+    let q = query.q.as_deref().unwrap_or("").trim().to_owned();
+    let rows = if q.is_empty() {
+        Vec::new()
+    } else {
+        service.search_students(&actor, &q).await?
+    };
+    let body = RegistrarStudentsPage { q, rows }.render()?;
+    Ok(page_html(StatusCode::OK, body))
+}
+
+#[derive(Template)]
+#[template(path = "pages/registrar_student_detail.html")]
+struct RegistrarStudentPage<'a> {
+    csrf_token: &'a str,
+    student: StudentHit,
+    term: Option<TermSummary>,
+    holds: Vec<String>,
+    notice: Option<&'a str>,
+    error: Option<&'a str>,
+}
+
+impl RegistrarStudentPage<'_> {
+    pub fn status_badge(&self) -> &'static str {
+        crate::shared::assets::badge_class(&self.student.academic_status)
+    }
+}
+
+async fn render_student_detail(
+    actor: &Actor,
+    current: &CurrentSession,
+    enrollment: &EnrollmentService,
+    academics: &AcademicsService,
+    student_id: Uuid,
+    notice: Option<&str>,
+    error: Option<&str>,
+) -> Result<String, AppError> {
+    let student = enrollment
+        .student_admin(actor, student_id)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let term = academics.current_term(actor).await?;
+    let holds = match &term {
+        Some(term) => enrollment.student_holds(actor, student_id, term.id).await?,
+        None => Vec::new(),
+    };
+    Ok(RegistrarStudentPage {
+        csrf_token: &current.csrf_token,
+        student,
+        term,
+        holds,
+        notice,
+        error,
+    }
+    .render()?)
+}
+
+#[derive(Deserialize)]
+pub struct StudentNoticeQuery {
+    notice: Option<String>,
+}
+
+#[get("/ui/registrar/students/{student_id}")]
+async fn registrar_student_detail_page(
+    actor: Actor,
+    current: CurrentSession,
+    enrollment: web::Data<EnrollmentService>,
+    academics: web::Data<AcademicsService>,
+    student_id: web::Path<Uuid>,
+    query: web::Query<StudentNoticeQuery>,
+) -> Result<HttpResponse, AppError> {
+    let notice = match query.notice.as_deref() {
+        Some("status") => Some("Academic status updated."),
+        Some("hold-placed") => Some("Hold placed."),
+        Some("hold-released") => Some("Hold released."),
+        _ => None,
+    };
+    let body = render_student_detail(
+        &actor,
+        &current,
+        &enrollment,
+        &academics,
+        student_id.into_inner(),
+        notice,
+        None,
+    )
+    .await?;
+    Ok(page_html(StatusCode::OK, body))
+}
+
+#[derive(Deserialize)]
+pub struct StatusForm {
+    academic_status: String,
+    csrf_token: String,
+}
+
+#[post("/ui/registrar/students/{student_id}/status")]
+async fn set_status_form(
+    actor: Actor,
+    current: CurrentSession,
+    enrollment: web::Data<EnrollmentService>,
+    academics: web::Data<AcademicsService>,
+    student_id: web::Path<Uuid>,
+    form: web::Form<StatusForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let student_id = student_id.into_inner();
+    match enrollment
+        .set_academic_status(&actor, student_id, &form.academic_status)
+        .await
+    {
+        Ok(()) => Ok(redirect(&format!(
+            "/ui/registrar/students/{student_id}?notice=status"
+        ))),
+        Err(AppError::Validation(message)) => {
+            let body = render_student_detail(
+                &actor,
+                &current,
+                &enrollment,
+                &academics,
+                student_id,
+                None,
+                Some(&message),
+            )
+            .await?;
+            Ok(page_html(StatusCode::UNPROCESSABLE_ENTITY, body))
+        }
+        Err(other) => Err(other),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct PlaceHoldForm {
+    term_id: Uuid,
+    flag: String,
+    reason: String,
+    csrf_token: String,
+}
+
+#[post("/ui/registrar/students/{student_id}/holds")]
+async fn place_hold_form(
+    actor: Actor,
+    current: CurrentSession,
+    enrollment: web::Data<EnrollmentService>,
+    academics: web::Data<AcademicsService>,
+    student_id: web::Path<Uuid>,
+    form: web::Form<PlaceHoldForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let student_id = student_id.into_inner();
+    match enrollment
+        .place_hold(&actor, student_id, form.term_id, &form.flag, &form.reason)
+        .await
+    {
+        Ok(()) => Ok(redirect(&format!(
+            "/ui/registrar/students/{student_id}?notice=hold-placed"
+        ))),
+        Err(AppError::Validation(message)) => {
+            let body = render_student_detail(
+                &actor,
+                &current,
+                &enrollment,
+                &academics,
+                student_id,
+                None,
+                Some(&message),
+            )
+            .await?;
+            Ok(page_html(StatusCode::UNPROCESSABLE_ENTITY, body))
+        }
+        Err(other) => Err(other),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct ReleaseHoldForm {
+    term_id: Uuid,
+    flag: String,
+    csrf_token: String,
+}
+
+#[post("/ui/registrar/students/{student_id}/holds/release")]
+async fn release_hold_form(
+    actor: Actor,
+    enrollment: web::Data<EnrollmentService>,
+    student_id: web::Path<Uuid>,
+    form: web::Form<ReleaseHoldForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+    let student_id = student_id.into_inner();
+    enrollment
+        .release_hold(&actor, student_id, form.term_id, &form.flag)
+        .await?;
+    Ok(redirect(&format!(
+        "/ui/registrar/students/{student_id}?notice=hold-released"
+    )))
+}
+
+fn page_html(status: StatusCode, body: String) -> HttpResponse {
+    HttpResponse::build(status)
+        .content_type("text/html; charset=utf-8")
+        .body(body)
+}
+
+fn redirect(location: &str) -> HttpResponse {
+    HttpResponse::SeeOther()
+        .insert_header(("Location", location.to_owned()))
+        .finish()
+}
+
+/// Renders the student lookup + detail pages with representative data and
+/// no database, for the frontend axe harness.
+pub fn sample_registrar_students_html() -> Result<String, askama::Error> {
+    RegistrarStudentsPage {
+        q: "A-00".into(),
+        rows: vec![
+            StudentHit {
+                student_id: Uuid::nil(),
+                student_number: "A-001".into(),
+                program_code: "CS".into(),
+                academic_status: "good_standing".into(),
+                username: "maria.santos".into(),
+            },
+            StudentHit {
+                student_id: Uuid::nil(),
+                student_number: "A-002".into(),
+                program_code: "MATH".into(),
+                academic_status: "suspended".into(),
+                username: "j.reyes".into(),
+            },
+        ],
+    }
+    .render()
+}
+
+pub fn sample_registrar_student_detail_html() -> Result<String, askama::Error> {
+    use chrono::{Duration, Utc};
+    let now = Utc::now();
+    RegistrarStudentPage {
+        csrf_token: "sample",
+        student: StudentHit {
+            student_id: Uuid::nil(),
+            student_number: "A-002".into(),
+            program_code: "MATH".into(),
+            academic_status: "suspended".into(),
+            username: "j.reyes".into(),
+        },
+        term: Some(TermSummary {
+            id: Uuid::nil(),
+            code: "FA26".into(),
+            name: "Fall 2026".into(),
+            starts_on: now.date_naive(),
+            ends_on: (now + Duration::days(100)).date_naive(),
+            registration_opens_at: now - Duration::days(20),
+            add_drop_closes_at: now + Duration::days(14),
+            grade_entry_closes_at: None,
+        }),
+        holds: vec!["financial".into(), "disciplinary".into()],
+        notice: Some("Hold placed."),
+        error: None,
+    }
+    .render()
+}
+
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(register_json)
         .service(grant_override)
@@ -401,5 +689,10 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .service(dashboard_page)
         .service(registration_page)
         .service(register_form)
-        .service(drop_form);
+        .service(drop_form)
+        .service(registrar_students_page)
+        .service(registrar_student_detail_page)
+        .service(set_status_form)
+        .service(place_hold_form)
+        .service(release_hold_form);
 }

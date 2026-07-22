@@ -915,6 +915,134 @@ impl EnrollmentService {
         Ok(flags.unwrap_or_default())
     }
 
+    /// Search students by number or username for the registrar's lookup.
+    /// Registrar-only; scoped to the institution.
+    pub async fn search_students(
+        &self,
+        actor: &Actor,
+        query: &str,
+    ) -> Result<Vec<StudentHit>, AppError> {
+        require_can_manage_holds(actor)?;
+        let pattern = format!("%{}%", query.trim().replace('%', "\\%").replace('_', "\\_"));
+        Ok(sqlx::query_as::<_, StudentHit>(
+            r#"
+            SELECT sp.id AS student_id, sp.student_number, sp.program_code,
+                   sp.academic_status, ua.username
+            FROM student_profile sp
+            JOIN user_account ua ON ua.id = sp.user_id
+            WHERE sp.institution_id = $1
+              AND (sp.student_number ILIKE $2 OR ua.username ILIKE $2)
+            ORDER BY sp.student_number
+            LIMIT 50
+            "#,
+        )
+        .bind(actor.institution_id)
+        .bind(pattern)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// One student for the registrar's detail page; `None` (→404) outside
+    /// the institution.
+    pub async fn student_admin(
+        &self,
+        actor: &Actor,
+        student_id: Uuid,
+    ) -> Result<Option<StudentHit>, AppError> {
+        require_can_manage_holds(actor)?;
+        Ok(sqlx::query_as::<_, StudentHit>(
+            r#"
+            SELECT sp.id AS student_id, sp.student_number, sp.program_code,
+                   sp.academic_status, ua.username
+            FROM student_profile sp
+            JOIN user_account ua ON ua.id = sp.user_id
+            WHERE sp.institution_id = $1 AND sp.id = $2
+            "#,
+        )
+        .bind(actor.institution_id)
+        .bind(student_id)
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
+    /// A student's hold flags for one term, as the registrar sees them.
+    pub async fn student_holds(
+        &self,
+        actor: &Actor,
+        student_id: Uuid,
+        term_id: Uuid,
+    ) -> Result<Vec<String>, AppError> {
+        require_can_manage_holds(actor)?;
+        let flags: Option<Vec<String>> = sqlx::query_scalar(
+            r#"
+            SELECT str.hold_flags
+            FROM student_term_registration str
+            JOIN student_profile sp ON sp.id = str.student_id AND sp.institution_id = $3
+            WHERE str.student_id = $1 AND str.term_id = $2
+            "#,
+        )
+        .bind(student_id)
+        .bind(term_id)
+        .bind(actor.institution_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(flags.unwrap_or_default())
+    }
+
+    /// Set a student's academic standing. The status is the institution's
+    /// recorded designation (it appears on transcripts); it does not itself
+    /// block registration — holds do (assumption A31), and the page says so.
+    pub async fn set_academic_status(
+        &self,
+        actor: &Actor,
+        student_id: Uuid,
+        status: &str,
+    ) -> Result<(), AppError> {
+        require_can_manage_holds(actor)?;
+        const STATUSES: [&str; 5] = [
+            "good_standing",
+            "probation",
+            "suspended",
+            "withdrawn",
+            "graduated",
+        ];
+        if !STATUSES.contains(&status) {
+            return Err(AppError::Validation(
+                "academic status must be one of: good_standing, probation, suspended, withdrawn, graduated"
+                    .into(),
+            ));
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let updated = sqlx::query(
+            "UPDATE student_profile SET academic_status = $3 \
+             WHERE id = $1 AND institution_id = $2",
+        )
+        .bind(student_id)
+        .bind(actor.institution_id)
+        .bind(status)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if updated != 1 {
+            return Err(AppError::NotFound);
+        }
+
+        self.audit
+            .write(
+                &mut tx,
+                actor.institution_id,
+                actor.user_id,
+                "enrollment.academic_status_set",
+                "student_profile",
+                student_id,
+                &serde_json::json!({ "academic_status": status }),
+            )
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Active holds for a term, counted per flag — the registrar overview
     /// tile. Registrar-only, like every other cross-student hold read.
     pub async fn term_hold_counts(
@@ -981,6 +1109,16 @@ fn valid_hold_flag(flag: &str) -> Result<&str, AppError> {
         ));
     }
     Ok(flag)
+}
+
+/// One student in the registrar's lookup and detail views.
+#[derive(Debug, sqlx::FromRow)]
+pub struct StudentHit {
+    pub student_id: Uuid,
+    pub student_number: String,
+    pub program_code: String,
+    pub academic_status: String,
+    pub username: String,
 }
 
 #[derive(sqlx::FromRow)]

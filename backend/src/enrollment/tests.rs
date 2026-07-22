@@ -2107,4 +2107,147 @@ mod ui {
             "prerequisite listed on the course row: {page}"
         );
     }
+
+    /// Holds and academic standing over plain forms. The proof of honesty:
+    /// a hold placed on the staff page denies the student's real
+    /// registration with the named reason, and releasing it registers them
+    /// successfully — same service, same rules, no staff-page bypass.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn registrar_manages_holds_and_academic_status(pool: PgPool) {
+        let fixture = seed_registration_fixture(&pool, 1).await;
+        let username = credential_registrar(&pool, &fixture).await;
+        let app = ui_app!(&pool, fixture.registrar.institution_id);
+        let cookie = login(&app, &username, PASSWORD).await;
+
+        // Lookup: finds the student by number prefix, case-insensitive.
+        let number: String =
+            sqlx::query_scalar("SELECT student_number FROM student_profile WHERE id = $1")
+                .bind(fixture.student_a)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let page = get_page(&app, &cookie, &format!("/ui/registrar/students?q={number}")).await;
+        assert!(page.contains(&number));
+        assert!(page.contains(&format!("/ui/registrar/students/{}", fixture.student_a)));
+
+        let detail_uri = format!("/ui/registrar/students/{}", fixture.student_a);
+        let detail = get_page(&app, &cookie, &detail_uri).await;
+        assert!(detail.contains("good_standing"));
+        assert!(detail.contains("Place hold"));
+        let csrf = extract_input(&detail, "csrf_token");
+
+        let post_form = |uri: String, form: serde_json::Value| {
+            let cookie = cookie.clone();
+            let app = &app;
+            async move {
+                let response = actix_test::call_service(
+                    app,
+                    actix_test::TestRequest::post()
+                        .uri(&uri)
+                        .cookie(cookie)
+                        .set_form(form)
+                        .to_request(),
+                )
+                .await;
+                let status = response.status();
+                let body =
+                    String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+                (status, body)
+            }
+        };
+
+        // A hold without a reason is refused inline.
+        let (status, body) = post_form(
+            format!("{detail_uri}/holds"),
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "term_id": fixture.term_id,
+                "flag": "financial",
+                "reason": "  ",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(body.contains("a hold requires a reason"));
+
+        // Place the hold for real…
+        let (status, _) = post_form(
+            format!("{detail_uri}/holds"),
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "term_id": fixture.term_id,
+                "flag": "financial",
+                "reason": "unpaid balance",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let detail = get_page(&app, &cookie, &format!("{detail_uri}?notice=hold-placed")).await;
+        assert!(detail.contains("Hold placed."));
+        assert!(detail.contains(">financial<"), "hold badge listed");
+
+        // …and the student's real registration is denied for that reason.
+        let student_username = credential_student(&pool, &fixture).await;
+        let student_cookie = login(&app, &student_username, PASSWORD).await;
+        let catalog = get_page(&app, &student_cookie, "/ui/catalog").await;
+        let student_csrf = extract_input(&catalog, "csrf_token");
+        let (status, body) =
+            post_add(&app, &student_cookie, &student_csrf, fixture.section_id).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(body.contains("student has a registration hold"));
+
+        // Release through the form → the same registration now succeeds.
+        let (status, _) = post_form(
+            format!("{detail_uri}/holds/release"),
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "term_id": fixture.term_id,
+                "flag": "financial",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let (status, _) = post_add(&app, &student_cookie, &student_csrf, fixture.section_id).await;
+        assert_eq!(status, StatusCode::SEE_OTHER, "released student registers");
+
+        // Academic standing: a bogus value is refused; a real one lands and
+        // renders as badge + word, never color alone.
+        let (status, body) = post_form(
+            format!("{detail_uri}/status"),
+            serde_json::json!({ "csrf_token": &csrf, "academic_status": "expelled-forever" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(body.contains("academic status must be one of"));
+        let (status, _) = post_form(
+            format!("{detail_uri}/status"),
+            serde_json::json!({ "csrf_token": &csrf, "academic_status": "probation" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let detail = get_page(&app, &cookie, &detail_uri).await;
+        assert!(detail.contains(">probation</span>"));
+        assert!(detail.contains("badge-warn"));
+
+        // Scoping: a foreign student's page is not found; students get 403.
+        let foreign = seed_registration_fixture(&pool, 1).await;
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri(&format!("/ui/registrar/students/{}", foreign.student_a))
+                .cookie(cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/ui/registrar/students")
+                .cookie(student_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
 }

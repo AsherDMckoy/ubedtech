@@ -90,7 +90,7 @@ pub fn badge_class(status: &str) -> &'static str {
         "pending" | "generating" | "queued" | "upcoming" => "badge-info",
         // A draft grade is amber everywhere: entered, unpublished, invisible
         // to students (instructor-grades reference).
-        "amended" | "suspended" | "draft" => "badge-warn",
+        "amended" | "suspended" | "draft" | "probation" => "badge-warn",
         "rejected" | "failed" | "expired" => "badge-bad",
         // "closed" (a finished window) stays neutral: routine, not an error.
         _ => "",
@@ -266,6 +266,7 @@ mod tests {
         assert_eq!(badge_class("amended"), "badge-warn");
         assert_eq!(badge_class("failed"), "badge-bad");
         assert_eq!(badge_class("suspended"), "badge-warn");
+        assert_eq!(badge_class("probation"), "badge-warn");
         // Registration-window states (registrar overview).
         assert_eq!(badge_class("open"), "badge-ok");
         assert_eq!(badge_class("upcoming"), "badge-info");

@@ -1,0 +1,81 @@
+{% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
+{% block title %}{{ student.student_number }} — student management{% endblock %}
+{% block rail %}{% call ui::registrar_nav("students") %}{% endcall %}{% endblock %}
+{% block content %}
+  <div class="wrap">
+    <p class="crumb"><a href="/ui/registrar/students">Students</a></p>
+    <div class="ctx">
+      <div>
+        <h1>{{ student.student_number }} · {{ student.username }}</h1>
+        <p class="ctx-detail">Program {{ student.program_code }}</p>
+      </div>
+    </div>
+
+    {% if let Some(notice) = notice %}
+      {% call ui::alert("success", notice) %}{% endcall %}
+    {% endif %}
+    {% if let Some(error) = error %}
+      {% call ui::alert("danger", error) %}{% endcall %}
+    {% endif %}
+
+    <section class="card detail-card" aria-labelledby="standing-h">
+      <h2 id="standing-h">Academic standing</h2>
+      <p>Current: <span class="badge {{ self.status_badge() }}">{{ student.academic_status }}</span></p>
+      <form method="post" action="/ui/registrar/students/{{ student.student_id }}/status" class="inline-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label for="status-select">Set standing</label>
+        <select id="status-select" name="academic_status">
+          <option value="good_standing">Good standing</option>
+          <option value="probation">Probation</option>
+          <option value="suspended">Suspended</option>
+          <option value="withdrawn">Withdrawn</option>
+          <option value="graduated">Graduated</option>
+        </select>
+        {% call ui::busy_button("Save standing", "Saving…", false) %}{% endcall %}
+      </form>
+      <p class="field-hint">Standing is the recorded designation shown on records. It does not block registration by itself — place a hold below to block.</p>
+    </section>
+
+    <section class="card detail-card" aria-labelledby="holds-h">
+      <h2 id="holds-h">Registration holds</h2>
+      {% if let Some(term) = term %}
+        {% if holds.is_empty() %}
+          <p class="c-empty">No holds for {{ term.name }}. The student can register.</p>
+        {% else %}
+          <ul class="strip">
+            {% for flag in holds %}
+              <li>
+                <span class="badge badge-warn">{{ flag }}</span>
+                <form method="post" action="/ui/registrar/students/{{ student.student_id }}/holds/release">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <input type="hidden" name="term_id" value="{{ term.id }}">
+                  <input type="hidden" name="flag" value="{{ flag }}">
+                  {% call ui::busy_button("Release", "Releasing…", false) %}{% endcall %}
+                </form>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+        <form method="post" action="/ui/registrar/students/{{ student.student_id }}/holds" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="term_id" value="{{ term.id }}">
+          <label for="hold-flag">Place hold</label>
+          <select id="hold-flag" name="flag">
+            <option value="financial">Financial</option>
+            <option value="academic">Academic</option>
+            <option value="advising">Advising</option>
+            <option value="disciplinary">Disciplinary</option>
+            <option value="other">Other</option>
+          </select>
+          <label for="hold-reason">Reason</label>
+          <input id="hold-reason" name="reason" required maxlength="200">
+          {% call ui::busy_button("Place hold", "Placing…", false) %}{% endcall %}
+        </form>
+        <p class="field-hint">A hold blocks registration and drops for {{ term.name }} until released. The reason is recorded in the audit log.</p>
+      {% else %}
+        <p class="c-empty">There is no active term, so term holds cannot be managed right now.</p>
+      {% endif %}
+    </section>
+  </div>
+{% endblock %}

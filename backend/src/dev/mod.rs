@@ -125,6 +125,20 @@ pub fn render_pages(out_dir: &str) -> std::io::Result<()> {
                 crate::academics::http::sample_registrar_courses_html(),
             ),
         ),
+        (
+            "registrar_students.html",
+            render(
+                "registrar_students",
+                crate::enrollment::http::sample_registrar_students_html(),
+            ),
+        ),
+        (
+            "registrar_student_detail.html",
+            render(
+                "registrar_student_detail",
+                crate::enrollment::http::sample_registrar_student_detail_html(),
+            ),
+        ),
     ];
     for (name, html) in pages {
         let path = format!("{out_dir}/{name}");

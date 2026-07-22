@@ -1,0 +1,56 @@
+{% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
+{% block title %}Students{% endblock %}
+{% block rail %}{% call ui::registrar_nav("students") %}{% endcall %}{% endblock %}
+{% block content %}
+  <div class="wrap wrap-wide">
+    <div class="head">
+      <div>
+        <h1>Students</h1>
+        <p class="sub">Look up a student to manage holds and academic standing.</p>
+      </div>
+    </div>
+
+    <form data-search-form role="search" method="get" action="/ui/registrar/students">
+      {% call ui::search("q", "q", "Search students", "Student number or username…", q) %}{% endcall %}
+      <button type="submit">Search</button>
+    </form>
+
+    {% if q.is_empty() %}
+      <p class="c-empty">Search by student number or username to begin.</p>
+    {% else if rows.is_empty() %}
+      <p class="c-empty">No students match “{{ q }}”.</p>
+    {% else %}
+      <section class="card card-flush" aria-label="Matching students">
+        <div class="table-wrap">
+          <table class="table-dense">
+            <caption>Students matching the search, up to 50</caption>
+            <thead>
+              <tr>
+                <th scope="col">Student number</th>
+                <th scope="col">Username</th>
+                <th scope="col">Program</th>
+                <th scope="col">Standing</th>
+                <th scope="col"><span class="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for row in rows %}
+                <tr data-search="{{ row.student_number|lower }} {{ row.username|lower }}">
+                  <td><span class="code">{{ row.student_number }}</span></td>
+                  <td>{{ row.username }}</td>
+                  <td>{{ row.program_code }}</td>
+                  <td>{% call ui::badge(row.academic_status) %}{% endcall %}</td>
+                  <td><a class="rowlink" href="/ui/registrar/students/{{ row.student_id }}">Manage</a></td>
+                </tr>
+              {% endfor %}
+              <tr data-search-empty hidden>
+                <td colspan="5" class="c-empty">No students match your filter.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+  </div>
+{% endblock %}
