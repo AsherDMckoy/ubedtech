@@ -1793,4 +1793,98 @@ mod ui {
         .await;
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
+
+    /// Terms & windows management over plain forms: a bad create is an
+    /// inline 422, a good one lands after PRG, and moving the shared
+    /// add/drop window into the past immediately denies a real student
+    /// registration — the form edits the same window enrollment enforces.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn registrar_manages_terms_and_the_window_governs_registration(pool: PgPool) {
+        let fixture = seed_registration_fixture(&pool, 1).await;
+        let username = credential_registrar(&pool, &fixture).await;
+        let app = ui_app!(&pool, fixture.registrar.institution_id);
+        let cookie = login(&app, &username, PASSWORD).await;
+
+        let page = get_page(&app, &cookie, "/ui/registrar/terms").await;
+        assert!(page.contains("Test Term"), "existing term listed");
+        assert!(page.contains("Edit windows"));
+        let csrf = extract_input(&page, "csrf_token");
+
+        // A term that ends before it starts is refused inline, not created.
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/ui/registrar/terms")
+                .cookie(cookie.clone())
+                .set_form(serde_json::json!({
+                    "csrf_token": &csrf,
+                    "code": "BAD",
+                    "name": "Backwards Term",
+                    "starts_on": "2027-05-01",
+                    "ends_on": "2027-01-01",
+                    "registration_opens_at": "2027-01-01T08:00",
+                    "add_drop_closes_at": "2027-02-01T08:00",
+                    "grade_entry_closes_at": "",
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        assert!(body.contains("term must start before it ends"));
+
+        // A valid term is created and listed after the redirect.
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/ui/registrar/terms")
+                .cookie(cookie.clone())
+                .set_form(serde_json::json!({
+                    "csrf_token": &csrf,
+                    "code": "SP27",
+                    "name": "Spring 2027",
+                    "starts_on": "2027-01-10",
+                    "ends_on": "2027-05-10",
+                    "registration_opens_at": "2027-01-01T08:00",
+                    "add_drop_closes_at": "2027-01-25T23:59",
+                    "grade_entry_closes_at": "2027-05-20T23:59",
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let page = get_page(&app, &cookie, "/ui/registrar/terms?notice=created").await;
+        assert!(page.contains("Term created."));
+        assert!(page.contains("Spring 2027"));
+
+        // Close the fixture term's window through the form…
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri(&format!("/ui/registrar/terms/{}/windows", fixture.term_id))
+                .cookie(cookie.clone())
+                .set_form(serde_json::json!({
+                    "csrf_token": &csrf,
+                    "registration_opens_at": "2020-01-01T08:00",
+                    "add_drop_closes_at": "2020-02-01T08:00",
+                    "grade_entry_closes_at": "",
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+        // …and a real student registration is now denied for that reason.
+        let student_username = credential_student(&pool, &fixture).await;
+        let student_cookie = login(&app, &student_username, PASSWORD).await;
+        let catalog = get_page(&app, &student_cookie, "/ui/catalog").await;
+        let student_csrf = extract_input(&catalog, "csrf_token");
+        let (status, body) =
+            post_add(&app, &student_cookie, &student_csrf, fixture.section_id).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert!(
+            body.contains("registration window is closed"),
+            "the edited window is the enforced window: {body}"
+        );
+    }
 }

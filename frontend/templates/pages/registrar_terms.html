@@ -1,0 +1,108 @@
+{% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
+{% block title %}Terms and windows{% endblock %}
+{% block rail %}{% call ui::registrar_nav("terms") %}{% endcall %}{% endblock %}
+{% block content %}
+  <div class="wrap wrap-wide">
+    <div class="head">
+      <div>
+        <h1>Terms and windows</h1>
+        <p class="sub">One shared registration/add-drop window per term governs what students can actually do. All times UTC.</p>
+      </div>
+    </div>
+
+    {% if let Some(notice) = notice %}
+      {% call ui::alert("success", notice) %}{% endcall %}
+    {% endif %}
+    {% if let Some(error) = error %}
+      {% call ui::alert("danger", error) %}{% endcall %}
+    {% endif %}
+
+    {# New term — drawer keeps the scanning page compact; opens with JS off. #}
+    <details class="drawer">
+      <summary>New term</summary>
+      <div class="drawer-panel">
+        <form method="post" action="/ui/registrar/terms">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="field">
+            <label for="term-code">Code</label>
+            <input id="term-code" name="code" required maxlength="20">
+          </div>
+          <div class="field">
+            <label for="term-name">Name</label>
+            <input id="term-name" name="name" required maxlength="100">
+          </div>
+          <div class="field">
+            <label for="term-starts">Starts</label>
+            <input id="term-starts" name="starts_on" type="date" required>
+          </div>
+          <div class="field">
+            <label for="term-ends">Ends</label>
+            <input id="term-ends" name="ends_on" type="date" required>
+          </div>
+          <div class="field">
+            <label for="term-opens">Registration opens (UTC)</label>
+            <input id="term-opens" name="registration_opens_at" type="datetime-local" required>
+          </div>
+          <div class="field">
+            <label for="term-closes">Add/drop closes (UTC)</label>
+            <input id="term-closes" name="add_drop_closes_at" type="datetime-local" required>
+          </div>
+          <div class="field">
+            <label for="term-grades">Grade entry closes (UTC)</label>
+            <input id="term-grades" name="grade_entry_closes_at" type="datetime-local">
+            <p class="field-hint" id="term-grades-hint">Optional — leave empty to set later.</p>
+          </div>
+          {% call ui::busy_button("Create term", "Creating…", true) %}{% endcall %}
+        </form>
+      </div>
+    </details>
+
+    {% if terms.is_empty() %}
+      <p class="c-empty">No terms exist yet. Create the first one above.</p>
+    {% endif %}
+
+    {% for row in terms %}
+      <section class="panel term-panel" aria-label="{{ row.term.name }}">
+        <h2>
+          <span><span class="code">{{ row.term.code }}</span> · {{ row.term.name }}</span>
+          <span class="badge {{ row.badge_class() }}">{{ row.state }}</span>
+        </h2>
+        <div class="term-body">
+          <p class="w-d">
+            {{ row.term.starts_on }} to {{ row.term.ends_on }}
+            · registration {{ row.term.registration_opens_at.format("%b %-d, %Y %H:%M") }}
+            – add/drop closes {{ row.term.add_drop_closes_at.format("%b %-d, %Y %H:%M") }}
+            {% if let Some(grades) = row.term.grade_entry_closes_at %}
+              · grade entry closes {{ grades.format("%b %-d, %Y %H:%M") }}
+            {% endif %}
+          </p>
+          <details>
+            <summary>Edit windows</summary>
+            <form method="post" action="/ui/registrar/terms/{{ row.term.id }}/windows">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <div class="field">
+                <label for="opens-{{ row.term.id }}">Registration opens (UTC)</label>
+                <input id="opens-{{ row.term.id }}" name="registration_opens_at"
+                       type="datetime-local" required value="{{ row.opens_value() }}">
+              </div>
+              <div class="field">
+                <label for="closes-{{ row.term.id }}">Add/drop closes (UTC)</label>
+                <input id="closes-{{ row.term.id }}" name="add_drop_closes_at"
+                       type="datetime-local" required value="{{ row.closes_value() }}">
+              </div>
+              <div class="field">
+                <label for="grades-{{ row.term.id }}">Grade entry closes (UTC)</label>
+                <input id="grades-{{ row.term.id }}" name="grade_entry_closes_at"
+                       type="datetime-local" value="{{ row.grade_entry_value() }}">
+              </div>
+              {% call ui::busy_button("Save windows", "Saving…", false) %}{% endcall %}
+            </form>
+          </details>
+        </div>
+      </section>
+    {% endfor %}
+
+    <p class="foot">A window change commits on the server before it shows as saved — and it is what registration enforcement reads.</p>
+  </div>
+{% endblock %}

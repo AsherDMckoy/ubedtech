@@ -52,6 +52,13 @@ pub struct AddMeetingCommand {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct UpdateWindowsCommand {
+    pub registration_opens_at: DateTime<Utc>,
+    pub add_drop_closes_at: DateTime<Utc>,
+    pub grade_entry_closes_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct AddPrerequisiteCommand {
     pub prerequisite_course_id: Uuid,
     pub minimum_grade_points: f64,
@@ -551,6 +558,83 @@ impl AcademicsService {
                 "section",
                 section_id,
                 &serde_json::json!({ "instructor_user_id": instructor_user_id }),
+            )
+            .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// All of the institution's terms, newest first — the terms-management
+    /// page. Terms accumulate slowly; the cap is a runaway guard.
+    pub async fn list_terms(&self, actor: &Actor) -> Result<Vec<TermSummary>, AppError> {
+        require_can_manage_academics(actor)?;
+        Ok(sqlx::query_as::<_, TermSummary>(
+            r#"
+            SELECT id, code, name, starts_on, ends_on,
+                   registration_opens_at, add_drop_closes_at, grade_entry_closes_at
+            FROM academic_term
+            WHERE institution_id = $1
+            ORDER BY starts_on DESC
+            LIMIT 100
+            "#,
+        )
+        .bind(actor.institution_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
+    /// Adjust a term's windows: the ONE shared registration/add/drop window
+    /// (ADR: single add-drop deadline) and the grade-entry close. The window
+    /// is what the enrollment service enforces, so changing it here changes
+    /// what students can actually do — audited in the same transaction.
+    pub async fn update_term_windows(
+        &self,
+        actor: &Actor,
+        term_id: Uuid,
+        command: UpdateWindowsCommand,
+    ) -> Result<(), AppError> {
+        require_can_manage_academics(actor)?;
+        if command.registration_opens_at >= command.add_drop_closes_at {
+            return Err(AppError::Validation(
+                "registration must open before add/drop closes".into(),
+            ));
+        }
+
+        let mut tx = self.pool.begin().await?;
+        let updated = sqlx::query(
+            r#"
+            UPDATE academic_term
+               SET registration_opens_at = $3,
+                   add_drop_closes_at = $4,
+                   grade_entry_closes_at = $5
+             WHERE id = $1 AND institution_id = $2
+            "#,
+        )
+        .bind(term_id)
+        .bind(actor.institution_id)
+        .bind(command.registration_opens_at)
+        .bind(command.add_drop_closes_at)
+        .bind(command.grade_entry_closes_at)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if updated != 1 {
+            return Err(AppError::NotFound);
+        }
+
+        self.audit
+            .write(
+                &mut tx,
+                actor.institution_id,
+                actor.user_id,
+                "academics.term_windows_updated",
+                "academic_term",
+                term_id,
+                &serde_json::json!({
+                    "registration_opens_at": command.registration_opens_at,
+                    "add_drop_closes_at": command.add_drop_closes_at,
+                    "grade_entry_closes_at": command.grade_entry_closes_at,
+                }),
             )
             .await?;
         tx.commit().await?;

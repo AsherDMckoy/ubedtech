@@ -1311,6 +1311,28 @@ th[aria-sort="descending"] .sortbtn::after {
   color: var(--text-danger);
 }
 
+/* Term panels (terms & windows): the per-term windows form sits behind a
+   native disclosure so the list stays scannable. */
+.term-panel {
+  margin-bottom: var(--space-3);
+}
+
+.term-body {
+  padding: var(--space-3);
+}
+
+.term-body > details > summary {
+  cursor: pointer;
+  color: var(--text-accent);
+  font-size: 13px;
+  margin-top: var(--space-2);
+}
+
+.term-body form {
+  margin-top: var(--space-3);
+  max-width: 420px;
+}
+
 @media (max-width: 860px) {
   .tiles {
     grid-template-columns: repeat(2, 1fr);

@@ -24,6 +24,7 @@
     `current` marks the active link (aria-current, styled once). -#}
 {% macro registrar_nav_links(current) %}
   <a class="navlink" href="/ui/registrar" {% if current == "overview" %}aria-current="page"{% endif %}>Overview</a>
+  <a class="navlink" href="/ui/registrar/terms" {% if current == "terms" %}aria-current="page"{% endif %}>Terms &amp; windows</a>
 {% endmacro %}
 
 {% macro registrar_nav(current) %}

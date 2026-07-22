@@ -1,3 +1,4 @@
+use actix_web::http::StatusCode;
 use actix_web::{HttpResponse, get, post, put, web};
 use askama::Template;
 use serde::Deserialize;
@@ -634,6 +635,265 @@ pub fn sample_registrar_overview_html() -> Result<String, askama::Error> {
     .render()
 }
 
+// ---- Terms & windows management -------------------------------------------
+
+/// One term row with its computed window state for the badge.
+pub struct TermRow {
+    pub term: TermSummary,
+    pub state: &'static str, // "open" | "upcoming" | "closed"
+}
+
+impl TermRow {
+    fn new(term: TermSummary, now: chrono::DateTime<chrono::Utc>) -> Self {
+        let state = if now < term.registration_opens_at {
+            "upcoming"
+        } else if now < term.add_drop_closes_at {
+            "open"
+        } else {
+            "closed"
+        };
+        Self { term, state }
+    }
+    pub fn badge_class(&self) -> &'static str {
+        crate::shared::assets::badge_class(self.state)
+    }
+    /// Values for the datetime-local inputs of the edit form.
+    pub fn opens_value(&self) -> String {
+        self.term
+            .registration_opens_at
+            .format("%Y-%m-%dT%H:%M")
+            .to_string()
+    }
+    pub fn closes_value(&self) -> String {
+        self.term
+            .add_drop_closes_at
+            .format("%Y-%m-%dT%H:%M")
+            .to_string()
+    }
+    pub fn grade_entry_value(&self) -> String {
+        self.term
+            .grade_entry_closes_at
+            .map(|at| at.format("%Y-%m-%dT%H:%M").to_string())
+            .unwrap_or_default()
+    }
+}
+
+#[derive(Template)]
+#[template(path = "pages/registrar_terms.html")]
+struct RegistrarTermsPage<'a> {
+    csrf_token: &'a str,
+    terms: Vec<TermRow>,
+    notice: Option<&'a str>,
+    error: Option<&'a str>,
+}
+
+async fn render_terms(
+    actor: &Actor,
+    current: &CurrentSession,
+    service: &AcademicsService,
+    notice: Option<&str>,
+    error: Option<&str>,
+) -> Result<String, AppError> {
+    let now = chrono::Utc::now();
+    let terms = service
+        .list_terms(actor)
+        .await?
+        .into_iter()
+        .map(|term| TermRow::new(term, now))
+        .collect();
+    Ok(RegistrarTermsPage {
+        csrf_token: &current.csrf_token,
+        terms,
+        notice,
+        error,
+    }
+    .render()?)
+}
+
+#[derive(Deserialize)]
+struct TermsNoticeQuery {
+    notice: Option<String>,
+}
+
+#[get("/ui/registrar/terms")]
+async fn registrar_terms_page(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<AcademicsService>,
+    query: web::Query<TermsNoticeQuery>,
+) -> Result<HttpResponse, AppError> {
+    crate::academics::policy::require_can_manage_academics(&actor)?;
+    let notice = match query.notice.as_deref() {
+        Some("created") => Some("Term created."),
+        Some("windows") => Some("Windows updated."),
+        _ => None,
+    };
+    let body = render_terms(&actor, &current, &service, notice, None).await?;
+    Ok(html(StatusCode::OK, body))
+}
+
+/// `datetime-local` values ("2026-08-25T09:00"); stored as UTC — the labels
+/// say UTC (assumption A30: institution-timezone entry is a later
+/// refinement, storage is UTC either way per CLAUDE.md §3).
+fn parse_utc_local(value: &str, field: &str) -> Result<chrono::DateTime<chrono::Utc>, AppError> {
+    let value = value.trim();
+    chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M")
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M:%S"))
+        .map(|naive| naive.and_utc())
+        .map_err(|_| AppError::Validation(format!("{field} must be a date and time")))
+}
+
+fn parse_optional_utc_local(
+    value: Option<&str>,
+    field: &str,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, AppError> {
+    match value.map(str::trim).filter(|v| !v.is_empty()) {
+        Some(value) => Ok(Some(parse_utc_local(value, field)?)),
+        None => Ok(None),
+    }
+}
+
+#[derive(Deserialize)]
+struct CreateTermForm {
+    code: String,
+    name: String,
+    starts_on: chrono::NaiveDate,
+    ends_on: chrono::NaiveDate,
+    registration_opens_at: String,
+    add_drop_closes_at: String,
+    grade_entry_closes_at: Option<String>,
+    csrf_token: String,
+}
+
+#[post("/ui/registrar/terms")]
+async fn create_term_form(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<AcademicsService>,
+    form: web::Form<CreateTermForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token; // validated by the CSRF middleware
+
+    let outcome = async {
+        let command = CreateTermCommand {
+            code: form.code.clone(),
+            name: form.name.clone(),
+            starts_on: form.starts_on,
+            ends_on: form.ends_on,
+            registration_opens_at: parse_utc_local(
+                &form.registration_opens_at,
+                "registration opens",
+            )?,
+            add_drop_closes_at: parse_utc_local(&form.add_drop_closes_at, "add/drop closes")?,
+            grade_entry_closes_at: parse_optional_utc_local(
+                form.grade_entry_closes_at.as_deref(),
+                "grade entry closes",
+            )?,
+        };
+        service.create_term(&actor, command).await
+    }
+    .await;
+
+    match outcome {
+        Ok(_) => Ok(see_other("/ui/registrar/terms?notice=created")),
+        Err(AppError::Validation(message)) => {
+            let body = render_terms(&actor, &current, &service, None, Some(&message)).await?;
+            Ok(html(StatusCode::UNPROCESSABLE_ENTITY, body))
+        }
+        Err(AppError::Conflict(message)) => {
+            let body = render_terms(&actor, &current, &service, None, Some(&message)).await?;
+            Ok(html(StatusCode::CONFLICT, body))
+        }
+        Err(other) => Err(other),
+    }
+}
+
+#[derive(Deserialize)]
+struct UpdateWindowsForm {
+    registration_opens_at: String,
+    add_drop_closes_at: String,
+    grade_entry_closes_at: Option<String>,
+    csrf_token: String,
+}
+
+#[post("/ui/registrar/terms/{term_id}/windows")]
+async fn update_windows_form(
+    actor: Actor,
+    current: CurrentSession,
+    service: web::Data<AcademicsService>,
+    term_id: web::Path<Uuid>,
+    form: web::Form<UpdateWindowsForm>,
+) -> Result<HttpResponse, AppError> {
+    let _ = &form.csrf_token;
+
+    let outcome = async {
+        let command = crate::academics::service::UpdateWindowsCommand {
+            registration_opens_at: parse_utc_local(
+                &form.registration_opens_at,
+                "registration opens",
+            )?,
+            add_drop_closes_at: parse_utc_local(&form.add_drop_closes_at, "add/drop closes")?,
+            grade_entry_closes_at: parse_optional_utc_local(
+                form.grade_entry_closes_at.as_deref(),
+                "grade entry closes",
+            )?,
+        };
+        service
+            .update_term_windows(&actor, term_id.into_inner(), command)
+            .await
+    }
+    .await;
+
+    match outcome {
+        Ok(()) => Ok(see_other("/ui/registrar/terms?notice=windows")),
+        Err(AppError::Validation(message)) => {
+            let body = render_terms(&actor, &current, &service, None, Some(&message)).await?;
+            Ok(html(StatusCode::UNPROCESSABLE_ENTITY, body))
+        }
+        Err(other) => Err(other),
+    }
+}
+
+fn html(status: StatusCode, body: String) -> HttpResponse {
+    HttpResponse::build(status)
+        .content_type("text/html; charset=utf-8")
+        .body(body)
+}
+
+fn see_other(location: &str) -> HttpResponse {
+    HttpResponse::SeeOther()
+        .insert_header(("Location", location.to_owned()))
+        .finish()
+}
+
+/// Renders the terms page with open/upcoming/closed terms and no database,
+/// for the frontend axe harness.
+pub fn sample_registrar_terms_html() -> Result<String, askama::Error> {
+    use chrono::{Duration, Utc};
+    let now = Utc::now();
+    let term = |code: &str, name: &str, opens: i64, closes: i64| TermSummary {
+        id: Uuid::nil(),
+        code: code.into(),
+        name: name.into(),
+        starts_on: (now + Duration::days(opens)).date_naive(),
+        ends_on: (now + Duration::days(closes + 90)).date_naive(),
+        registration_opens_at: now + Duration::days(opens),
+        add_drop_closes_at: now + Duration::days(closes),
+        grade_entry_closes_at: Some(now + Duration::days(closes + 60)),
+    };
+    RegistrarTermsPage {
+        csrf_token: "sample",
+        terms: vec![
+            TermRow::new(term("SP27", "Spring 2027", 120, 140), now),
+            TermRow::new(term("FA26", "Fall 2026", -20, 14), now),
+            TermRow::new(term("SP26", "Spring 2026", -200, -180), now),
+        ],
+        notice: Some("Windows updated."),
+        error: None,
+    }
+    .render()
+}
+
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.service(create_term)
         .service(current_term)
@@ -645,5 +905,8 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .service(assign_instructor)
         .service(catalog)
         .service(catalog_page)
-        .service(registrar_overview_page);
+        .service(registrar_overview_page)
+        .service(registrar_terms_page)
+        .service(create_term_form)
+        .service(update_windows_form);
 }
