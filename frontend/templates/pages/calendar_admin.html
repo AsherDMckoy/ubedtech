@@ -1,64 +1,87 @@
 {% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
 {% block title %}Events and holidays{% endblock %}
+{% block rail %}{% call ui::admin_nav("calendar") %}{% endcall %}{% endblock %}
 {% block content %}
-  <h1>Events and holidays</h1>
-  {% if let Some(notice) = notice %}
-    <p role="status">{{ notice }}</p>
-  {% endif %}
-  {% if let Some(error) = error %}
-    <p role="alert">{{ error }}</p>
-  {% endif %}
+  <div class="wrap wrap-wide">
+    <div class="head">
+      <div>
+        <h1>Events and holidays</h1>
+        <p class="sub">Calendar entries are display data — academic deadlines are governed by term windows, never by a holiday.</p>
+      </div>
+    </div>
 
-  <form method="post" action="/ui/admin/calendar">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>Title
-      <input name="title" required maxlength="200">
-    </label>
-    <label>Type
-      <select name="event_type">
-        <option value="holiday">Holiday</option>
-        <option value="event">Event</option>
-      </select>
-    </label>
-    <label>Starts
-      <input type="date" name="starts_on" required>
-    </label>
-    <label>Ends
-      <input type="date" name="ends_on" required>
-    </label>
-    <button type="submit">Add</button>
-  </form>
+    {% if let Some(notice) = notice %}
+      {% call ui::alert("success", notice) %}{% endcall %}
+    {% endif %}
+    {% if let Some(error) = error %}
+      {% call ui::alert("danger", error) %}{% endcall %}
+    {% endif %}
 
-  {% if events.is_empty() %}
-    <p>No events yet.</p>
-  {% else %}
-    <table>
-      <caption>Events and holidays, soonest first</caption>
-      <thead>
-        <tr>
-          <th scope="col">Title</th>
-          <th scope="col">Type</th>
-          <th scope="col">Starts</th>
-          <th scope="col">Ends</th>
-          <th scope="col"></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for event in events %}
-          <tr>
-            <td>{{ event.title }}</td>
-            <td>{{ event.kind_label }}</td>
-            <td>{{ event.starts_on }}</td>
-            <td>{{ event.ends_on }}</td>
-            <td>
-              <form method="post" action="/ui/admin/calendar/{{ event.id }}/delete">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <button type="submit">Remove</button>
-              </form>
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  {% endif %}
+    <details class="drawer">
+      <summary>New event</summary>
+      <div class="drawer-panel">
+        <form method="post" action="/ui/admin/calendar">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="field">
+            <label for="ev-title">Title</label>
+            <input id="ev-title" name="title" required maxlength="200">
+          </div>
+          <div class="field">
+            <label for="ev-type">Type</label>
+            <select id="ev-type" name="event_type">
+              <option value="holiday">Holiday</option>
+              <option value="event">Event</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="ev-starts">Starts</label>
+            <input id="ev-starts" name="starts_on" type="date" required>
+          </div>
+          <div class="field">
+            <label for="ev-ends">Ends</label>
+            <input id="ev-ends" name="ends_on" type="date" required>
+          </div>
+          {% call ui::busy_button("Add event", "Adding…", true) %}{% endcall %}
+        </form>
+      </div>
+    </details>
+
+    {% if events.is_empty() %}
+      <p class="c-empty">No events yet. Add the first one above.</p>
+    {% else %}
+      <section class="card card-flush" aria-label="Events and holidays">
+        <div class="table-wrap">
+          <table class="table-dense">
+            <caption>Events and holidays, soonest first</caption>
+            <thead>
+              <tr>
+                <th scope="col">Title</th>
+                <th scope="col">Type</th>
+                <th scope="col">Starts</th>
+                <th scope="col">Ends</th>
+                <th scope="col"><span class="sr-only">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for event in events %}
+                <tr>
+                  <td>{{ event.title }}</td>
+                  <td>{{ event.kind_label }}</td>
+                  <td class="num">{{ event.starts_on }}</td>
+                  <td class="num">{{ event.ends_on }}</td>
+                  <td>
+                    <form method="post" action="/ui/admin/calendar/{{ event.id }}/delete">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                      {% call ui::busy_button("Remove", "Removing…", false) %}{% endcall %}
+                    </form>
+                  </td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    {% endif %}
+  </div>
 {% endblock %}

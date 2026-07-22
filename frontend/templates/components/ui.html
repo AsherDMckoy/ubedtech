@@ -31,6 +31,30 @@
   <a class="navlink" href="/ui/registrar/overrides" {% if current == "overrides" %}aria-current="page"{% endif %}>Overrides</a>
 {% endmacro %}
 
+{#- Institution-admin shell, same shape as registrar_nav. -#}
+{% macro admin_nav_links(current) %}
+  <a class="navlink" href="/ui/admin/calendar" {% if current == "calendar" %}aria-current="page"{% endif %}>Calendar</a>
+{% endmacro %}
+
+{% macro admin_nav(current) %}
+  <header class="topbar">
+    <span class="brand">UB Administration</span>
+    <details class="nav-sheet">
+      <summary>Menu</summary>
+      <nav class="sheet-panel" aria-label="Administration">
+        {% call admin_nav_links(current) %}{% endcall %}
+      </nav>
+    </details>
+  </header>
+  <nav class="rail" aria-label="Administration">
+    <span class="brand">UB Administration</span>
+    {% call admin_nav_links(current) %}{% endcall %}
+    <div class="rail-foot">
+      <a href="/ui/signout">Sign out</a>
+    </div>
+  </nav>
+{% endmacro %}
+
 {% macro registrar_nav(current) %}
   <header class="topbar">
     <span class="brand">UB Registrar</span>

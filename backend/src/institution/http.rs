@@ -158,6 +158,33 @@ async fn render_calendar(
     .render()?)
 }
 
+/// Renders the calendar page with representative data and no database, for
+/// the frontend axe harness.
+pub fn sample_calendar_admin_html() -> Result<String, askama::Error> {
+    CalendarPage {
+        csrf_token: "sample",
+        events: vec![
+            EventView {
+                id: Uuid::nil(),
+                title: "Independence Day".into(),
+                kind_label: "Holiday",
+                starts_on: "2026-09-21".into(),
+                ends_on: "2026-09-21".into(),
+            },
+            EventView {
+                id: Uuid::nil(),
+                title: "Open day".into(),
+                kind_label: "Event",
+                starts_on: "2026-10-03".into(),
+                ends_on: "2026-10-04".into(),
+            },
+        ],
+        notice: Some("Event added."),
+        error: None,
+    }
+    .render()
+}
+
 // ---------------------------------------------------------------------------
 // Settings + document-type configuration (JSON, institution admin only).
 // ---------------------------------------------------------------------------
