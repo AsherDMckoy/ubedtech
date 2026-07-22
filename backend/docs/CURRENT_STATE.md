@@ -491,3 +491,23 @@ wiring, demo seed, and axe harness — no feature screens (next session).
   (axe-core in jsdom, color-contrast delegated to the token test) wired
   as `npm test` and into CI; verified to fail on a seeded-violation page.
 - **Gates**: fmt/clippy/tests green at every slice; suite now 131.
+
+## Registrar UI session outcome (2026-07-21)
+
+- **Registrar screens** (scanning density, registrar-dashboard reference,
+  all over the SAME audited service functions as the JSON API): overview
+  at `/ui/registrar` (term tiles, needs-attention worklist, window
+  badges, dense sortable/filterable sections table); terms & windows
+  management (create + edit the single shared add/drop window —
+  `update_term_windows`, new); sections/capacity/meetings/instructor and
+  courses/prerequisites management; student lookup with holds and
+  academic standing (`set_academic_status`, new; standing is recorded
+  designation, holds block — A31); override grants from the student page
+  and the full-record review list (`list_overrides`, new).
+- **No staff bypass, verified**:
+  `ui::staff_pages_commit_on_the_server_and_grant_no_rule_bypass` —
+  refused mutations write nothing; successes are committed at redirect
+  time. Window edits, holds, and overrides are proven against live
+  student registrations in the flow tests.
+- **a11y**: eight registrar pages added to `render-pages`/axe (22 pages
+  total, all passing). Suite: 131 → 142 tests, green at every slice.

@@ -2390,4 +2390,147 @@ mod ui {
         .await;
         assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
+
+    /// CLAUDE.md §2/§3 for staff pages, stated as one test: registrar forms
+    /// call the SAME service functions as the JSON API, so (a) a refused
+    /// mutation writes NOTHING — the staff origin buys no bypass — and (b) a
+    /// successful mutation is committed in the database at the moment the
+    /// redirect is issued, before anything is ever shown as saved.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn staff_pages_commit_on_the_server_and_grant_no_rule_bypass(pool: PgPool) {
+        let fixture = seed_registration_fixture(&pool, 1).await;
+        let service =
+            crate::enrollment::EnrollmentService::new(pool.clone(), crate::audit::AuditWriter);
+        service
+            .register_for(
+                &fixture.registrar,
+                fixture.student_a,
+                crate::enrollment::types::RegisterCommand {
+                    section_id: fixture.section_id,
+                    idempotency_key: Uuid::new_v4(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let username = credential_registrar(&pool, &fixture).await;
+        let app = ui_app!(&pool, fixture.registrar.institution_id);
+        let cookie = login(&app, &username, PASSWORD).await;
+        let page = get_page(&app, &cookie, "/ui/registrar/terms").await;
+        let csrf = extract_input(&page, "csrf_token");
+
+        let post_form = |uri: String, form: serde_json::Value| {
+            let cookie = cookie.clone();
+            let app = &app;
+            async move {
+                let response = actix_test::call_service(
+                    app,
+                    actix_test::TestRequest::post()
+                        .uri(&uri)
+                        .cookie(cookie)
+                        .set_form(form)
+                        .to_request(),
+                )
+                .await;
+                response.status()
+            }
+        };
+
+        // Capacity below current enrollment: refused, and the stored value
+        // did not move.
+        let status = post_form(
+            format!("/ui/registrar/sections/{}/capacity", fixture.section_id),
+            serde_json::json!({ "csrf_token": &csrf, "capacity": 0 }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        let capacity: i32 =
+            sqlx::query_scalar("SELECT capacity FROM section_capacity WHERE section_id = $1")
+                .bind(fixture.section_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(capacity, 1, "refused capacity change wrote nothing");
+
+        // A backwards term: refused, and no term row appeared.
+        let status = post_form(
+            "/ui/registrar/terms".into(),
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "code": "BAD",
+                "name": "Backwards",
+                "starts_on": "2027-05-01",
+                "ends_on": "2027-01-01",
+                "registration_opens_at": "2027-01-01T08:00",
+                "add_drop_closes_at": "2027-02-01T08:00",
+                "grade_entry_closes_at": "",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        let terms: i64 = sqlx::query_scalar("SELECT count(*) FROM academic_term")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(terms, 1, "refused term wrote nothing");
+
+        // A reasonless hold: refused, and no flag was stored.
+        let status = post_form(
+            format!("/ui/registrar/students/{}/holds", fixture.student_a),
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "term_id": fixture.term_id,
+                "flag": "financial",
+                "reason": "",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        let flags: Vec<String> = sqlx::query_scalar(
+            "SELECT unnest(hold_flags) FROM student_term_registration \
+             WHERE student_id = $1 AND term_id = $2",
+        )
+        .bind(fixture.student_a)
+        .bind(fixture.term_id)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert!(flags.is_empty(), "refused hold wrote nothing");
+
+        // An unknown override rule: refused, and no record appeared.
+        let status = post_form(
+            format!("/ui/registrar/students/{}/overrides", fixture.student_a),
+            serde_json::json!({
+                "csrf_token": &csrf,
+                "term_id": fixture.term_id,
+                "section_id": "",
+                "override_type": "be-nice",
+                "reason": "please",
+                "expires_at": "",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        let overrides: i64 = sqlx::query_scalar("SELECT count(*) FROM registration_override")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(overrides, 0, "refused override wrote nothing");
+
+        // The success half: at the moment the redirect (not a success page)
+        // is issued, the change is already committed in the database.
+        let status = post_form(
+            format!("/ui/registrar/sections/{}/capacity", fixture.section_id),
+            serde_json::json!({ "csrf_token": &csrf, "capacity": 5 }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::SEE_OTHER);
+        let capacity: i32 =
+            sqlx::query_scalar("SELECT capacity FROM section_capacity WHERE section_id = $1")
+                .bind(fixture.section_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(capacity, 5, "committed before anything was shown as saved");
+    }
 }

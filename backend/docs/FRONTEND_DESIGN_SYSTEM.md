@@ -129,6 +129,34 @@ box-shadow).
   row; terminal rows drop `data-poll` and polling stops itself. Status is
   always badge + the status word from the ONE badge map — never color
   alone.
+- **Registrar shell** (`ui::registrar_nav(current)`, session 4): the same
+  topbar + rail structure as the default shell with the registrar's own
+  sections (Overview, Terms & windows, Sections, Courses, Students,
+  Overrides); `current` sets `aria-current="page"`, styled once on
+  `.navlink`. Registrar pages override the `rail` block with it and use
+  `.wrap-wide` (1200 px) — scanning screens opt out of the calm column.
+- **Metric tiles** (`.tiles`/`.tile`, registrar-dashboard reference): the
+  at-a-glance strip — label `.k`, value `.v`, hint `.h`; `.tile-warn` for
+  the needs-attention tile when its count is non-zero. Two columns on
+  mobile.
+- **Panel + worklist + windows** (`.panel`, `.queue`, `.win`): bordered
+  card with a heading row (`.count` pill for the worklist size); queue
+  items carry a severity dot (`.dot-danger`/`.dot-warn`) plus title and
+  detail text — the reason is always written out, never the dot alone.
+  Window rows pair label/range with a state badge (open/upcoming/closed
+  from the ONE badge map).
+- **Sortable dense table** (`.sortbtn`, session 4): a scanning table's
+  sortable column headers are real buttons inside `th` (keyboard-first);
+  the enhancement (see JavaScript policy) reorders loaded rows in place
+  and sets `aria-sort` (arrow drawn via CSS). With JS off the server's
+  order stands. Combined with the instant filter via `tr[data-search]`
+  and the `.tabletop` header row (title + `.termpick` + search).
+- **Inline management forms** (`.inline-form`, `.detail-card`): label +
+  control + busy button on one line inside a card — the shape of every
+  section-detail and student-detail mutation (capacity, meetings,
+  instructor, standing, holds). Errors re-render the page with the alert
+  primitive and an honest 409/422; successes are PRG redirects with a
+  fixed notice string.
 - **Unofficial document** (`.print-doc`, `.doc-head`, `.doc-actions`,
   `.doc-foot`): identity `<dl>` header + warning alert marking the page
   unofficial; `@media print` drops the chrome (`.rail`, `.topbar`,
@@ -160,10 +188,13 @@ through the shared `#drop-dialog` first. Document status rows carrying
 `data-poll` re-fetch their server-rendered fragment every 4 s and swap it
 in (honest pipeline view — approved → generating → ready only as the
 worker actually completes; terminal rows stop polling by omitting the
-attribute). Alpine AJAX fragment swaps are enhancement over working HTML
-forms, never a replacement (FRONTEND.md §5). Server-side idempotency
-keys remain the real duplicate guarantee — the script is UX, not
-correctness.
+attribute). Sortable scanning tables (registrar): a click on a
+`th button[data-sort]` reorders the already-loaded `tr[data-search]`
+rows by that column, numeric-aware, and sets `aria-sort` — read path,
+zero round trips, server order with JS off. Alpine AJAX fragment swaps
+are enhancement over working HTML forms, never a replacement
+(FRONTEND.md §5). Server-side idempotency keys remain the real
+duplicate guarantee — the script is UX, not correctness.
 
 ## Automated checks
 
