@@ -511,3 +511,20 @@ wiring, demo seed, and axe harness — no feature screens (next session).
   student registrations in the flow tests.
 - **a11y**: eight registrar pages added to `render-pages`/axe (22 pages
   total, all passing). Suite: 131 → 142 tests, green at every slice.
+
+## Institution-admin UI session outcome (2026-07-21)
+
+- **Admin screens** (ui::admin_nav shell, same audited services as the
+  JSON API): calendar redesigned onto the design system (existing flow
+  test unchanged); settings page for name + IANA timezone (PostgreSQL
+  validates the zone; refusals write nothing) and document-type toggles
+  with A24 semantics stated inline; account management — lookup by
+  username/email, password reset, role grant/revoke, and confirm-gated
+  suspension with a required reason.
+- **Guardrails proven through the forms**: the reset password really
+  rotates the login, self role-changes are refused inline, the platform
+  licensing role is ungrantable (403), suspension blocks the next login,
+  foreign account ids 404 (`admin_account_pages_work_as_plain_forms`,
+  `settings_page_works_as_plain_forms`).
+- **a11y**: four pages added to the axe harness (26 total, all passing).
+  Suite: 142 → 144 tests, green at every slice.

@@ -129,6 +129,13 @@ box-shadow).
   row; terminal rows drop `data-poll` and polling stops itself. Status is
   always badge + the status word from the ONE badge map — never color
   alone.
+- **Admin shell** (`ui::admin_nav(current)`, session 5): the
+  institution-admin variant of the role shell (Calendar, Settings,
+  Accounts), identical structure to the registrar shell below. Admin
+  pages: calendar (drawer create + dense table), settings (identity/
+  timezone form + document-type toggles as badge + word with per-row
+  Enable/Disable forms), accounts (lookup table + per-account cards for
+  roles, password reset, and a confirm-gated suspension).
 - **Registrar shell** (`ui::registrar_nav(current)`, session 4): the same
   topbar + rail structure as the default shell with the registrar's own
   sections (Overview, Terms & windows, Sections, Courses, Students,

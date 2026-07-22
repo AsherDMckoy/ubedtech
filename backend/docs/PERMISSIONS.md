@@ -45,6 +45,8 @@ authenticated actor regardless of role; "anon" = no session required.
 | Registrar student lookup, holds, academic standing (`/ui/registrar/students…`) | ❌ 401 | ❌ 403 | ❌ | ✅ own institution (foreign student id 404), hold reason required, standing from a fixed set | ❌ | ❌ | ❌ (hold authority is registrar-only, same as the API) | ❌ | `ui::registrar_manages_holds_and_academic_status` |
 | Override grant form + review list (`/ui/registrar/students/{id}/overrides`, `/ui/registrar/overrides`) | ❌ 401 | ❌ 403 | ❌ | ✅ reason required, rule from the fixed set, full record shown | ❌ | ❌ | ❌ | ❌ | `ui::registrar_grants_recorded_overrides_and_reviews_them` |
 | Any registrar-form rule bypass because the request came from a staff page | ❌ for every role — refused mutations write nothing; successes commit before the redirect | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | `ui::staff_pages_commit_on_the_server_and_grant_no_rule_bypass` |
+| Institution settings page + document-type toggles (`/ui/admin/settings…`) | ❌ 401 | ❌ 403 | ❌ | ❌ | ❌ | ❌ | ✅ own institution; unknown timezone refused inline, writes nothing | ❌ | `settings_page_works_as_plain_forms` |
+| Account pages: lookup, password reset, role grant/revoke, suspend (`/ui/admin/accounts…`) | ❌ 401 | ❌ 403 | ❌ | ❌ | ❌ | ❌ | ✅ own institution (foreign id 404), never self-roles, never the platform role (403) | ❌ | `admin_account_pages_work_as_plain_forms` (reset actually rotates the login; suspension blocks the next login) |
 
 ## Matrix (Phase 4: instructor assignments, grades, records)
 
