@@ -2,17 +2,17 @@
 
 ## Frontend budgets (Phase 7, rebased on the frontend/ pipeline — ADR-12)
 
-| Budget | Limit | Actual (2026-07-20) | Enforced by |
+| Budget | Limit | Actual (2026-07-22, final session) | Enforced by |
 |---|---|---|---|
-| Stylesheet bundle (tokens + base + components) | ≤ 32 KiB uncompressed | ~10 KiB (~2.7 KiB gzipped) | `asset_sizes_stay_inside_the_budget` |
-| Script bundle (Alpine CSP build + enhancements) | ≤ 80 KiB uncompressed | ~61 KiB (~20 KiB gzipped) | same |
+| Stylesheet bundle (tokens + base + components) | ≤ 32 KiB uncompressed | 18.9 KiB (4.3 KiB gzipped, 3.7 KiB brotli) | `asset_sizes_stay_inside_the_budget` |
+| Script bundle (Alpine CSP build + enhancements) | ≤ 80 KiB uncompressed | 63.6 KiB (20.9 KiB gzipped, 18.6 KiB brotli) | same |
 | Images on workflow pages | none | none | `templates_carry_no_images_or_csp_violations` |
 | Third-party/external resources at runtime | none (Alpine is bundled, same-origin) | none | same |
 | Asset caching | esbuild content hash in the URL + `public, max-age=31536000, immutable` | ✓ | `assets_serve_fingerprinted_with_an_immutable_cache_lifetime` |
 | Compression | gzip (brotli/zstd also available) via `Compress` middleware | ✓ | `assets_compress_when_the_client_accepts_gzip` |
 
-Consequences: a first page view costs the HTML plus one ~2.7 KiB
-stylesheet and one ~20 KiB script (both immutably cached — every later
+Consequences: a first page view costs the HTML plus one ~4.3 KiB
+stylesheet and one ~21 KiB script (both immutably cached — every later
 view costs the HTML alone). First meaningful content never waits on JS:
 pages are server-rendered, navigation is real links, and every form works
 before the bundle arrives (FRONTEND.md §7). No layout shift from late
