@@ -370,6 +370,80 @@ async fn platform_admin_flips_the_license_end_to_end(pool: PgPool) {
     assert_eq!(after.status(), StatusCode::OK);
 }
 
+/// Self-hosted deployments: the panel is a read-only view and the status
+/// service refuses manual flips — the signed license file is the only
+/// authority over state (a manual flip would silently diverge from what
+/// the signature attests).
+#[sqlx::test(migrations = "./migrations")]
+async fn self_hosted_license_state_is_read_only_in_the_panel(pool: PgPool) {
+    let fixture = seed(&pool, "active").await;
+    sqlx::query("UPDATE institution_license SET mode = 'self_hosted' WHERE institution_id = $1")
+        .bind(fixture.institution_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    seed_user_with_role(
+        &pool,
+        fixture.institution_id,
+        "plat.admin",
+        "pw-admin",
+        "platform_licensing_admin",
+    )
+    .await;
+    let gate = LicenseGate::new(snapshot(fixture.institution_id, LicenseStatus::Active));
+    let app = test_app!(&pool, gate);
+    let (cookie, csrf) = login_session!(&app, "plat.admin", "pw-admin");
+
+    // The panel says self-hosted and renders no status form.
+    let panel = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/ui/platform/license")
+            .cookie(cookie.clone())
+            .to_request(),
+    )
+    .await;
+    assert_eq!(panel.status(), StatusCode::OK);
+    let body = String::from_utf8(actix_test::read_body(panel).await.to_vec()).unwrap();
+    crate::shared::assets::assert_page_a11y(&body);
+    assert!(body.contains("Self-hosted deployment"));
+    assert!(
+        !body.contains("name=\"status\""),
+        "self-hosted panel must not render the status form"
+    );
+
+    // A crafted POST is refused by the service, not the template: 422,
+    // nothing written, the gate untouched.
+    let refused = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::post()
+            .uri(&format!(
+                "/ui/platform/institutions/{}/license",
+                fixture.institution_id
+            ))
+            .cookie(cookie)
+            .insert_header((
+                actix_web::http::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            ))
+            .set_payload(format!(
+                "status=suspended&reason=manual+flip&csrf_token={csrf}"
+            ))
+            .to_request(),
+    )
+    .await;
+    assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let (version, status): (i64, String) =
+        sqlx::query_as("SELECT version, status FROM institution_license WHERE institution_id = $1")
+            .bind(fixture.institution_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!((version, status.as_str()), (1, "active"));
+    assert!(gate.require_deployment_active().is_ok());
+}
+
 /// The Phase 6 acceptance test: disabling an institution's license denies
 /// ordinary access institution-wide, the health/recovery/license-management
 /// surface stays reachable, and no individual account is suspended or

@@ -57,6 +57,30 @@
   </nav>
 {% endmacro %}
 
+{#- Platform-operator shell: one surface today (license management). -#}
+{% macro platform_nav_links(current) %}
+  <a class="navlink" href="/ui/platform/license" {% if current == "license" %}aria-current="page"{% endif %}>License</a>
+{% endmacro %}
+
+{% macro platform_nav(current) %}
+  <header class="topbar">
+    <span class="brand">UB Platform</span>
+    <details class="nav-sheet">
+      <summary>Menu</summary>
+      <nav class="sheet-panel" aria-label="Platform">
+        {% call platform_nav_links(current) %}{% endcall %}
+      </nav>
+    </details>
+  </header>
+  <nav class="rail" aria-label="Platform">
+    <span class="brand">UB Platform</span>
+    {% call platform_nav_links(current) %}{% endcall %}
+    <div class="rail-foot">
+      <a href="/ui/signout">Sign out</a>
+    </div>
+  </nav>
+{% endmacro %}
+
 {% macro registrar_nav(current) %}
   <header class="topbar">
     <span class="brand">UB Registrar</span>

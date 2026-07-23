@@ -174,6 +174,20 @@ pub fn render_pages(out_dir: &str) -> std::io::Result<()> {
                 crate::identity_access::http::sample_account_detail_html(),
             ),
         ),
+        (
+            "license_panel.html",
+            render(
+                "license_panel",
+                crate::licensing::http::sample_license_panel_html(),
+            ),
+        ),
+        (
+            "license_panel_selfhosted.html",
+            render(
+                "license_panel_selfhosted",
+                crate::licensing::http::sample_license_panel_selfhosted_html(),
+            ),
+        ),
     ];
     for (name, html) in pages {
         let path = format!("{out_dir}/{name}");

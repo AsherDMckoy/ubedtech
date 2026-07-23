@@ -58,6 +58,9 @@ struct LicensePanelPage<'a> {
     changes: Vec<ChangeView>,
     notice: Option<&'a str>,
     error: Option<&'a str>,
+    /// Self-hosted deployments are read-only here: the signed license file
+    /// is the authority, so the panel explains that instead of a form.
+    self_hosted: bool,
 }
 
 #[derive(Deserialize)]
@@ -140,6 +143,12 @@ async fn render_panel(
 
     let snapshot = gate.snapshot();
 
+    let mode: String =
+        sqlx::query_scalar("SELECT mode FROM institution_license WHERE institution_id = $1")
+            .bind(snapshot.institution_id)
+            .fetch_one(pool)
+            .await?;
+
     #[derive(sqlx::FromRow)]
     struct ChangeRow {
         changed_at: chrono::DateTime<chrono::Utc>,
@@ -190,8 +199,63 @@ async fn render_panel(
         changes,
         notice,
         error,
+        self_hosted: mode == "self_hosted",
     }
     .render()?)
+}
+
+/// Rendered samples for the accessibility harness (`render-pages`).
+pub(crate) fn sample_license_panel_html() -> Result<String, askama::Error> {
+    LicensePanelPage {
+        csrf_token: "sample-token",
+        institution_id: Uuid::nil(),
+        status: "active",
+        valid_from: "2026-01-01 00:00 UTC".to_owned(),
+        valid_until: "2027-01-01 00:00 UTC".to_owned(),
+        version: 3,
+        changes: vec![
+            ChangeView {
+                changed_at: "2026-06-01 12:00 UTC".to_owned(),
+                old_status: "suspended".to_owned(),
+                new_status: "active".to_owned(),
+                reason: "invoice settled".to_owned(),
+                changed_by: "plat.admin".to_owned(),
+            },
+            ChangeView {
+                changed_at: "2026-05-01 09:00 UTC".to_owned(),
+                old_status: "active".to_owned(),
+                new_status: "suspended".to_owned(),
+                reason: "contract lapsed".to_owned(),
+                changed_by: "plat.admin".to_owned(),
+            },
+        ],
+        notice: None,
+        error: None,
+        self_hosted: false,
+    }
+    .render()
+}
+
+pub(crate) fn sample_license_panel_selfhosted_html() -> Result<String, askama::Error> {
+    LicensePanelPage {
+        csrf_token: "sample-token",
+        institution_id: Uuid::nil(),
+        status: "active",
+        valid_from: "2026-01-01 00:00 UTC".to_owned(),
+        valid_until: "2027-01-01 00:00 UTC".to_owned(),
+        version: 2,
+        changes: vec![ChangeView {
+            changed_at: "2026-03-01 08:00 UTC".to_owned(),
+            old_status: "expired".to_owned(),
+            new_status: "active".to_owned(),
+            reason: "signed license import (serial 4f1c…)".to_owned(),
+            changed_by: "inst.admin".to_owned(),
+        }],
+        notice: None,
+        error: None,
+        self_hosted: true,
+    }
+    .render()
 }
 
 fn html(status: StatusCode, body: String) -> HttpResponse {

@@ -35,6 +35,22 @@ impl LicenseService {
             return Err(AppError::Validation("reason is required".into()));
         }
 
+        // Self-hosted deployments take license state from the signed file
+        // only — a manual flip here would silently diverge from what the
+        // signature attests. Mode is immutable, so reading it outside the
+        // transaction is safe.
+        let mode: String =
+            sqlx::query_scalar("SELECT mode FROM institution_license WHERE institution_id = $1")
+                .bind(institution_id)
+                .fetch_optional(&self.pool)
+                .await?
+                .ok_or(AppError::NotFound)?;
+        if mode == "self_hosted" {
+            return Err(AppError::Validation(
+                "self-hosted license state changes only through signed license import".into(),
+            ));
+        }
+
         let mut tx = self.pool.begin().await?;
 
         let old = sqlx::query_as::<_, LicenseRow>(
