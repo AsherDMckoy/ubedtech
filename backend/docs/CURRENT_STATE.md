@@ -528,3 +528,26 @@ wiring, demo seed, and axe harness — no feature screens (next session).
   `settings_page_works_as_plain_forms`).
 - **a11y**: four pages added to the axe harness (26 total, all passing).
   Suite: 142 → 144 tests, green at every slice.
+
+## Licensing UI + locked-experience session outcome (2026-07-22)
+
+- **License panel on the design system** (`/ui/platform/license`,
+  `ui::platform_nav` shell): status card, mode display, change history.
+  Hosted mode keeps the status form (reason required; change record +
+  audit in one transaction — unchanged services). Self-hosted mode is
+  read-only: `set_status` refuses with 422 at the service (A33), the
+  panel names signed import as the only path
+  (`self_hosted_license_state_is_read_only_in_the_panel`).
+- **Access-suspended screen**: while the license is inactive, browser
+  GETs on `/ui/` product pages 303 to `/institution-locked`, now a
+  design-system page stating that no individual account is disabled and
+  linking the reachable surface (license status, sign-in, license
+  management). API clients and non-GET requests keep the JSON 402.
+  Carve-outs (health, license status/import, session routes, platform
+  UI, assets) proven untouched by
+  `locked_institution_answers_402_and_recovery_stays_reachable`.
+- **A32**: no public document-verification endpoint exists to keep live
+  while locked; reminder recorded in the exemption list.
+- **a11y**: three pages added to the axe harness — license panel
+  (hosted + self-hosted variants) and the locked screen (29 pages
+  total, all passing). Suite: 144 → 145 tests, green at every slice.

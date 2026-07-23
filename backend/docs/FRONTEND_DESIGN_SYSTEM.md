@@ -129,6 +129,17 @@ box-shadow).
   row; terminal rows drop `data-poll` and polling stops itself. Status is
   always badge + the status word from the ONE badge map — never color
   alone.
+- **Platform shell** (`ui::platform_nav(current)`, session 6): the
+  platform-operator variant of the role shell — one link today
+  (License). The license panel composes the status card (`.doc-head`
+  key-value grid + badge) with either the status form (hosted) or a
+  read-only explanation (self-hosted: the signed file is the authority;
+  the read-only rule is enforced in the service, not the template).
+- **Access-suspended screen** (`pages/locked.html`, session 6): bare
+  shell (`shell-bare`, like sign-in); the license middleware 303s any
+  `/ui/` browser GET here while the license is inactive. It names what
+  happened, states that no individual account is disabled, and links
+  what stays reachable (license status, sign-in, license management).
 - **Admin shell** (`ui::admin_nav(current)`, session 5): the
   institution-admin variant of the role shell (Calendar, Settings,
   Accounts), identical structure to the registrar shell below. Admin
