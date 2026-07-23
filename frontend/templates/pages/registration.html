@@ -14,6 +14,7 @@
     {% if enrollments.is_empty() %}
       <p>You are not registered for any sections this term.</p>
     {% else %}
+      <div class="table-wrap">
       <table>
         <caption>Current enrollments</caption>
         <thead>
@@ -42,6 +43,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     {% endif %}
   {% else %}
     <p>There is no active term right now.</p>

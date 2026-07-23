@@ -252,6 +252,35 @@ findings in the commit:
    rendered contrast, sticky-region overlap, or zoom reflow.
 7. **Print** the student history page: chrome hidden, content legible.
 
+### Checklist status (2026-07-22, demo-readiness session)
+
+What automation and code inspection could verify, verified:
+
+- Focus ring: one `:focus-visible` rule covers every interactive element
+  (`base.css`); no component overrides `outline`/`box-shadow` on focus.
+- Escape + focus return on dialogs: native `<dialog>.showModal()` is used
+  everywhere (menu sheet is `<details>`, closes with a second activation);
+  no hand-rolled focus trap exists to get wrong.
+- Reduced motion: `prefers-reduced-motion: reduce` kills every animation
+  and transition globally; nothing depends on motion to become visible.
+- 320 px width: every `<table>` on every page sits in `.table-wrap` (or
+  the registrar `.tabletop` scroller) — verified by template sweep; the
+  last two unwrapped tables (registration, license panel) fixed this
+  session. No fixed-width containers outside the wrap/wrap-wide columns.
+- Color independence: statuses render badge + word from the ONE badge
+  map (pinned unit test); blocked rows name their reason in text.
+- Print: `@media print` hides the shell chrome (`components.css`).
+- Structure per page: `assert_page_a11y` in every UI flow test plus
+  axe-core over all 29 rendered pages (`npm test`), both green today.
+
+What still needs a human with real assistive tech (cannot be run in this
+environment): the NVDA/VoiceOver pass (item 2), rendered-contrast +
+zoom-reflow in a real browser (item 6), and the physical keyboard walk
+(item 1 — the tab order is source order and the code has no tabindex
+overrides, but only hands on a keyboard prove feel). These are the
+release-gate items for a human reviewer; everything else above is
+regression-proof in CI.
+
 ## Adding a screen
 
 Extend `pages/base.html` (or override `rail`/`shell_class` for bare
