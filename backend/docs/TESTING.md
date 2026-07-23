@@ -30,7 +30,16 @@ harness — an infrastructure flake, not a code failure). Run
 `cargo test --all-targets --all-features -- --test-threads=4` locally;
 CI's service container copes with the default.
 
-## Current suite (131 tests as of the frontend/design-system session)
+## Current suite (145 tests as of the demo-readiness session, 2026-07-22)
+
+The UI sessions after the design-system session grew the suite 131 → 145:
+registrar screens (+11, including the staff no-bypass proof), the
+institution-admin screens (+2), and the licensing surfaces (+1
+self-hosted read-only). The four critical demo journeys are each a
+continuous seeded HTTP acceptance test (A34 lists them); the axe step
+covers 29 rendered pages.
+
+## Frontend/design-system session (131 tests)
 
 The frontend session (2026-07-20) added 3: the sign-in redirect for
 signed-out browsers vs honest API 401s, the full UI sign-out flow

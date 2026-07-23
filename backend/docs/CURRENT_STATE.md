@@ -551,3 +551,25 @@ wiring, demo seed, and axe harness — no feature screens (next session).
 - **a11y**: three pages added to the axe harness — license panel
   (hosted + self-hosted variants) and the locked screen (29 pages
   total, all passing). Suite: 144 → 145 tests, green at every slice.
+
+## Demo-readiness session outcome (2026-07-22, final frontend session)
+
+- **Responsive**: every table on every page now sits in a scroll
+  container (the last two — registration, license panel — fixed); no
+  horizontal page scroll at 320 px by construction.
+- **Accessibility**: axe green over all 29 rendered pages; the manual
+  checklist's machine-verifiable items are verified and recorded in
+  FRONTEND_DESIGN_SYSTEM.md (focus ring, native dialogs, reduced-motion,
+  color independence, print); the NVDA/real-browser items are named as
+  the remaining human release gate.
+- **Performance**: budgets re-measured and recorded (CSS 18.9 KiB /
+  4.3 gz; JS 63.6 KiB / 20.9 gz; both inside budget, enforced by tests);
+  fingerprinted immutable assets, no images, two asset requests per
+  page, HTML-first — all test-enforced.
+- **E2E**: the four demo journeys are continuous seeded HTTP acceptance
+  tests (A34 maps journey → test); no Playwright added — the JS-off
+  floor is the tested contract.
+- **Demo**: `docs/DEMO_SCRIPT.md` — click-paths, seed accounts
+  (src/dev/seed.sql, `ub-demo-password`), talking points per step.
+- Production asset build reproducible (dist diff clean); release binary
+  builds clean. Suite: 145 tests green.
