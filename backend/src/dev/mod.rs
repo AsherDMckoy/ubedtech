@@ -181,6 +181,7 @@ pub fn render_pages(out_dir: &str) -> std::io::Result<()> {
                 crate::licensing::http::sample_license_panel_html(),
             ),
         ),
+        ("locked.html", render("locked", crate::app::locked_html())),
         (
             "license_panel_selfhosted.html",
             render(

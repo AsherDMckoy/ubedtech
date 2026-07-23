@@ -1,0 +1,21 @@
+{% extends "pages/base.html" %}
+{% block title %}Access suspended{% endblock %}
+{% block shell_class %}shell-bare{% endblock %}
+{% block rail %}{% endblock %}
+{% block content %}
+  <div class="wrap">
+    <h1>Access suspended</h1>
+    <div class="card">
+      <p>This institution's license is not currently active, so ordinary access is paused
+        institution-wide. No individual account has been disabled and no records have been
+        lost — access resumes exactly where it left off once the license is active again.</p>
+      <p>If you are a student or staff member, contact your institution's administration.</p>
+      <h2>Still available</h2>
+      <ul>
+        <li><a href="/license/status">Current license status</a></li>
+        <li><a href="/ui/login">Sign in</a> — platform operators manage the license at
+          <a href="/ui/platform/license">License management</a></li>
+      </ul>
+    </div>
+  </div>
+{% endblock %}

@@ -6,7 +6,7 @@ use actix_web::body::MessageBody;
 use actix_web::dev::ServiceResponse;
 use actix_web::http::{Method, StatusCode, header};
 use actix_web::middleware::{ErrorHandlerResponse, ErrorHandlers};
-use actix_web::{HttpResponse, middleware::DefaultHeaders, web};
+use actix_web::{HttpResponse, ResponseError, middleware::DefaultHeaders, web};
 use sqlx::PgPool;
 
 use crate::config::Environment;
@@ -70,16 +70,27 @@ async fn license_status(gate: web::Data<crate::licensing::LicenseGate>) -> HttpR
     }))
 }
 
+/// The access-suspended screen browsers land on while the license is
+/// inactive (the license middleware redirects `/ui/` GETs here).
+#[derive(askama::Template)]
+#[template(path = "pages/locked.html")]
+struct LockedPage;
+
+pub(crate) fn locked_html() -> Result<String, askama::Error> {
+    use askama::Template;
+    LockedPage.render()
+}
+
 async fn locked_page() -> HttpResponse {
-    HttpResponse::Ok()
-        .content_type("text/html; charset=utf-8")
-        .body(
-            "<!doctype html><html lang=\"en\"><head><title>Institution locked</title></head>\
-             <body><h1>Institution access is inactive.</h1>\
-             <p>This institution's license is not currently active. Staff can check \
-             <a href=\"/license/status\">the license status</a> or contact the platform \
-             operator.</p></body></html>",
-        )
+    match locked_html() {
+        Ok(body) => HttpResponse::Ok()
+            .content_type("text/html; charset=utf-8")
+            .body(body),
+        Err(error) => {
+            tracing::error!(%error, "rendering the locked page failed");
+            crate::shared::error::AppError::Internal.error_response()
+        }
+    }
 }
 
 /// Shared readiness flag: written by the prober task, read by every

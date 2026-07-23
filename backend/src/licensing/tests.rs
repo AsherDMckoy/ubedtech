@@ -223,6 +223,38 @@ async fn locked_institution_answers_402_and_recovery_stays_reachable(pool: PgPoo
         );
     }
 
+    // A browser GET on a product page routes to the access-suspended
+    // screen instead of a bare 402 body.
+    let redirect = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/ui/registration")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(redirect.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        redirect.headers().get("location").unwrap(),
+        "/institution-locked"
+    );
+
+    let locked_screen = actix_test::call_service(
+        &app,
+        actix_test::TestRequest::get()
+            .uri("/institution-locked")
+            .to_request(),
+    )
+    .await;
+    assert_eq!(locked_screen.status(), StatusCode::OK);
+    let locked_body =
+        String::from_utf8(actix_test::read_body(locked_screen).await.to_vec()).unwrap();
+    crate::shared::assets::assert_page_a11y(&locked_body);
+    assert!(locked_body.contains("Access suspended"));
+    assert!(
+        locked_body.contains("No individual account has been disabled"),
+        "the screen must say the lock is the license, not the users"
+    );
+
     // Recovery surface: all reachable.
     for path in ["/health/live", "/health/ready", "/institution-locked"] {
         let response =

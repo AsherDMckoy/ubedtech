@@ -9,8 +9,9 @@
 
 use actix_web::body::{BoxBody, MessageBody};
 use actix_web::dev::{ServiceRequest, ServiceResponse};
+use actix_web::http::{Method, header};
 use actix_web::middleware::Next;
-use actix_web::{ResponseError, web};
+use actix_web::{HttpResponse, ResponseError, web};
 
 use crate::licensing::LicenseGate;
 use crate::shared::error::AppError;
@@ -29,6 +30,9 @@ pub(crate) fn is_license_exempt(path: &str) -> bool {
     ];
     // Static assets carry no institution data; the login and locked pages
     // need their stylesheet while locked.
+    // A32: no public document-verification endpoint exists yet. When one is
+    // built, its route belongs in this list — already-issued verification
+    // links must stay live while the institution is locked.
     EXACT.contains(&path) || path.starts_with("/ui/platform/") || path.starts_with("/assets/")
 }
 
@@ -51,6 +55,16 @@ pub async fn license_middleware(
     };
 
     if let Err(locked) = gate.require_deployment_active() {
+        // A browser navigating a product page lands on the access-suspended
+        // screen; API clients and non-GET requests keep the JSON 402. The
+        // target and the login/platform routes are exempt, so no loop.
+        if req.method() == Method::GET && req.path().starts_with("/ui/") {
+            let redirect = HttpResponse::SeeOther()
+                .insert_header((header::LOCATION, "/institution-locked"))
+                .finish();
+            let (req, _) = req.into_parts();
+            return Ok(ServiceResponse::new(req, redirect));
+        }
         let (req, _) = req.into_parts();
         return Ok(ServiceResponse::new(req, locked.error_response()));
     }
