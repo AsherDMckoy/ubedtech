@@ -1262,7 +1262,8 @@ async fn seed_stc(
     sqlx::query(
         "INSERT INTO academic_term (id, institution_id, code, name, starts_on, ends_on, \
          registration_opens_at, add_drop_closes_at, grade_entry_closes_at) \
-         VALUES ($1, $2, 'FALL-2026', 'Fall 2026', DATE '2026-08-24', DATE '2026-12-11', \
+         VALUES ($1, $2, 'FALL-2026', 'Fall 2026', \
+                 LEAST(CURRENT_DATE, DATE '2026-08-24'), DATE '2026-12-11', \
                  now() - interval '7 days', now() + interval '35 days', \
                  now() + interval '150 days')",
     )
@@ -1958,6 +1959,25 @@ mod tests {
         assert_eq!(
             instructor_sections, 2,
             "demo.instructor keeps exactly CMPS-2131 + CMPS-3141"
+        );
+
+        // The demo term must be the current term: current_term resolves by
+        // date span, and the sectionless DEV-2026 bootstrap term once
+        // shadowed FALL-2026, blanking every student screen. FALL-2026
+        // starts no later than today (LEAST in seed.sql) and DEV-2026 ends
+        // before it starts.
+        let (fall_started, dev_clear): (bool, bool) = sqlx::query_as(
+            "SELECT (SELECT starts_on <= CURRENT_DATE FROM academic_term WHERE id = $1), \
+                    (SELECT d.ends_on < f.starts_on FROM academic_term d, academic_term f \
+                      WHERE d.code = 'DEV-2026' AND f.id = $1)",
+        )
+        .bind(Uuid::from_u128(0x20))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            fall_started && dev_clear,
+            "FALL-2026 must span today and DEV-2026 must not shadow it"
         );
 
         // Idempotence: the second run detects the dataset and does nothing.

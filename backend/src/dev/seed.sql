@@ -52,6 +52,12 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
+-- The dev bootstrap term lives strictly in the PAST. current_term picks
+-- the term whose dates contain today, and this term has no sections —
+-- if it spanned today it would shadow the demo term FALL-2026 below and
+-- every student screen would render empty. Load tests reference it by
+-- explicit id, so its dates carry no other weight. DO UPDATE repairs
+-- databases seeded before this fix.
 INSERT INTO academic_term (
     id,
     institution_id,
@@ -68,13 +74,19 @@ VALUES (
     '00000000-0000-0000-0000-000000000001',
     'DEV-2026',
     'Development Term 2026',
-    CURRENT_DATE,
-    CURRENT_DATE + 120,
-    now() - interval '7 days',
-    now() + interval '37 days',
-    now() + interval '150 days'
+    DATE '2026-05-11',
+    DATE '2026-06-26',
+    TIMESTAMPTZ '2026-04-27 00:00+00',
+    TIMESTAMPTZ '2026-05-25 23:59+00',
+    TIMESTAMPTZ '2026-07-10 23:59+00'
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE
+SET
+    starts_on = EXCLUDED.starts_on,
+    ends_on = EXCLUDED.ends_on,
+    registration_opens_at = EXCLUDED.registration_opens_at,
+    add_drop_closes_at = EXCLUDED.add_drop_closes_at,
+    grade_entry_closes_at = EXCLUDED.grade_entry_closes_at;
 
 INSERT INTO institution_license (
     institution_id,
@@ -174,13 +186,21 @@ ON CONFLICT (id) DO NOTHING;
 
 -- Fall 2026: registration opened a week ago, add/drop stays open ~5 weeks,
 -- grade entry open well past that (the instructor screen needs a live
--- entry window).
+-- entry window). starts_on must contain today whenever the demo runs
+-- before Aug 24 — current_term resolves by date span, and a demo term
+-- that hasn't "started" renders every student screen empty. DO UPDATE
+-- so re-applying refreshes the windows on an existing database.
 INSERT INTO academic_term (id, institution_id, code, name, starts_on, ends_on,
                            registration_opens_at, add_drop_closes_at, grade_entry_closes_at)
 VALUES ('00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0000-000000000001',
-        'FALL-2026', 'Fall 2026', DATE '2026-08-24', DATE '2026-12-11',
+        'FALL-2026', 'Fall 2026', LEAST(CURRENT_DATE, DATE '2026-08-24'), DATE '2026-12-11',
         now() - interval '7 days', now() + interval '35 days', now() + interval '150 days')
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE
+SET
+    starts_on = EXCLUDED.starts_on,
+    registration_opens_at = EXCLUDED.registration_opens_at,
+    add_drop_closes_at = EXCLUDED.add_drop_closes_at,
+    grade_entry_closes_at = EXCLUDED.grade_entry_closes_at;
 
 INSERT INTO course (id, institution_id, code, title, credit_hours) VALUES
     ('00000000-0000-0000-0000-000000000021', '00000000-0000-0000-0000-000000000001', 'CMPS-2131', 'Data structures',      3.0),
