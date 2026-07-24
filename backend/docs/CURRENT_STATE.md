@@ -573,3 +573,61 @@ wiring, demo seed, and axe harness — no feature screens (next session).
   (src/dev/seed.sql, `ub-demo-password`), talking points per step.
 - Production asset build reproducible (dist diff clean); release binary
   builds clean. Suite: 145 tests green.
+
+## Demo-dataset session outcome (2026-07-23)
+
+- **`seed-demo` subcommand** (`src/dev/seed_demo.rs`): deterministic
+  (fixed RNG seed), idempotent (detects and skips), refuses
+  `APP_ENV=production`, layered on seed.sql. Full scale in ~32 s
+  (release, synchronous_commit off on its own pool): 900 students, 45
+  instructors, 89 courses across five faculties (FEA/FMSS/FST/FHS real,
+  Agriculture assumed for Central Farm), 685 sections over four terms,
+  5,389 current + 8,562 past enrollments, 8,564 grades, 47 document
+  requests across all six states, 73 holds, 18 calendar events, and a
+  second institution (STC) for scoping checks. Everything with an
+  invariant or audit requirement went through the real services; a
+  verification pass (counters, capacity rows, audit coverage) fails the
+  command loudly and is asserted again by the dataset acceptance test.
+  Suite: 146 tests green (`--test-threads=4` per TESTING.md).
+- **Term-shadow fix**: the sectionless DEV-2026 bootstrap term spanned
+  the seed-application day and outranked FALL-2026 in `current_term`,
+  blanking every student screen — the rehearsed demo could not start.
+  DEV-2026 now sits at fixed past dates; FALL-2026 starts no later than
+  today; both upsert so re-applying seed.sql repairs existing databases.
+- **Over-enrolled section**: not seeded — unrepresentable by design
+  (`section_capacity` CHECK `enrolled_count <= capacity`, and the
+  service refuses capacity reductions below current enrollment). The
+  display-state request lost to the correctness constraint.
+- All four demo journeys re-walked against the full dataset over HTTP:
+  each scripted step behaves as scripted (catalog states via search —
+  see finding 1), registration/drop/hold/grades/documents/license
+  lock+carve-outs+restore all verified; seat counts and idempotency
+  held throughout.
+
+### UI findings from the demo dataset (recorded, deliberately not fixed)
+
+1. **Catalog pagination vs. the demo script**: 280 current-term sections
+   paginate at 20, ordered by course code — the four scripted seed
+   states (CMPS-2131/CMPS-3141/MATH-3201/PHYS-2101) no longer share one
+   screen. Each is reachable instantly via search; DEMO_SCRIPT.md now
+   notes this. A "demo tour" is not worth building; consider pinning or
+   a curated default sort only if presenting stays painful.
+2. **Registrar sections list is unpaginated**: `/ui/registrar/sections`
+   renders all 282 current-term rows in one 190 KB page. Violates the
+   §4 pagination rule on a real UI path now that data is at scale.
+3. **Officer document queue is unpaginated** (38 rows today, unbounded
+   growth).
+4. **Catalog count text**: "Showing all 20 sections" renders on every
+   page of ~280 matches — "all" is only true when one page exists.
+5. **Meeting days render as ISO numbers** in catalog and registration
+   tables ("2 13:00–14:15" for Tuesday); the schedule grid uses day
+   names. Cryptic across hundreds of rows.
+6. **Live worker drains transient document states**: within ~a minute of
+   server start the queued/approved jobs render to `ready` and the
+   reaper requeues the frozen `generating` rows — exactly as designed.
+   All six badges exist at seed time (test-asserted); a screenshot pass
+   must capture approved/generating before starting the server's worker
+   or show them live via journey 3. There is no worker-off switch.
+7. **Academic history has no GPA/credit totals**: with two fully graded
+   terms the table is a long wall of rows with no term or cumulative
+   summary line.

@@ -30,7 +30,16 @@ harness — an infrastructure flake, not a code failure). Run
 `cargo test --all-targets --all-features -- --test-threads=4` locally;
 CI's service container copes with the default.
 
-## Current suite (145 tests as of the demo-readiness session, 2026-07-22)
+## Current suite (146 tests as of the demo-dataset session, 2026-07-23)
+
+The demo-dataset session added the dataset acceptance test
+(`dev::seed_demo`, SMOKE scale): every seeding stage runs against a real
+database, the invariant verification (seat counters, capacity rows,
+audit coverage) must pass, the rehearsed demo cores must survive
+untouched, empty-state accounts must exist, the demo term must not be
+shadowed, and a re-run must be a no-op. It builds its own pool
+(long acquire timeout, `synchronous_commit off`) so it tolerates a
+saturated local Postgres.
 
 The UI sessions after the design-system session grew the suite 131 → 145:
 registrar screens (+11, including the staff no-bypass proof), the

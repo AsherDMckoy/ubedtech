@@ -12,6 +12,14 @@ psql -d ubedtechdb -f src/dev/seed.sql    # idempotent demo dataset
 cargo run --release                       # migrations apply at startup
 ```
 
+Optional, recommended: `cargo run --release -- seed-demo` layers the
+deterministic full-scale dataset (900 students, ~280 current sections)
+on top, so every screen shows real volume. The scripted scenarios below
+survive it untouched — but the catalog then paginates (~280 sections,
+20 per page, ordered by course code), so surface each scripted course
+by typing its code into the catalog search instead of expecting all
+four on the first page.
+
 All demo passwords are `ub-demo-password`.
 
 | Account | Roles | Used for |
