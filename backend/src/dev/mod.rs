@@ -3,6 +3,8 @@
 //! (`frontend/test/a11y.mjs` runs axe over the rendered files). Needs no
 //! configuration or database — it must work on a bare checkout and in CI.
 
+pub mod seed_demo;
+
 use askama::Template;
 
 /// Every design-system primitive rendered once (FRONTEND.md §9). Not

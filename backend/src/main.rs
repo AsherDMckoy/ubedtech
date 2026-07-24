@@ -72,6 +72,12 @@ async fn main() -> std::io::Result<()> {
         std::process::exit(run_bootstrap_platform_admin(&pool, &config, &args[2..]).await);
     }
 
+    // `seed-demo`: deterministic development dataset layered on seed.sql
+    // (src/dev/seed_demo.rs). Refuses to run in production.
+    if args.get(1).map(String::as_str) == Some("seed-demo") {
+        std::process::exit(crate::dev::seed_demo::run(&pool, &config).await);
+    }
+
     let audit = AuditWriter;
     let initial_license = load_initial_license(&pool)
         .await

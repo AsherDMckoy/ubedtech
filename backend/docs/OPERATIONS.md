@@ -96,6 +96,16 @@ response header.
 `src/dev/seed.sql` seeds an institution, dev student, term, and an active
 license for local work: `psql -d ubedtechdb -f src/dev/seed.sql`.
 
+`cargo run -- seed-demo` layers a deterministic large dataset on top
+(src/dev/seed_demo.rs): ~900 students, four terms, ~14k enrollments made
+through the real services, all document states, a second institution.
+Development only — it exits with an error under `APP_ENV=production`, and
+its final verification pass fails the command if any seat counter, capacity
+row, or audit trail is inconsistent. Re-running detects the dataset and
+does nothing; rebuild by dropping the database, re-applying `seed.sql`,
+and re-running. Uses `synchronous_commit=off` on its own pool for speed —
+never on the application pool.
+
 ## Document artifact storage
 
 Artifacts (generated PDFs) live behind the `DocumentStore` trait

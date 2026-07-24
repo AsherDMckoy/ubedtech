@@ -48,4 +48,23 @@ development term, and demo accounts/data for every critical screen
 (see the header of `seed.sql` for the account list and passwords —
 development only, never production). Idempotent; re-run freely.
 
+For a realistic large dataset on top of that (UI evaluation at true
+scale):
+
+```sh
+cargo run -- seed-demo
+```
+
+Deterministic (fixed RNG seed): ~900 students, 45 instructors, ~85
+courses across five faculties, four terms (two fully graded), ~14,000
+enrollments and grades made through the real services so every counter
+and audit invariant holds (a verification pass fails loudly otherwise),
+~50 document requests across all six states, holds, calendar events, a
+second institution for scoping checks, and deliberate layout stressors
+(long names, an over-long course title, empty-state accounts). Skips
+itself if already present; refuses `APP_ENV=production`. Rebuild = drop
+the database, re-apply `seed.sql`, re-run. The `seed.sql` core scenarios
+(the rehearsed demo in `backend/docs/DEMO_SCRIPT.md`) are preserved
+exactly.
+
 Load-test dataset on top of that: `backend/load/README.md`.
