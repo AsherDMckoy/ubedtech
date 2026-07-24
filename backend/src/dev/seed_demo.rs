@@ -716,6 +716,17 @@ pub async fn seed(
     }
     insert_assignments(pool, &assignments).await?;
 
+    // Two students are reserved out of EVERY fill: students[1] is the
+    // brief's empty-state student (zero enrollments in any term, ever) and
+    // students[2] stays clean for the capacity-override showcase (their
+    // only enrollment is the one the override admits).
+    let enrollable: Vec<(Uuid, Uuid)> = students
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != 1 && *i != 2)
+        .map(|(_, s)| *s)
+        .collect();
+
     // ---- Past terms: enroll + grade through the real services ------------
     let mut past_enrollments = 0usize;
     let mut grade_count = 0usize;
@@ -727,7 +738,7 @@ pub async fn seed(
             let enrolled = fill_section(
                 &enrollment,
                 UB,
-                &students,
+                &enrollable,
                 *sid,
                 target,
                 scale.max_load,
@@ -773,9 +784,9 @@ pub async fn seed(
         .bind(math_2110_past)
         .execute(pool)
         .await?;
-    let prereq_holders = 60.min(students.len());
+    let prereq_holders = 60.min(enrollable.len());
     let mut math_graded = 0usize;
-    for (user_id, profile_id) in students.iter().take(prereq_holders) {
+    for (user_id, profile_id) in enrollable.iter().take(prereq_holders) {
         let receipt = enrollment
             .register_for(
                 &actor_in(UB, *user_id, *profile_id),
@@ -831,7 +842,7 @@ pub async fn seed(
     current_enrollments += fill_section(
         &enrollment,
         UB,
-        &students,
+        &enrollable,
         SEC_MATH_3201,
         22,
         usize::MAX,
@@ -840,7 +851,7 @@ pub async fn seed(
     )
     .await?
     .len();
-    let prereq_students: Vec<(Uuid, Uuid)> = students[..prereq_holders].to_vec();
+    let prereq_students: Vec<(Uuid, Uuid)> = enrollable[..prereq_holders].to_vec();
     current_enrollments += fill_section(
         &enrollment,
         UB,
@@ -856,15 +867,6 @@ pub async fn seed(
 
     // The generated current-term sections: ~15% full, ~20% nearly full
     // (1–3 seats left), the rest 40–85%.
-    // The empty-state student is students[1] ("first" generated after xi);
-    // students[2] is reserved conflict-free for the override showcase below.
-    // Both are excluded from every fill.
-    let enrollable: Vec<(Uuid, Uuid)> = students
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| *i != 1 && *i != 2)
-        .map(|(_, s)| *s)
-        .collect();
     let mut showcase_full: Option<Uuid> = None;
     for (sid, term, _, pattern, capacity) in &sections {
         if *term != FALL_2026 {
@@ -1959,6 +1961,27 @@ mod tests {
         assert_eq!(
             instructor_sections, 2,
             "demo.instructor keeps exactly CMPS-2131 + CMPS-3141"
+        );
+
+        // The brief's empty states are real accounts: a loginable student
+        // with zero enrollments ever, and an instructor with no sections.
+        let (empty_students, empty_instructors): (i64, i64) = sqlx::query_as(
+            "SELECT \
+             (SELECT count(*) FROM student_profile p \
+               JOIN password_credential c ON c.user_id = p.user_id \
+              WHERE NOT EXISTS (SELECT 1 FROM enrollment e WHERE e.student_id = p.id)), \
+             (SELECT count(*) FROM user_role ur JOIN role r ON r.id = ur.role_id \
+               WHERE r.code = 'instructor' AND NOT EXISTS \
+                     (SELECT 1 FROM instructor_assignment a \
+                       WHERE a.instructor_user_id = ur.user_id))",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            empty_students >= 1 && empty_instructors >= 1,
+            "empty-state accounts must exist (students: {empty_students}, \
+             instructors: {empty_instructors})"
         );
 
         // The demo term must be the current term: current_term resolves by
