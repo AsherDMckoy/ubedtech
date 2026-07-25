@@ -4,14 +4,16 @@ Produces the three benchmark-class reports CLAUDE.md §4 requires (results
 + metadata live in `docs/PERFORMANCE.md`). Tool: `wrk`.
 
 ```sh
-# 1. Dedicated throwaway database, seeded.
+# 1. Dedicated throwaway database, seeded. The URL needs an explicit
+#    username — without one sqlx falls back to a default role, not the
+#    OS user the way psql does.
 createdb ubedtech_load
-DATABASE_URL=postgresql://localhost:5432/ubedtech_load ./target/release/backend  # runs migrations, exits: no license yet
+DATABASE_URL=postgresql://$USER@localhost:5432/ubedtech_load ./target/release/backend  # runs migrations, exits: no license yet
 psql -d ubedtech_load -f src/dev/seed.sql
 psql -d ubedtech_load -f load/seed.sql
 
 # 2. Release server against it (readiness on /health/live).
-DATABASE_URL=postgresql://localhost:5432/ubedtech_load \
+DATABASE_URL=postgresql://$USER@localhost:5432/ubedtech_load \
   APP_BIND_ADDR=127.0.0.1:8087 APP_DOCUMENT_STORAGE_PATH=/tmp/load-docs \
   RUST_LOG=warn ./target/release/backend &
 
