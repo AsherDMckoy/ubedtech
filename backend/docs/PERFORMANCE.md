@@ -100,6 +100,58 @@ a factor at any percentile. The c64 tail is saturation queueing (the box
 tops out ~7.6 k req/s on this query; at c16 the p99 is 3.9 ms), consistent
 with the "saturation, not per-request cost" note above.
 
+## Realistic-scale benchmarks + plan inspection (2026-07-25, seed-demo dataset)
+
+The 2026-07-17 numbers above ran against 200 uniform sections and one
+student. Re-run against the `seed-demo` dataset — 900 students, 89
+courses, 685 sections across four terms (278 open in the current term),
+~14 k enrollments with real seat distribution, multi-term grade history —
+same hardware, quiet machine, fixed binary, `VACUUM ANALYZE` after seed,
+warm + measured. Class B/C authenticated as `demo.student`
+(`term_id = …0020`, FALL-2026).
+
+| Class | Configuration | Throughput | p50 / p90 / p99 | Notes |
+|---|---|---|---|---|
+| A | t8/c64 | 635,941 req/s | 79 µs / 138 µs / 424 µs | identical to both prior records |
+| B | t8/c64 | 5,590 req/s | 10.8 / 17.3 / 25.7 ms | 0 errors |
+| B | t4/c16 | 4,598 req/s | 3.4 / 4.1 / 5.3 ms | 0 errors |
+| B, page 13 (OFFSET 260) | t4/c16 | 4,442 req/s | 3.5 / 4.3 / 5.5 ms | deep OFFSET costs ~3 % |
+| B, `q=MATH` | t4/c16 | 14,605 req/s | 1.0 / 1.4 / 1.8 ms | filter shrinks the working set |
+| C | t4/c16 | 95 req/s | 158 / 183 / 490 ms | 4,335 rows verified for ~4,314 requests |
+
+Realistic scale costs class B ~27 % versus the tiny dataset (3.4 ms vs
+2.4 ms p50 at c16): the pre-LIMIT working set is now 278 rows. Class C is
+~20 % slower per request (transcript snapshots and availability checks
+see real history) and remains fsync-bound.
+
+**Plan inspection at this scale** (`EXPLAIN (ANALYZE, BUFFERS)`, stats
+fresh):
+
+- Catalog search: 1.5 ms. Seq scans on `section`/`section_capacity` are
+  the planner's correct choice (695-row tables, 21 shared-buffer pages);
+  the meeting LATERAL costs 0.002 ms × 278. The only wasted work in the
+  plan: the LATERAL and sort run over all 278 open sections before LIMIT
+  takes 20. Rewrite trigger: ~1,000+ open sections per term or a measured
+  p50 regression — then wrap the ORDER BY/LIMIT in a subquery and join
+  the meeting aggregate after it (keyset pagination is NOT indicated;
+  OFFSET at this depth is ~3 %).
+- Session resolve: 0.098 ms, index scans throughout
+  (`user_session_token_hash_key` exists; the seq scan on a 2-row session
+  table is size, not a missing index).
+- Idempotency lookup: 0.043 ms via `document_request_idempotent`. (A
+  test query with `gen_random_uuid()` in the WHERE showed a 3.8 ms seq
+  scan — volatile functions forbid index conditions. Bind constants when
+  hand-checking plans, as the app does.)
+- Officer queue / student history / registrar sections: 0.8–2.4 ms even
+  with 4.4 k benchmark-generated requests in the table. The cost of the
+  known unpaginated pages (CURRENT_STATE.md findings) is HTML
+  rendering/transfer, not the database.
+
+**Verdict: no optimization earned.** Every hot path is an index scan or
+a correct small-table seq scan; the only real pessimizations at scale
+remain the unpaginated registrar/officer HTML pages already recorded as
+UI findings.
+
 ## Query plans (Phase 8 inspection, hot enrollment + document paths)
 
 `EXPLAIN ANALYZE` on the load dataset (caveat: 200 sections / ~3.9k

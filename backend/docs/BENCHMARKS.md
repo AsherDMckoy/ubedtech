@@ -94,6 +94,32 @@ and zero real writes.
 
 A: 635,941 req/s · B: 3,940 req/s, p99 35.6 ms · C: 106 req/s, p99 625 ms.
 
+## Realistic-scale runs (seed-demo dataset, 900 students / 685 sections / 14 k enrollments)
+
+Fresh `ubedtech_bench` database: migrations → seed.sql → `seed-demo`
+(30.5 s) → `VACUUM ANALYZE`. Auth as `demo.student`, FALL-2026 term.
+Full numbers and the EXPLAIN ANALYZE inspection: PERFORMANCE.md
+(2026-07-25 realistic-scale section).
+
+| Class | Config | Throughput | p50 / p99 |
+|---|---|---|---|
+| A | t8/c64 | 635,941 req/s | 79 µs / 424 µs |
+| B | t8/c64 | 5,590 req/s | 10.8 / 25.7 ms |
+| B | t4/c16 | 4,598 req/s | 3.4 / 5.3 ms |
+| B deep OFFSET (page 13) | t4/c16 | 4,442 req/s | 3.5 / 5.5 ms |
+| B search `q=MATH` | t4/c16 | 14,605 req/s | 1.0 / 1.8 ms |
+| C | t4/c16 | 95 req/s | 158 / 490 ms (4,335 rows verified) |
+
+Findings: realistic scale costs class B ~27 % (pre-LIMIT working set of
+278 rows), deep OFFSET ~3 % (keyset pagination not indicated), class C
+stays fsync-bound. Plan inspection indicted nothing — the recorded
+catalog-LATERAL rewrite trigger is ~1,000+ open sections per term. One
+methodology trap worth keeping: `gen_random_uuid()` in a hand-written
+EXPLAIN forces a seq scan (volatile ≠ indexable) and fakes a missing
+index; bind constants. The bench server also died silently once between
+class A and B (empty log, no panic — likely OOM/external kill;
+unreproduced on restart). One watch item, not a finding yet.
+
 ## Operational findings this session
 
 - `DATABASE_URL` needs an explicit username — sqlx falls back to a
