@@ -35,7 +35,9 @@ Durability: `synchronous_commit = on`, fsync on — **a raw single-row
 `INSERT; COMMIT` in psql costs ~68 ms on this machine's storage**, which
 is the floor for anything durable below. All authenticated runs share one
 session (session resolution on every request; the idle-deadline slide
-UPDATE fires at most once per 60 s). Error rate 0 in every measured run
+UPDATE writes at most once per 60 s per session — enforced in the
+statement itself since the 2026-07-25 stampede fix below, not just by the
+application-side staleness check). Error rate 0 in every measured run
 (all responses 2xx/3xx, verified; class C row count matched the request
 count).
 
@@ -62,6 +64,41 @@ midpoint marker — raw distributions in the wrk output reproduced by
   idempotency keys, and the server correctly returned the original
   request each time — an accidental proof that idempotency holds under
   concurrent load. The script now seeds per thread.
+
+## Session-touch stampede fix + class B re-measurement (2026-07-25)
+
+A benchmark run with a **stale** shared session (cookie minted minutes
+before the run, unlike the fresh-cookie runs above) exposed a stampede:
+all 64 in-flight requests read the same stale `last_seen_at`, all fired
+the idle-slide UPDATE on the same `user_session` row, and each queued
+writer paid its own ~68 ms durable commit to write the timestamp the
+previous one had just written — a monotonic 1 s → 7 s lock queue, p99
+474 ms, and 2 s client timeouts on a pure read path. Real users hold
+distinct sessions, but any single high-concurrency API client reproduces
+this.
+
+Fix (`identity_access/sessions.rs`): the staleness threshold is repeated
+inside the UPDATE (`AND last_seen_at <= now − 60 s`) so only the first
+writer matches, and the row is selected `FOR NO KEY UPDATE SKIP LOCKED`
+so the losing herd doesn't even wait for the winner's commit — measured
+intermediate state showed the guard alone left a ~3 s convoy of no-op
+waiters. Same pattern as the document-job claim query. Test:
+`concurrent_refreshes_write_once_not_once_per_request`.
+
+Re-measured class B after the fix, same hardware/dataset, quiet machine
+(a leftover second server process from the interactive session had been
+halving earlier numbers — generator noise, worth checking before trusting
+any local run), stale-session start, warm caches:
+
+| Concurrency | Throughput | p50 / p90 / p99 | Errors |
+|---|---|---|---|
+| 8 t / 64 conns | **7,633 req/s** | 7.4 ms / 12.4 ms / 423 ms | 35 timeouts / 229 k (0.015 %) |
+| 4 t / 16 conns | **6,438 req/s** | 2.4 ms / 3.0 ms / 3.9 ms | 0 |
+
+Zero slow-statement warnings in either run — the session row is no longer
+a factor at any percentile. The c64 tail is saturation queueing (the box
+tops out ~7.6 k req/s on this query; at c16 the p99 is 3.9 ms), consistent
+with the "saturation, not per-request cost" note above.
 
 ## Query plans (Phase 8 inspection, hot enrollment + document paths)
 

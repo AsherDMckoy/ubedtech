@@ -30,7 +30,15 @@ harness — an infrastructure flake, not a code failure). Run
 `cargo test --all-targets --all-features -- --test-threads=4` locally;
 CI's service container copes with the default.
 
-## Current suite (146 tests as of the demo-dataset session, 2026-07-23)
+## Current suite (147 tests; last change 2026-07-25, session-touch stampede)
+
+2026-07-25 added `identity_access::sessions::
+concurrent_refreshes_write_once_not_once_per_request`: an open
+transaction refreshes the session row and holds the lock while a
+concurrent `resolve()` that already read the stale row fires its
+refresh — the resolve must succeed and must NOT overwrite the winner's
+timestamp (the losing herd skips via `SKIP LOCKED` instead of queueing
+an fsync each; see PERFORMANCE.md, 2026-07-25).
 
 The demo-dataset session added the dataset acceptance test
 (`dev::seed_demo`, SMOKE scale): every seeding stage runs against a real

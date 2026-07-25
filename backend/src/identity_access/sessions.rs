@@ -195,16 +195,32 @@ impl SessionService {
         }
 
         if now - row.last_seen_at >= Duration::seconds(LAST_SEEN_REFRESH_SECS) {
+            // The refresh is best-effort bookkeeping, and this statement is
+            // written for the stampede: many in-flight requests on one
+            // session all read the same stale last_seen_at and all reach
+            // this point. The staleness guard repeated in the WHERE means
+            // only the first writer's UPDATE matches (measured without it:
+            // 64 connections on one session queued ~7 s of redundant
+            // fsyncs); SKIP LOCKED means the rest do not even wait for the
+            // winner's commit — they see the row locked, skip it, and move
+            // on (measured with the guard alone: the no-op herd still
+            // convoyed ~3 s on the row lock). Same pattern as the job
+            // worker's claim query.
             sqlx::query(
                 r#"
                 UPDATE user_session
                    SET last_seen_at = $2, idle_expires_at = $3
-                 WHERE id = $1 AND revoked_at IS NULL
+                 WHERE id IN (
+                     SELECT id FROM user_session
+                      WHERE id = $1 AND revoked_at IS NULL AND last_seen_at <= $4
+                        FOR NO KEY UPDATE SKIP LOCKED
+                 )
                 "#,
             )
             .bind(row.session_id)
             .bind(now)
             .bind(now + self.idle)
+            .bind(now - Duration::seconds(LAST_SEEN_REFRESH_SECS))
             .execute(&self.pool)
             .await?;
         }
@@ -530,5 +546,70 @@ mod tests {
                 .unwrap();
 
         assert!(after > before, "idle deadline was refreshed by activity");
+    }
+
+    /// The stampede case: N concurrent requests on one stale session all
+    /// pass the in-memory staleness check and all fire the refresh UPDATE.
+    /// Only the first may write; the rest must re-check after the row lock
+    /// clears and no-op — otherwise every one of them pays a durable commit
+    /// (the class-B benchmark queued seconds of fsyncs this way).
+    ///
+    /// Replayed deterministically: an open transaction refreshes the row
+    /// and holds the lock while resolve() — which already read the stale
+    /// row — blocks on its UPDATE. After the commit, resolve's re-check
+    /// must find the row fresh and leave the winner's timestamp in place.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn concurrent_refreshes_write_once_not_once_per_request(pool: PgPool) {
+        let (institution_id, user_id) = seed_user(&pool).await;
+        let sessions = service(&pool);
+        let new = sessions.create(user_id, institution_id, 1).await.unwrap();
+
+        sqlx::query(
+            "UPDATE user_session SET last_seen_at = now() - interval '2 minutes' WHERE id = $1",
+        )
+        .bind(new.session_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // The "winner": refresh inside an open transaction, lock held.
+        let mut winner = pool.begin().await.unwrap();
+        let winner_stamp: DateTime<Utc> = sqlx::query_scalar(
+            "UPDATE user_session SET last_seen_at = now(), \
+             idle_expires_at = now() + interval '30 minutes' \
+             WHERE id = $1 RETURNING last_seen_at",
+        )
+        .bind(new.session_id)
+        .fetch_one(&mut *winner)
+        .await
+        .unwrap();
+
+        // The "herd member": reads the stale row (MVCC — the winner is
+        // uncommitted), fires the refresh UPDATE, blocks on the row lock.
+        let herd = {
+            let sessions = service(&pool);
+            let token = new.token.expose().to_owned();
+            tokio::spawn(async move { sessions.resolve(&token).await })
+        };
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        winner.commit().await.unwrap();
+
+        let resolved = herd.await.unwrap().unwrap();
+        assert!(
+            resolved.is_some(),
+            "losing the refresh race is not an error"
+        );
+
+        let final_stamp: DateTime<Utc> =
+            sqlx::query_scalar("SELECT last_seen_at FROM user_session WHERE id = $1")
+                .bind(new.session_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            final_stamp, winner_stamp,
+            "the herd member overwrote the winner's refresh — the WHERE \
+             guard is gone and every queued request pays its own fsync"
+        );
     }
 }
