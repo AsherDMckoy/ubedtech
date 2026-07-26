@@ -406,6 +406,8 @@ mod tests {
             ("text-warning", "bg-warning"),
             ("text-danger", "bg-danger"),
             ("action-ink", "action"),
+            // the gold KPI surface carries brand-ink text (dashboard ref)
+            ("text-accent", "action-wash"),
         ];
         for theme in ["light", "dark"] {
             for (fg, bg) in text_pairs {
@@ -422,5 +424,34 @@ mod tests {
                 "[{theme}] --border-accent on --surface-0 is {ratio:.2}:1; needs 3:1"
             );
         }
+
+        // The explicit-choice dark block ([data-theme="dark"]) and the
+        // system-preference media block must define IDENTICAL values —
+        // otherwise "chose dark" and "OS is dark" silently drift apart and
+        // only one of them is contrast-checked.
+        let block = |from: usize| {
+            let open = sheet[from..].find('{').unwrap() + from + 1;
+            let close = sheet[open..].find("\n}").unwrap() + open;
+            sheet[open..close]
+                .lines()
+                .map(str::trim)
+                .filter(|line| line.starts_with("--"))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        let chosen = block(
+            sheet
+                .find("\n:root[data-theme=\"dark\"] {")
+                .expect("chosen-dark block"),
+        );
+        let media_root = split
+            + dark
+                .find(":root:not([data-theme])")
+                .expect("system-dark block");
+        let system = block(media_root);
+        assert_eq!(
+            chosen, system,
+            "the [data-theme=\"dark\"] and prefers-color-scheme dark blocks have drifted apart"
+        );
     }
 }

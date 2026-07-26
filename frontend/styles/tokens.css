@@ -1,37 +1,63 @@
-/* Design tokens — the single source of truth (FRONTEND.md §9), extracted
-   from the shared :root block of the three reference screens in
-   docs/design-references/. Everything downstream references these; no
-   component may introduce its own color, duration, or easing.
+/* Design tokens — the single source of truth (FRONTEND.md §9), remapped to
+   the University of Belize identity in
+   docs/design-references/dashboard-upgraded.html: purple carries brand and
+   structure, gold is the acting color (primary action, active nav, the one
+   number that matters). Token NAMES are unchanged from the first system so
+   every downstream rule keeps working; only values moved.
 
-   Deviations from the references, both for WCAG AA (verified by
+   Three theme blocks, in this order (the contrast test depends on it):
+   1. :root                       — light, the default
+   2. :root[data-theme="dark"]    — user chose dark (cookie, server-stamped)
+   3. @media prefers-color-scheme — dark for "system" users (no data-theme)
+   Blocks 2 and 3 must stay value-identical; the contrast test enforces it.
+
+   Deviations from the reference, for WCAG AA (verified by
    `design_tokens_meet_wcag_contrast`):
-   - --text-muted (light) darkened #8a8983 → #6f6e6b (was 3.2:1 on
-     --surface-0; hint text is still text).
-   - --action/--action-ink added for the primary button. The references
-     reuse --text-accent as the button background, which becomes a light
-     blue in dark mode and drops white label text to 2.1:1. The action
-     pair stays a fixed dark blue in both themes. */
+   - --text-muted (light) darkened #8b8397 → #6b6178 (hint text is still
+     text; the reference value is 3.2:1 on the page background).
+   - Dark status washes are precomputed SOLID blends of the reference's
+     rgba washes over the dark card surface, so contrast is checkable and
+     rendering doesn't depend on what sits underneath.
+   - --dur-base stays 180ms (FRONTEND.md §2 fixes ≈180ms; the reference's
+     200ms is within the same perceptual bucket and loses to the rule). */
 
 :root {
+  /* UB identity ramps — referenced by tokens and the two brand gradients
+     (logo mark, avatar) only; screens never use these directly */
+  --purple-900: #2a1a4a;
+  --purple-800: #38235f;
+  --purple-700: #4a2d7a;
+  --purple-600: #5e3a97;
+  --purple-500: #734bb3;
+  --purple-100: #ede7f6;
+  --gold-600: #b8860b;
+  --gold-500: #d4a017;
+  --gold-400: #e6b93a;
+  --gold-100: #fbf3d9;
+
   /* surfaces: page < panel < card */
-  --surface-0: #f6f5f1;
-  --surface-1: #faf9f6;
+  --surface-0: #f7f5fb;
+  --surface-1: #faf8fd;
   --surface-2: #ffffff;
 
   /* text */
-  --text-primary: #1f1f1d;
-  --text-secondary: #5f5e5a;
-  --text-muted: #6f6e6b;
+  --text-primary: #1c1526;
+  --text-secondary: #5a5169;
+  --text-muted: #6b6178;
 
   /* borders */
-  --border: rgba(31, 31, 29, 0.12);
-  --border-strong: rgba(31, 31, 29, 0.22);
+  --border: rgba(42, 26, 74, 0.1);
+  --border-strong: rgba(42, 26, 74, 0.22);
 
-  /* color roles: accent (blue), success (green), warning (amber),
-     danger (red) — each a text/bg/border triple */
-  --text-accent: #185fa5;
-  --bg-accent: #e6f1fb;
-  --border-accent: #378add;
+  /* brand (purple): identity and structure. --text-accent is brand ink,
+     --bg-accent the brand wash, --border-accent the focus/structure line. */
+  --brand: #4a2d7a;
+  --text-accent: #38235f;
+  --bg-accent: #ede7f6;
+  --border-accent: #4a2d7a;
+
+  /* status roles — unchanged from the first system (the reference reuses
+     these exact greens/reds; each pair is AA-checked) */
   --text-success: #0f6e56;
   --bg-success: #e1f5ee;
   --border-success: #1d9e75;
@@ -42,13 +68,26 @@
   --bg-danger: #fcebeb;
   --border-danger: #e24b4a;
 
-  /* the primary action button pair — fixed across themes */
-  --action: #185fa5;
-  --action-ink: #ffffff;
+  /* the acting color — gold, a scalpel: primary action, active-nav mark,
+     one key figure per screen. Never on alerts, never sprinkled. */
+  --action: #d4a017;
+  --action-hover: #b8860b;
+  --action-ink: #3a2a00;
+  --action-wash: #fbf3d9;
+
+  /* elevation — page chrome sits flat; cards lift once; dialogs float */
+  --shadow-sm: 0 1px 2px rgba(42, 26, 74, 0.06), 0 1px 3px rgba(42, 26, 74, 0.04);
+  --shadow-md: 0 2px 8px rgba(42, 26, 74, 0.08), 0 6px 20px rgba(42, 26, 74, 0.06);
+  --shadow-lg: 0 8px 30px rgba(42, 26, 74, 0.14);
 
   /* radius */
   --radius: 8px;
   --radius-card: 12px;
+  --radius-lg: 18px;
+  --radius-pill: 999px;
+
+  /* layout: the centered comfortable measure every screen shell uses */
+  --measure: 1080px;
 
   /* spacing scale — every gap/padding/margin steps on this */
   --space-1: 4px;
@@ -66,28 +105,76 @@
   --ease-enter: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-exit: cubic-bezier(0.4, 0, 1, 1);
 
-  /* type */
-  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-    Helvetica, Arial, sans-serif;
+  /* type — the display face carries headings and the one key figure;
+     the sans carries everything else. Both self-hosted (no third-party
+     runtime requests; ADR-14). */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif;
+  --font-display: "Fraunces", "Iowan Old Style", Georgia, serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
+/* DARK — near-black with a purple tint; gold glows against it. Applied
+   when the user explicitly chose dark (server stamps data-theme from the
+   ub_theme cookie). KEEP IN SYNC with the media block below — the
+   contrast test fails if the two blocks diverge. */
+:root[data-theme="dark"] {
+  --surface-0: #141019;
+  --surface-1: #1d1726;
+  --surface-2: #241d30;
+
+  --text-primary: #f2eef8;
+  --text-secondary: #bab2c7;
+  --text-muted: #948b9f;
+
+  --border: rgba(242, 238, 248, 0.12);
+  --border-strong: rgba(242, 238, 248, 0.26);
+
+  --brand: #734bb3;
+  --text-accent: #c9b8e6;
+  --bg-accent: #2e2142;
+  --border-accent: #8f6cc9;
+
+  --text-success: #5dcaa5;
+  --bg-success: #085041;
+  --border-success: #1d9e75;
+  --text-warning: #fac775;
+  --bg-warning: #633806;
+  --border-warning: #ba7517;
+  --text-danger: #f09595;
+  --bg-danger: #791f1f;
+  --border-danger: #e24b4a;
+
+  --action: #e6b93a;
+  --action-hover: #d4a017;
+  --action-ink: #1c1200;
+  --action-wash: #3a3122;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 10px 36px rgba(0, 0, 0, 0.55);
+}
+
+/* system: follow the OS only when the user hasn't chosen (no data-theme
+   stamped). Value-identical to the block above, enforced by test. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --surface-0: #1a1a18;
-    --surface-1: #232320;
-    --surface-2: #2c2c29;
+  :root:not([data-theme]) {
+    --surface-0: #141019;
+    --surface-1: #1d1726;
+    --surface-2: #241d30;
 
-    --text-primary: #f2f1ec;
-    --text-secondary: #b4b2a9;
-    --text-muted: #8a8983;
+    --text-primary: #f2eef8;
+    --text-secondary: #bab2c7;
+    --text-muted: #948b9f;
 
-    --border: rgba(242, 241, 236, 0.14);
-    --border-strong: rgba(242, 241, 236, 0.26);
+    --border: rgba(242, 238, 248, 0.12);
+    --border-strong: rgba(242, 238, 248, 0.26);
 
-    --text-accent: #85b7eb;
-    --bg-accent: #0c447c;
-    --border-accent: #378add;
+    --brand: #734bb3;
+    --text-accent: #c9b8e6;
+    --bg-accent: #2e2142;
+    --border-accent: #8f6cc9;
+
     --text-success: #5dcaa5;
     --bg-success: #085041;
     --border-success: #1d9e75;
@@ -97,5 +184,14 @@
     --text-danger: #f09595;
     --bg-danger: #791f1f;
     --border-danger: #e24b4a;
+
+    --action: #e6b93a;
+    --action-hover: #d4a017;
+    --action-ink: #1c1200;
+    --action-wash: #3a3122;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 10px 36px rgba(0, 0, 0, 0.55);
   }
 }
