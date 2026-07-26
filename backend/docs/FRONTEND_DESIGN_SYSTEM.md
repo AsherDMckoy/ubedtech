@@ -26,22 +26,50 @@ their styling.
 
 ## Design tokens (`frontend/styles/tokens.css` — the single source of truth)
 
-Extracted from the reference screens in `docs/design-references/`; light
-and dark (via `prefers-color-scheme`). **Every text pair is
-contrast-tested in both themes** (`design_tokens_meet_wcag_contrast`).
+The University of Belize identity, remapped 2026-07-26 from
+`docs/design-references/dashboard-upgraded.html` under the ORIGINAL token
+names: **purple carries brand and structure, gold is the acting color** —
+the primary action, the active-nav bar, and at most one key figure per
+screen. Gold never colors alerts (action-blocking stays danger) and never
+sprinkles across tables. **Every text pair is contrast-tested in both
+themes** (`design_tokens_meet_wcag_contrast`), which also proves the two
+dark blocks (chosen vs system) are value-identical.
 
-- Surfaces `--surface-0/1/2` (page < panel < card), text
-  `--text-primary/secondary/muted`, borders `--border`, `--border-strong`.
-- Four color roles, each a `--text-*`/`--bg-*`/`--border-*` triple:
-  accent (blue), success (green), warning (amber), danger (red).
-- `--action` + `--action-ink` — the primary button pair, fixed across
-  themes (deviation from the references, noted in the file: their
-  dark-mode button label sat at 2.1:1).
-- Radius `--radius` (controls) / `--radius-card`; spacing scale
+- Identity ramps `--purple-900…100`, `--gold-600…100` — referenced by
+  tokens and the two brand gradients only; screens never use them raw.
+- Surfaces `--surface-0/1/2` (page < panel < card; dark is near-black
+  with a purple tint), text `--text-primary/secondary/muted`, borders
+  `--border`, `--border-strong`.
+- Brand: `--brand`, `--text-accent` (brand ink), `--bg-accent` (wash),
+  `--border-accent` (focus/structure). Status triples for
+  success/warning/danger unchanged from the first system.
+- The acting pair `--action`/`--action-ink` plus `--action-hover` and
+  `--action-wash` — gold in both themes, AA-checked.
+- Elevation `--shadow-sm/md/lg`: chrome flat, cards lift once, dialogs
+  float. (Supersedes the flat system's "focus ring is the only
+  box-shadow" stance; the focus ring rule itself is unchanged.)
+- Type: `--font-sans` (Inter), `--font-display` (Fraunces — headings,
+  brand, the key figure), `--font-mono`. Both faces self-hosted
+  (ADR-14), `font-display: swap`.
+- Radius `--radius` / `--radius-card` / `--radius-lg` / `--radius-pill`;
+  layout measure `--measure` (1080px centered shell); spacing scale
   `--space-1…6` (4/8/12/16/24/40 px).
 - Motion: `--dur-fast` 120 ms (hover/focus/menu), `--dur-base` 180 ms
   (dialog/sheet); `--ease-enter`, `--ease-exit`. These four tokens are the
   entire motion vocabulary (FRONTEND.md §2).
+
+## Theme mechanism (light / dark / system — ADR-14)
+
+The choice persists in a `ub_theme` cookie; the SERVER stamps
+`<html data-theme=…>` at render time (request-scoped task-local read by
+`shared::theme::html_attr()` in base.html). "system" stamps nothing and
+the `prefers-color-scheme` block in tokens.css decides. No inline script,
+no localStorage, no flash of wrong theme — the attribute is in the first
+byte. The toggle (`ui::theme_toggle()`, in every rail foot and the mobile
+sheet) is a real form POSTing `/ui/theme` (CSRF-checked, redirects back);
+the bundled script enhances it to flip `data-theme` instantly and persist
+via the same POST. Proof:
+`theme_is_cookie_stamped_server_side_and_toggles_as_a_plain_form`.
 
 ## Primitives (`frontend/styles/components.css` + `frontend/templates/components/ui.html`)
 
