@@ -167,8 +167,11 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::JsonConfig::default().limit(64 * 1024))
             .app_data(web::FormConfig::default().limit(64 * 1024))
             .app_data(web::PayloadConfig::new(256 * 1024))
-            // Registered first = runs innermost: CSRF checks need the
-            // session already resolved, so csrf sits inside session.
+            // Registered first = runs innermost. The theme scope needs the
+            // session already resolved (it lifts the CSRF token for the
+            // toggle form), so it sits inside csrf, which sits inside
+            // session.
+            .wrap(middleware::from_fn(crate::shared::theme::theme_middleware))
             .wrap(middleware::from_fn(
                 crate::identity_access::csrf::csrf_middleware,
             ))

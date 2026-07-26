@@ -233,3 +233,40 @@ repository, and CLAUDE.md §6 requires docs to be committed with code.
   and compression against the real dist files; the CI dist-diff step proves
   committed assets match the sources; the UI flow tests still never
   execute a script.
+
+## ADR-14: cookie-stamped theming and self-hosted fonts (annotates ADR-11/12)
+
+- **Original:** ADR-11/12's system had a single palette that followed the
+  OS via `prefers-color-scheme` only — no user choice, nothing persisted,
+  no display typeface, system font stack only. The upgraded reference
+  (docs/design-references/dashboard-upgraded.html) demands a selectable
+  light/dark/system theme and the Fraunces/Inter pairing, and demonstrates
+  both with an inline script + localStorage and a Google Fonts `@import` —
+  all three of which the behavioral floor forbids (CSP `script-src 'self'`
+  with no inline scripts; no third-party runtime requests).
+- **Replacement:** the choice lives in a `ub_theme` cookie
+  (light|dark|system, 1 year, SameSite=Lax). The SERVER stamps
+  `<html data-theme=…>` at render time — "system" stamps nothing and the
+  `prefers-color-scheme` media block in tokens.css decides. The toggle is
+  a real form: POST `/ui/theme` (CSRF-checked) sets the cookie and
+  redirects back — that is the JS-off path — and the bundled first-party
+  script enhances it to flip `data-theme` instantly and persist via the
+  same POST. The per-request theme and the toggle's CSRF token reach
+  `base.html` through request-scoped task-locals read by free functions
+  (the `assets::css_href()` calling pattern), so no template grows new
+  fields. Fonts are two vendored latin variable woff2 files, fingerprinted
+  by esbuild, served same-origin/immutable, `font-display: swap`.
+- **Why cookie-stamped over inline-script:** an inline `<head>` script is
+  a CSP exception on every page to fix a flash the server can prevent
+  outright — the attribute rides the first byte of HTML, so there is no
+  frame rendered in the wrong theme, and the preference works with
+  JavaScript disabled, which localStorage never can.
+- **Consequences:** the theme is per-browser (cookie), not per-account —
+  acceptable for a display preference; the toggle only renders inside a
+  session (the CSRF task-local is empty when signed out), so anonymous
+  pages follow the cookie/OS without offering the control.
+- **Proof:** `theme_is_cookie_stamped_server_side_and_toggles_as_a_plain_
+  form` (stamp present/absent, JS-off POST + redirect + cookie, garbage
+  refused); `design_tokens_meet_wcag_contrast` covers both dark blocks and
+  proves them value-identical; the asset tests pin font serving and the
+  per-file font budget.

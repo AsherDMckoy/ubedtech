@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en"{{ crate::shared::theme::html_attr() }}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -19,6 +19,7 @@
         <summary>Menu</summary>
         <nav class="sheet-panel" aria-label="Primary">
           {% call ui::nav_links() %}{% endcall %}
+          {% call ui::theme_toggle() %}{% endcall %}
         </nav>
       </details>
     </header>
@@ -26,6 +27,7 @@
       <span class="brand">University of Belize</span>
       {% call ui::nav_links() %}{% endcall %}
       <div class="rail-foot">
+        {% call ui::theme_toggle() %}{% endcall %}
         <a href="/ui/signout">Sign out</a>
       </div>
     </nav>

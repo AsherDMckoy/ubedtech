@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<!--
+  UPGRADED DESIGN-SYSTEM REFERENCE — student dashboard.
+  Target for the beautification pass. Same behavioral floor as before
+  (server-rendered, JS-off-safe, no optimistic success, reduced-motion honored);
+  raised visual ceiling: UB purple as brand/structure, gold as the acting color
+  (primary buttons, active nav, the one number that matters).
+
+  Fixes the four issues found in the running app:
+   1. Clicking the already-active nav item is a no-op (aria-current, not a link).
+   2. Theme is light / dark / system, persisted — NOT locked to the OS.
+      Persistence uses a COOKIE stamped server-side onto <html data-theme>, so
+      there is no CSP-violating inline script and no flash of wrong theme.
+      (This demo mirrors that with a data-theme attribute + a CSP-safe toggle;
+      in production the server writes data-theme at render time. See note in JS.)
+   3. Content has a comfortable max measure and centered gutters — no dead space.
+   4. The catalog search region is sticky (shown on the catalog reference; the
+      dashboard demonstrates the sticky app header the same mechanism uses).
+
+  GOLD IS A SCALPEL: it touches the primary action, the active nav item, and the
+  single most important number per screen — nothing else. Purple carries identity.
+-->
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard · University of Belize</title>
+<style>
+  /* ---- TOKENS ---------------------------------------------------------- */
+  :root{
+    /* UB identity */
+    --purple-900:#2a1a4a; --purple-800:#38235f; --purple-700:#4a2d7a;
+    --purple-600:#5e3a97; --purple-500:#734bb3; --purple-100:#ede7f6;
+    --gold-600:#b8860b; --gold-500:#d4a017; --gold-400:#e6b93a; --gold-100:#fbf3d9;
+
+    /* LIGHT (default) */
+    --bg:#f7f5fb; --surface:#ffffff; --surface-2:#faf8fd;
+    --ink:#1c1526; --ink-2:#5a5169; --ink-3:#8b8397;
+    --line:rgba(42,26,74,.10); --line-2:rgba(42,26,74,.06);
+    --brand:var(--purple-700); --brand-ink:var(--purple-800);
+    --brand-wash:var(--purple-100);
+    --act:var(--gold-500); --act-hover:var(--gold-600); --act-ink:#3a2a00; --act-wash:var(--gold-100);
+    --ok:#0f6e56; --ok-wash:#e1f5ee; --warn:#8a5a0b; --warn-wash:#faf0da;
+    --danger:#a32d2d; --danger-wash:#fcebeb;
+
+    --shadow-sm:0 1px 2px rgba(42,26,74,.06),0 1px 3px rgba(42,26,74,.04);
+    --shadow-md:0 2px 8px rgba(42,26,74,.08),0 6px 20px rgba(42,26,74,.06);
+    --shadow-lg:0 8px 30px rgba(42,26,74,.14);
+
+    --r-sm:8px; --r:12px; --r-lg:18px; --r-pill:999px;
+    --measure:1080px;
+    --dur-fast:120ms; --dur-base:200ms;
+    --ease:cubic-bezier(.2,.8,.2,1);
+
+    --f-sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    --f-display:"Fraunces","Iowan Old Style",Georgia,serif;
+    --f-mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  /* DARK — near-black with a purple tint, gold glows against it */
+  :root[data-theme="dark"]{
+    --bg:#141019; --surface:#1d1726; --surface-2:#241d30;
+    --ink:#f2eef8; --ink-2:#bab2c7; --ink-3:#8b8397;
+    --line:rgba(242,238,248,.12); --line-2:rgba(242,238,248,.07);
+    --brand:var(--purple-500); --brand-ink:#c9b8e6; --brand-wash:rgba(115,75,179,.20);
+    --act:var(--gold-400); --act-hover:var(--gold-500); --act-ink:#1c1200; --act-wash:rgba(212,160,23,.16);
+    --ok:#5dcaa5; --ok-wash:rgba(15,110,86,.22); --warn:#e6b93a; --warn-wash:rgba(138,90,11,.22);
+    --danger:#f09595; --danger-wash:rgba(163,45,45,.22);
+    --shadow-sm:0 1px 2px rgba(0,0,0,.4); --shadow-md:0 4px 16px rgba(0,0,0,.45);
+    --shadow-lg:0 10px 36px rgba(0,0,0,.55);
+  }
+  /* system: follow OS only when the user hasn't chosen. Server normally omits
+     data-theme in this case; here we replicate with :root:not([data-theme]). */
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme]){
+      --bg:#141019; --surface:#1d1726; --surface-2:#241d30;
+      --ink:#f2eef8; --ink-2:#bab2c7; --ink-3:#8b8397;
+      --line:rgba(242,238,248,.12); --line-2:rgba(242,238,248,.07);
+      --brand:var(--purple-500); --brand-ink:#c9b8e6; --brand-wash:rgba(115,75,179,.20);
+      --act:var(--gold-400); --act-hover:var(--gold-500); --act-ink:#1c1200; --act-wash:rgba(212,160,23,.16);
+      --ok:#5dcaa5; --ok-wash:rgba(15,110,86,.22); --warn:#e6b93a; --warn-wash:rgba(138,90,11,.22);
+      --danger:#f09595; --danger-wash:rgba(163,45,45,.22);
+      --shadow-md:0 4px 16px rgba(0,0,0,.45); --shadow-lg:0 10px 36px rgba(0,0,0,.55);
+    }
+  }
+
+  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap');
+
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:var(--f-sans);background:var(--bg);color:var(--ink);
+    font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased;
+    transition:background var(--dur-base) var(--ease),color var(--dur-base) var(--ease)}
+  a{color:var(--brand-ink);text-decoration:none}
+
+  /* ---- APP HEADER (sticky) -------------------------------------------- */
+  .appbar{position:sticky;top:0;z-index:40;background:var(--surface);
+    border-bottom:1px solid var(--line);backdrop-filter:saturate(1.4) blur(8px)}
+  .appbar-in{max-width:var(--measure);margin:0 auto;padding:0 24px;height:60px;
+    display:flex;align-items:center;gap:20px}
+  .logo{display:flex;align-items:center;gap:10px;font-family:var(--f-display);
+    font-weight:600;font-size:18px;color:var(--brand-ink);letter-spacing:-.01em}
+  .logo .mark{width:30px;height:30px;border-radius:9px;flex-shrink:0;
+    background:linear-gradient(135deg,var(--purple-600),var(--purple-800));
+    display:flex;align-items:center;justify-content:center;color:#fff;
+    font-family:var(--f-display);font-weight:600;font-size:15px;
+    box-shadow:inset 0 0 0 1px rgba(255,255,255,.12), var(--shadow-sm)}
+  .logo .mark::after{content:"";position:absolute}
+  nav.top{display:flex;gap:2px;margin-left:8px}
+  /* active nav = <span aria-current>, NOT a link → clicking it does nothing */
+  nav.top a,nav.top span{padding:8px 14px;border-radius:var(--r-sm);font-size:14px;
+    font-weight:500;color:var(--ink-2);position:relative;
+    transition:background var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease)}
+  nav.top a:hover{background:var(--brand-wash);color:var(--brand-ink)}
+  nav.top span[aria-current]{color:var(--brand-ink);cursor:default}
+  /* the one gold structural touch in the chrome: the active underline */
+  nav.top span[aria-current]::after{content:"";position:absolute;left:14px;right:14px;
+    bottom:-11px;height:2px;background:var(--act);border-radius:2px}
+  .appbar .spacer{flex:1}
+
+  /* theme toggle — segmented, CSP-safe (event listeners, no inline handlers) */
+  .theme{display:flex;background:var(--surface-2);border:1px solid var(--line);
+    border-radius:var(--r-pill);padding:2px;gap:1px}
+  .theme button{border:0;background:transparent;width:30px;height:26px;border-radius:var(--r-pill);
+    cursor:pointer;color:var(--ink-3);display:flex;align-items:center;justify-content:center;
+    font-size:13px;transition:background var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease)}
+  .theme button[aria-pressed="true"]{background:var(--surface);color:var(--brand-ink);box-shadow:var(--shadow-sm)}
+  .avatar{width:34px;height:34px;border-radius:var(--r-pill);flex-shrink:0;
+    background:linear-gradient(135deg,var(--purple-500),var(--purple-700));color:#fff;
+    display:flex;align-items:center;justify-content:center;font-weight:600;font-size:13px}
+
+  /* ---- CONTENT: centered, comfortable measure (fixes gutters) --------- */
+  main{max-width:var(--measure);margin:0 auto;padding:32px 24px 80px}
+
+  .greet{font-family:var(--f-display);font-weight:600;font-size:30px;letter-spacing:-.02em;
+    margin:0 0 2px;color:var(--ink)}
+  .greet-sub{color:var(--ink-2);font-size:14px;margin:0 0 24px}
+  .greet .name{color:var(--brand-ink)}
+
+  /* hold alert — action-blocking, so it's loud (danger, not gold) */
+  .alert{display:flex;gap:12px;align-items:flex-start;background:var(--danger-wash);
+    border:1px solid color-mix(in oklab,var(--danger) 30%,transparent);
+    border-left:3px solid var(--danger);border-radius:var(--r);padding:14px 16px;margin-bottom:24px}
+  .alert .t{font-weight:600;font-size:14px;color:var(--danger);margin:0}
+  .alert .d{font-size:13px;color:var(--danger);opacity:.9;margin:2px 0 0}
+
+  .grid{display:grid;grid-template-columns:1.7fr 1fr;gap:16px}
+
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);
+    box-shadow:var(--shadow-sm);overflow:hidden}
+  .card-h{display:flex;align-items:baseline;justify-content:space-between;padding:18px 20px 0}
+  .card-h h2{font-family:var(--f-display);font-weight:600;font-size:17px;margin:0;letter-spacing:-.01em}
+  .card-h a{font-size:13px;font-weight:500}
+  .card-b{padding:14px 20px 20px}
+
+  /* schedule rows: purple identity strip, calm */
+  .cls{display:flex;gap:14px;align-items:center;padding:11px 12px;border-radius:var(--r);
+    background:var(--surface-2);border:1px solid var(--line-2);margin-top:8px;
+    border-left:3px solid var(--brand)}
+  .cls:first-child{margin-top:0}
+  .cls .when{font-size:12px;color:var(--brand-ink);font-weight:600;min-width:56px;font-family:var(--f-mono)}
+  .cls .what{font-size:14px;font-weight:500;margin:0}
+  .cls .where{font-size:12px;color:var(--ink-3);margin:1px 0 0}
+
+  /* deadline — THE gold number: the one datum the student acts on */
+  .kpi{background:linear-gradient(160deg,var(--surface),var(--act-wash));
+    border:1px solid color-mix(in oklab,var(--act) 40%,transparent);
+    border-radius:var(--r-lg);padding:18px 20px;box-shadow:var(--shadow-sm)}
+  .kpi .k{font-size:12px;color:var(--ink-2);margin:0 0 6px;display:flex;align-items:center;gap:6px;font-weight:500}
+  .kpi .v{font-family:var(--f-display);font-weight:600;font-size:30px;line-height:1;margin:0;
+    color:var(--brand-ink)}
+  .kpi .h{font-size:13px;color:var(--act-hover);font-weight:600;margin:6px 0 0}
+
+  .mini{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);
+    box-shadow:var(--shadow-sm);padding:16px 20px;margin-top:16px}
+  .mini h3{font-size:12px;color:var(--ink-2);margin:0 0 12px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  .ev{display:flex;gap:10px;align-items:baseline;padding:7px 0;border-top:1px solid var(--line-2)}
+  .ev:first-of-type{border-top:0}
+  .ev .d{font-size:12px;color:var(--ink-3);font-family:var(--f-mono);min-width:46px}
+  .ev .n{font-size:13px;font-weight:500}
+
+  .btn{font:inherit;font-size:14px;font-weight:600;height:40px;padding:0 18px;border-radius:var(--r-sm);
+    border:1px solid transparent;cursor:pointer;display:inline-flex;align-items:center;gap:8px;
+    transition:transform var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease),background var(--dur-fast) var(--ease)}
+  /* PRIMARY = gold. The one action the screen wants. */
+  .btn-primary{background:var(--act);color:var(--act-ink);box-shadow:var(--shadow-sm)}
+  .btn-primary:hover{background:var(--act-hover);box-shadow:var(--shadow-md);transform:translateY(-1px)}
+  .btn-primary:active{transform:translateY(0)}
+  .btn-ghost{background:var(--surface);border-color:var(--line);color:var(--ink)}
+  .btn-ghost:hover{background:var(--surface-2)}
+
+  :focus-visible{outline:none;box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--brand)}
+
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}.btn-primary:hover{transform:none}}
+  @media (max-width:840px){
+    .grid{grid-template-columns:1fr}
+    nav.top{display:none}
+    .greet{font-size:25px}
+  }
+</style>
+</head>
+<body>
+
+  <header class="appbar">
+    <div class="appbar-in">
+      <span class="logo"><span class="mark">UB</span>Belize</span>
+      <nav class="top" aria-label="Primary">
+        <!-- ACTIVE item is a span with aria-current: no href, no reload, no-op on click -->
+        <span aria-current="page">Dashboard</span>
+        <a href="/catalog">Catalog</a>
+        <a href="/schedule">Schedule</a>
+        <a href="/grades">Grades</a>
+        <a href="/documents">Documents</a>
+      </nav>
+      <span class="spacer"></span>
+      <div class="theme" role="group" aria-label="Theme">
+        <button data-theme-set="light" aria-pressed="false" title="Light" aria-label="Light theme">☀</button>
+        <button data-theme-set="dark" aria-pressed="false" title="Dark" aria-label="Dark theme">☾</button>
+        <button data-theme-set="system" aria-pressed="true" title="System" aria-label="Match system">⌂</button>
+      </div>
+      <div class="avatar" aria-hidden="true">DR</div>
+    </div>
+  </header>
+
+  <main>
+    <h1 class="greet">Good morning, <span class="name">Daniela</span></h1>
+    <p class="greet-sub">Fall 2026 · 12 credits enrolled</p>
+
+    <div class="alert" role="status">
+      <span aria-hidden="true" style="font-size:18px">⚠</span>
+      <div>
+        <p class="t">Advising hold on your account</p>
+        <p class="d">You can view classes but can't register until an advisor clears it.</p>
+      </div>
+    </div>
+
+    <div class="grid">
+      <section class="card">
+        <div class="card-h"><h2>This week</h2><a href="/schedule">Full schedule</a></div>
+        <div class="card-b">
+          <div class="cls">
+            <span class="when">Mon 9:00</span>
+            <div><p class="what">CMPS 2131 · Data structures</p><p class="where">Rm 214 · Prof. Alvarez</p></div>
+          </div>
+          <div class="cls">
+            <span class="when">Mon 13:00</span>
+            <div><p class="what">MATH 2110 · Calculus II</p><p class="where">Rm 108 · Prof. Chen</p></div>
+          </div>
+          <div class="cls">
+            <span class="when">Wed 9:00</span>
+            <div><p class="what">CMPS 2131 · Data structures</p><p class="where">Rm 214 · Prof. Alvarez</p></div>
+          </div>
+        </div>
+      </section>
+
+      <div>
+        <div class="kpi">
+          <p class="k"><span aria-hidden="true">◷</span> Add/drop closes</p>
+          <p class="v">Sep 12</p>
+          <p class="h">in 6 days</p>
+        </div>
+        <div class="mini">
+          <h3>Campus events</h3>
+          <div class="ev"><span class="d">Sep 15</span><div><p class="n">Career fair</p></div></div>
+          <div class="ev"><span class="d">Sep 21</span><div><p class="n">Independence Day — no classes</p></div></div>
+          <div class="ev"><span class="d">Sep 24</span><div><p class="n">Add-deadline reminder</p></div></div>
+        </div>
+        <div style="margin-top:16px;display:flex;gap:10px">
+          <a class="btn btn-primary" href="/catalog">Find sections</a>
+          <a class="btn btn-ghost" href="/documents">Request a document</a>
+        </div>
+      </div>
+    </div>
+  </main>
+
+<script>
+  // CSP-safe: real event listeners, no inline handlers, script-src 'self'.
+  // In PRODUCTION the chosen theme is stored in a cookie and the server stamps
+  // <html data-theme="..."> at render time — zero inline script, no flash of
+  // wrong theme, works with JS off (the toggle just re-POSTs the preference).
+  // This demo does it client-side with a graceful no-flash fallback.
+  (function(){
+    var root=document.documentElement;
+    var saved=null; try{saved=localStorage.getItem('ub-theme');}catch(e){}
+    function apply(mode){
+      if(mode==='system'){root.removeAttribute('data-theme');}
+      else{root.setAttribute('data-theme',mode);}
+      document.querySelectorAll('[data-theme-set]').forEach(function(b){
+        b.setAttribute('aria-pressed', b.getAttribute('data-theme-set')===mode ? 'true':'false');
+      });
+      try{localStorage.setItem('ub-theme',mode);}catch(e){}
+    }
+    apply(saved||'system');
+    document.querySelectorAll('[data-theme-set]').forEach(function(b){
+      b.addEventListener('click',function(){apply(b.getAttribute('data-theme-set'));});
+    });
+  })();
+</script>
+</body>
+</html>

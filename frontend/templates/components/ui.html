@@ -6,6 +6,23 @@
   markup in docs/FRONTEND_DESIGN_SYSTEM.md and shown in pages/gallery.html.
 -#}
 
+{#- Theme toggle (ADR-14): a real form — the JS-off path POSTs the choice
+    and lands back on the same page; the enhancement script flips
+    data-theme instantly and persists via the same POST. aria-pressed
+    reflects the server-known choice, so the control is truthful at first
+    paint. Rendered only where a session exists (the CSRF token comes from
+    the request scope). -#}
+{% macro theme_toggle() %}
+  {% if !crate::shared::theme::csrf_token().is_empty() %}
+    <form class="theme" method="post" action="/ui/theme" data-theme-form role="group" aria-label="Theme">
+      <input type="hidden" name="csrf_token" value="{{ crate::shared::theme::csrf_token() }}">
+      <button type="submit" name="theme" value="light" aria-pressed="{% if crate::shared::theme::current() == "light" %}true{% else %}false{% endif %}" aria-label="Light theme" title="Light">☀</button>
+      <button type="submit" name="theme" value="dark" aria-pressed="{% if crate::shared::theme::current() == "dark" %}true{% else %}false{% endif %}" aria-label="Dark theme" title="Dark">☾</button>
+      <button type="submit" name="theme" value="system" aria-pressed="{% if crate::shared::theme::current() == "system" %}true{% else %}false{% endif %}" aria-label="Match system" title="System">⌂</button>
+    </form>
+  {% endif %}
+{% endmacro %}
+
 {#- Primary navigation links, rendered once in the desktop rail and once
     in the mobile sheet (only one is ever in the accessibility tree). -#}
 {% macro nav_links() %}

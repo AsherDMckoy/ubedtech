@@ -250,5 +250,31 @@ async function submitRow(form) {
   }
 }
 
+// Theme toggle enhancement (ADR-14): flip data-theme instantly, persist
+// via the same POST the JS-off form would make. The server-stamped
+// attribute remains the source of truth on the next full page load.
+addEventListener(
+  "submit",
+  (event) => {
+    const form = event.target.closest("[data-theme-form]");
+    if (!form) return;
+    const choice = event.submitter?.value;
+    if (!choice) return;
+    event.preventDefault();
+    if (choice === "system") {
+      document.documentElement.removeAttribute("data-theme");
+    } else {
+      document.documentElement.setAttribute("data-theme", choice);
+    }
+    for (const button of document.querySelectorAll("[data-theme-form] button")) {
+      button.setAttribute("aria-pressed", String(button.value === choice));
+    }
+    const body = new FormData(form);
+    body.set("theme", choice);
+    fetch(form.action, { method: "POST", body, credentials: "same-origin" }).catch(() => {});
+  },
+  true,
+);
+
 window.Alpine = Alpine;
 Alpine.start();

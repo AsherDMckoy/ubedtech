@@ -1246,7 +1246,11 @@ mod ui {
                         $pool.clone(),
                         crate::audit::AuditWriter,
                     )))
-                    // Same order as main.rs: csrf inside session resolution.
+                    // Same order as main.rs: theme inside csrf inside
+                    // session resolution.
+                    .wrap(actix_web::middleware::from_fn(
+                        crate::shared::theme::theme_middleware,
+                    ))
                     .wrap(actix_web::middleware::from_fn(
                         crate::identity_access::csrf::csrf_middleware,
                     ))
@@ -1255,7 +1259,8 @@ mod ui {
                     ))
                     .configure(crate::identity_access::http::routes)
                     .configure(crate::academics::http::routes)
-                    .configure(crate::enrollment::http::routes),
+                    .configure(crate::enrollment::http::routes)
+                    .configure(crate::shared::theme::routes),
             )
             .await
         }};
@@ -2130,6 +2135,80 @@ mod ui {
             page.contains("Showing the first 500 sections — the term has more"),
             "cap reached must render the truncation notice"
         );
+    }
+
+    /// ADR-14: the theme is a cookie the SERVER stamps onto `<html>` at
+    /// render time — no inline script, no flash of wrong theme — and the
+    /// JS-off path is a plain form POST that sets the cookie and redirects
+    /// back. "system" stamps nothing (the prefers-color-scheme block in
+    /// tokens.css decides).
+    #[sqlx::test(migrations = "./migrations")]
+    async fn theme_is_cookie_stamped_server_side_and_toggles_as_a_plain_form(pool: PgPool) {
+        let fixture = seed_registration_fixture(&pool, 1).await;
+        let username = credential_student(&pool, &fixture).await;
+        let app = ui_app!(&pool, fixture.registrar.institution_id);
+        let cookie = login(&app, &username, PASSWORD).await;
+
+        // No preference: nothing stamped, toggle shows "system" pressed.
+        let page = get_page(&app, &cookie, "/ui/registration").await;
+        assert!(
+            page.contains("<html lang=\"en\">"),
+            "no data-theme without a choice"
+        );
+        assert!(
+            page.contains("data-theme-form"),
+            "the toggle renders for signed-in pages"
+        );
+        let csrf = extract_input(&page, "csrf_token");
+
+        // JS-off toggle: plain form POST -> cookie set -> redirect back.
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/ui/theme")
+                .cookie(cookie.clone())
+                .insert_header(("Referer", "http://localhost/ui/registration"))
+                .set_form(serde_json::json!({ "theme": "dark", "csrf_token": &csrf }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response.headers().get("Location").unwrap(),
+            "/ui/registration"
+        );
+        let theme_cookie = response
+            .response()
+            .cookies()
+            .find(|cookie| cookie.name() == "ub_theme")
+            .expect("theme cookie set");
+        assert_eq!(theme_cookie.value(), "dark");
+
+        // Next render is stamped in the first byte of HTML.
+        let request = actix_test::TestRequest::get()
+            .uri("/ui/registration")
+            .cookie(cookie.clone())
+            .cookie(theme_cookie.into_owned())
+            .to_request();
+        let response = actix_test::call_service(&app, request).await;
+        let page = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        assert!(
+            page.contains("<html lang=\"en\" data-theme=dark>"),
+            "server stamps the chosen theme"
+        );
+        assert!(page.contains(r#"value="dark" aria-pressed="true""#));
+
+        // Garbage values are refused, not stored.
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/ui/theme")
+                .cookie(cookie.clone())
+                .set_form(serde_json::json!({ "theme": "neon", "csrf_token": &csrf }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
     /// Holds and academic standing over plain forms. The proof of honesty:

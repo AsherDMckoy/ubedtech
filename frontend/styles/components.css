@@ -1404,3 +1404,41 @@ th[aria-sort="descending"] .sortbtn::after {
     transform: rotate(1turn);
   }
 }
+
+/* ---------- theme toggle (ADR-14): segmented control in the rail foot
+   and mobile sheet. The pressed segment reads as chosen; buttons are
+   real submit buttons so the control works with JS off. */
+
+.theme {
+  display: inline-flex;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 2px;
+  gap: 1px;
+  margin-bottom: var(--space-2);
+}
+
+.theme button {
+  font: inherit;
+  font-size: 13px;
+  border: 0;
+  background: transparent;
+  width: 30px;
+  height: 26px;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    background var(--dur-fast) var(--ease-enter),
+    color var(--dur-fast) var(--ease-enter);
+}
+
+.theme button[aria-pressed="true"] {
+  background: var(--surface-0);
+  color: var(--text-accent);
+  box-shadow: var(--shadow-sm);
+}
