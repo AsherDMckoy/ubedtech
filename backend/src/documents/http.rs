@@ -361,6 +361,9 @@ pub async fn officer_row_fragment(
 struct QueuePage<'a> {
     csrf_token: &'a str,
     requests: Vec<PendingRequestView>,
+    /// True backlog depth; larger than `requests.len()` when the page
+    /// truncates, and the template must say so.
+    pending_total: usize,
     recent: Vec<DecidedRequestView>,
     notice: Option<&'a str>,
     error: Option<&'a str>,
@@ -470,6 +473,11 @@ async fn render_queue(
         return Err(AppError::Forbidden);
     }
 
+    // The queue is a worklist drained oldest-first, so it shows one bounded
+    // page — no pager; deciding requests is how the rest surface. The bound
+    // must never be silent, though: when it truncates, the page says how
+    // deep the backlog really is (pending_total below).
+    const QUEUE_PAGE: i64 = 100;
     let rows = sqlx::query_as::<_, PendingRequestRow>(
         r#"
         SELECT
@@ -482,12 +490,25 @@ async fn render_queue(
         JOIN student_profile sp ON sp.id = dr.student_id
         WHERE dr.institution_id = $1 AND dr.status = 'pending'
         ORDER BY dr.requested_at
-        LIMIT 100
+        LIMIT $2
         "#,
     )
     .bind(actor.institution_id)
+    .bind(QUEUE_PAGE)
     .fetch_all(pool)
     .await?;
+
+    let pending_total = if rows.len() as i64 == QUEUE_PAGE {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM document_request \
+              WHERE institution_id = $1 AND status = 'pending'",
+        )
+        .bind(actor.institution_id)
+        .fetch_one(pool)
+        .await? as usize
+    } else {
+        rows.len()
+    };
 
     let requests = rows
         .into_iter()
@@ -522,6 +543,7 @@ async fn render_queue(
     Ok(QueuePage {
         csrf_token: &current.csrf_token,
         requests,
+        pending_total,
         recent,
         notice,
         error,
@@ -584,6 +606,8 @@ pub fn sample_queue_html() -> Result<String, askama::Error> {
             purpose: "visa application".into(),
             requested_at: "2026-07-20 13:55 UTC".into(),
         }],
+        // > requests.len(), so the axe pass covers the truncation notice.
+        pending_total: 140,
         recent: vec![
             decided("approved"),
             decided("generating"),

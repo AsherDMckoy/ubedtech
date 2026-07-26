@@ -923,6 +923,36 @@ mod ui {
         );
         let bytes = actix_test::read_body(response).await;
         assert!(bytes.starts_with(b"%PDF-"));
+
+        // The queue page shows one bounded worklist page (oldest first),
+        // never silently: with a backlog past the page bound, it names the
+        // true pending depth. 150 synthetic pending requests → 100 shown,
+        // "of 150" stated.
+        sqlx::query(
+            "INSERT INTO document_request (id, institution_id, student_id, document_type, \
+             status, delivery_method, idempotency_key) \
+             SELECT gen_random_uuid(), $1, $2, 'enrollment_letter', 'pending', 'download', \
+                    gen_random_uuid() \
+             FROM generate_series(1, 150)",
+        )
+        .bind(institution)
+        .bind(fx.student.student_id.unwrap())
+        .execute(&pool)
+        .await
+        .unwrap();
+        let queue = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/ui/admin/documents")
+                .cookie(officer_cookie.clone())
+                .to_request(),
+        )
+        .await;
+        let body = String::from_utf8(actix_test::read_body(queue).await.to_vec()).unwrap();
+        assert!(
+            body.contains("Showing the 100 oldest of 150 pending requests"),
+            "a truncated queue must state the real backlog depth"
+        );
     }
 }
 

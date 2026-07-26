@@ -11,6 +11,11 @@ use crate::academics::policy::require_can_manage_academics;
 use crate::audit::AuditWriter;
 use crate::shared::{actor::Actor, error::AppError};
 
+/// Row cap for the registrar's one-page section scanning table
+/// (`term_sections_overview`). A full result means truncation, and the
+/// page must say so.
+pub(crate) const SECTIONS_SCAN_CAP: i64 = 500;
+
 #[derive(Clone)]
 pub struct AcademicsService {
     pool: PgPool,
@@ -919,7 +924,9 @@ impl AcademicsService {
 
     /// Every section of a term for the registrar's scanning table, with
     /// seats, meetings, and instructors. Optional server-side filter for the
-    /// JS-off search floor; the in-page filter handles the rest.
+    /// JS-off search floor; the in-page filter handles the rest. Returns at
+    /// most [`SECTIONS_SCAN_CAP`] rows — a full result is the caller's
+    /// signal that the list was truncated.
     pub async fn term_sections_overview(
         &self,
         actor: &Actor,
@@ -928,9 +935,11 @@ impl AcademicsService {
     ) -> Result<Vec<SectionOverviewRow>, AppError> {
         require_can_manage_academics(actor)?;
         // ponytail: one term's sections fit on one scanning page (reference:
-        // ~300 rows); the cap is a runaway guard, paginate if a real term
-        // ever exceeds it.
-        const CAP: i64 = 500;
+        // ~300 rows) and the in-page filter/sort needs the full set loaded;
+        // the cap is a runaway guard. It is not silent — the page shows a
+        // narrow-your-search notice at the cap (render_sections). Paginate
+        // for real if an actual term ever exceeds it.
+        const CAP: i64 = SECTIONS_SCAN_CAP;
         let pattern = query
             .map(str::trim)
             .filter(|q| !q.is_empty())

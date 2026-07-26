@@ -14,6 +14,9 @@
     {% endif %}
 
     <h2>Pending review</h2>
+    {% if requests.len() < pending_total %}
+      <p class="meta">Showing the {{ requests.len() }} oldest of {{ pending_total }} pending requests — deciding these surfaces the rest.</p>
+    {% endif %}
     {% if requests.is_empty() %}
       {% call ui::empty_state("No requests are waiting for review.", "", "") %}{% endcall %}
     {% else %}

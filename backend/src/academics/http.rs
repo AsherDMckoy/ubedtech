@@ -868,6 +868,9 @@ struct RegistrarSectionsPage<'a> {
     selected_term: Option<Uuid>,
     courses: Vec<crate::academics::service::CourseSummary>,
     rows: Vec<OverviewRow>,
+    /// The scan cap was hit — `rows` is not the whole term, and the page
+    /// says so instead of truncating silently.
+    truncated: bool,
     q: String,
     notice: Option<&'a str>,
     error: Option<&'a str>,
@@ -898,7 +901,7 @@ async fn render_sections(
             .or(terms.first())
             .map(|t| t.id)
     });
-    let rows = match selected_term {
+    let rows: Vec<OverviewRow> = match selected_term {
         Some(term_id) => service
             .term_sections_overview(actor, term_id, Some(q))
             .await?
@@ -907,6 +910,7 @@ async fn render_sections(
             .collect(),
         None => Vec::new(),
     };
+    let truncated = rows.len() as i64 == crate::academics::service::SECTIONS_SCAN_CAP;
     let courses = service.list_courses(actor).await?;
     Ok(RegistrarSectionsPage {
         csrf_token: &current.csrf_token,
@@ -914,6 +918,7 @@ async fn render_sections(
         selected_term,
         courses,
         rows,
+        truncated,
         q: q.to_owned(),
         notice,
         error,
@@ -1460,6 +1465,9 @@ pub fn sample_registrar_sections_html() -> Result<String, askama::Error> {
     RegistrarSectionsPage {
         csrf_token: "sample",
         selected_term: Some(term.id),
+        // Sample rows are few; the truncation notice is axe-covered by the
+        // queue page's sample instead (both are the same .meta paragraph).
+        truncated: false,
         terms: vec![term],
         courses: vec![crate::academics::service::CourseSummary {
             id: Uuid::nil(),

@@ -73,6 +73,9 @@
           {% call ui::search("q", "q", "Filter sections", "Filter…", q) %}{% endcall %}
         </form>
       </div>
+      {% if truncated %}
+        <p class="meta">Showing the first {{ rows.len() }} sections — the term has more. Use the filter to narrow the list.</p>
+      {% endif %}
       <div class="table-wrap">
         <table class="table-dense">
           <caption>Sections of the selected term with seats, meetings, and instructors</caption>

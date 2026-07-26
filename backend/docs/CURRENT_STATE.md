@@ -612,11 +612,20 @@ wiring, demo seed, and axe harness — no feature screens (next session).
    screen. Each is reachable instantly via search; DEMO_SCRIPT.md now
    notes this. A "demo tour" is not worth building; consider pinning or
    a curated default sort only if presenting stays painful.
-2. **Registrar sections list is unpaginated**: `/ui/registrar/sections`
-   renders all 282 current-term rows in one 190 KB page. Violates the
-   §4 pagination rule on a real UI path now that data is at scale.
-3. **Officer document queue is unpaginated** (38 rows today, unbounded
-   growth).
+2. ~~Registrar sections list is unpaginated~~ **Resolved 2026-07-25 as
+   an honest cap, not a pager**: the page was already bounded
+   (`SECTIONS_SCAN_CAP` = 500, a deliberate one-page scanning design —
+   the in-page filter/sort needs the full set loaded), but the cap was
+   silent. It now renders a "first 500 shown, narrow with the filter"
+   notice when hit, and the 190 KB/282-row render is within the design's
+   recorded ceiling. Real pagination only if an actual term exceeds the
+   cap.
+3. ~~Officer document queue is unpaginated~~ **Resolved 2026-07-25 as an
+   honest cap**: the queue was already `LIMIT 100` oldest-first (a
+   self-draining worklist — deciding requests is the navigation), but
+   truncation was silent. It now states "showing the 100 oldest of N
+   pending" when the backlog exceeds the page. Both caps are
+   test-pinned.
 4. **Catalog count text**: "Showing all 20 sections" renders on every
    page of ~280 matches — "all" is only true when one page exists.
 5. **Meeting days render as ISO numbers** in catalog and registration

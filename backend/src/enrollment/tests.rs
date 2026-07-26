@@ -2106,6 +2106,30 @@ mod ui {
             page.contains("(≥2)"),
             "prerequisite listed on the course row: {page}"
         );
+
+        // The scanning table's row cap is never silent: under the cap there
+        // is no truncation notice; past it, the page says the term has more
+        // sections than it shows (the cap itself lives in
+        // academics::service::SECTIONS_SCAN_CAP).
+        let sections_uri = format!("/ui/registrar/sections?term_id={}", fixture.term_id);
+        let page = get_page(&app, &cookie, &sections_uri).await;
+        assert!(!page.contains("the term has more"));
+        sqlx::query(
+            "INSERT INTO section (id, institution_id, term_id, course_id, section_code, status) \
+             SELECT gen_random_uuid(), $1, $2, $3, 'T' || lpad(n::text, 3, '0'), 'open' \
+             FROM generate_series(1, 500) AS n",
+        )
+        .bind(fixture.registrar.institution_id)
+        .bind(fixture.term_id)
+        .bind(course_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let page = get_page(&app, &cookie, &sections_uri).await;
+        assert!(
+            page.contains("Showing the first 500 sections — the term has more"),
+            "cap reached must render the truncation notice"
+        );
     }
 
     /// Holds and academic standing over plain forms. The proof of honesty:
