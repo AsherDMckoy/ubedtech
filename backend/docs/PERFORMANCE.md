@@ -2,10 +2,11 @@
 
 ## Frontend budgets (Phase 7, rebased on the frontend/ pipeline — ADR-12)
 
-| Budget | Limit | Actual (2026-07-22, final session) | Enforced by |
+| Budget | Limit | Actual (2026-07-26, UB-identity session) | Enforced by |
 |---|---|---|---|
-| Stylesheet bundle (tokens + base + components) | ≤ 32 KiB uncompressed | 18.9 KiB (4.3 KiB gzipped, 3.7 KiB brotli) | `asset_sizes_stay_inside_the_budget` |
-| Script bundle (Alpine CSP build + enhancements) | ≤ 80 KiB uncompressed | 63.6 KiB (20.9 KiB gzipped, 18.6 KiB brotli) | same |
+| Stylesheet bundle (tokens + base + components) | ≤ 32 KiB uncompressed | 21.0 KiB (4.8 KiB gzipped) | `asset_sizes_stay_inside_the_budget` |
+| Script bundle (Alpine CSP build + enhancements) | ≤ 80 KiB uncompressed | 63.6 KiB (20.9 KiB gzipped) | same |
+| Fonts (2 latin variable woff2, self-hosted, `font-display: swap`) | ≤ 72 KiB per file | Inter 47.1 KiB + Fraunces 65.7 KiB, immutable-cached, never block paint | same |
 | Images on workflow pages | none | none | `templates_carry_no_images_or_csp_violations` |
 | Third-party/external resources at runtime | none (Alpine is bundled, same-origin) | none | same |
 | Asset caching | esbuild content hash in the URL + `public, max-age=31536000, immutable` | ✓ | `assets_serve_fingerprinted_with_an_immutable_cache_lifetime` |

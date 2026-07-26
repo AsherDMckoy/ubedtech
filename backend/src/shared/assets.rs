@@ -15,6 +15,9 @@ pub struct Dist {
     css: String,
     js_href: String,
     js: String,
+    /// Fingerprinted binary assets the bundles reference (the two vendored
+    /// font files) — served immutable like everything else in dist.
+    fonts: Vec<(String, Vec<u8>)>,
 }
 
 /// The dist directory: `APP_FRONTEND_DIST` if set, else `frontend/dist`
@@ -40,10 +43,17 @@ pub fn dist() -> &'static Dist {
                  at the built assets."
             )
         });
+        let mut fonts = Vec::new();
         for entry in entries {
             let path = entry.expect("dist directory entry").path();
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
             let slot = match name {
+                _ if name.ends_with(".woff2") => {
+                    let bytes = std::fs::read(&path)
+                        .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+                    fonts.push((format!("/assets/{name}"), bytes));
+                    continue;
+                }
                 _ if name.starts_with("app-") && name.ends_with(".css") => &mut css,
                 _ if name.starts_with("app-") && name.ends_with(".js") => &mut js,
                 _ => continue,
@@ -57,6 +67,7 @@ pub fn dist() -> &'static Dist {
                 .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
             *slot = Some((format!("/assets/{name}"), content));
         }
+        fonts.sort();
         let (css_href, css) =
             css.unwrap_or_else(|| panic!("no app-*.css bundle in {dir}; run `npm run build`"));
         let (js_href, js) =
@@ -66,6 +77,7 @@ pub fn dist() -> &'static Dist {
             css,
             js_href,
             js,
+            fonts,
         }
     })
 }
@@ -117,9 +129,23 @@ async fn js() -> HttpResponse {
         .body(dist().js.as_str())
 }
 
+async fn font(request: actix_web::HttpRequest) -> HttpResponse {
+    let wanted = request.path();
+    match dist().fonts.iter().find(|(href, _)| href == wanted) {
+        Some((_, bytes)) => HttpResponse::Ok()
+            .content_type("font/woff2")
+            .insert_header(IMMUTABLE)
+            .body(bytes.as_slice()),
+        None => HttpResponse::NotFound().finish(),
+    }
+}
+
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.route(css_href(), web::get().to(css));
     cfg.route(js_href(), web::get().to(js));
+    for (href, _) in &dist().fonts {
+        cfg.route(href, web::get().to(font));
+    }
 }
 
 /// Structural accessibility audit for a rendered page, shared by every UI
@@ -225,6 +251,27 @@ mod tests {
             let served = actix_test::read_body(response).await;
             assert_eq!(served, body.as_bytes());
         }
+
+        // The vendored fonts serve the same way: fingerprinted, immutable,
+        // correct MIME, byte-identical.
+        for (href, bytes) in &dist().fonts {
+            let response = actix_test::call_service(
+                &app,
+                actix_test::TestRequest::get().uri(href).to_request(),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK, "{href}");
+            assert_eq!(
+                response.headers().get(header::CACHE_CONTROL).unwrap(),
+                "public, max-age=31536000, immutable"
+            );
+            assert_eq!(
+                response.headers().get(header::CONTENT_TYPE).unwrap(),
+                "font/woff2"
+            );
+            let served = actix_test::read_body(response).await;
+            assert_eq!(&served[..], bytes.as_slice());
+        }
     }
 
     #[actix_web::test]
@@ -295,6 +342,16 @@ mod tests {
             "app css bundle is {} bytes; budget is 32 KiB uncompressed",
             dist().css.len()
         );
+        // Two latin variable font files (ADR-14); each immutable-cached,
+        // font-display swap, so they never block first paint.
+        assert_eq!(dist().fonts.len(), 2, "expected the two vendored fonts");
+        for (href, bytes) in &dist().fonts {
+            assert!(
+                bytes.len() <= 72 * 1024,
+                "{href} is {} bytes; font budget is 72 KiB per file",
+                bytes.len()
+            );
+        }
         assert!(
             dist().js.len() <= 80 * 1024,
             "app js bundle is {} bytes; budget is 80 KiB uncompressed",

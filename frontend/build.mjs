@@ -13,6 +13,8 @@ await build({
   minify: true,
   outdir: "dist",
   entryNames: "[name]-[hash]",
+  assetNames: "[name]-[hash]",
+  loader: { ".woff2": "file" },
   logLevel: "info",
 });
 
