@@ -31,10 +31,28 @@
 }
 
 .brand {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-accent);
   padding: var(--space-1) var(--space-2) var(--space-3);
+}
+
+.brand-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--purple-600), var(--purple-800));
 }
 
 .navlink {
@@ -58,6 +76,9 @@
   background: var(--bg-accent);
   color: var(--text-accent);
   font-weight: 500;
+  border-left: 2px solid var(--action);
+  padding-left: calc(var(--space-2) - 2px);
+  cursor: default;
 }
 
 .rail-foot {
@@ -75,7 +96,7 @@ main {
 /* Calm single-decision screens center a readable column; scanning screens
    opt out with .main-wide (FRONTEND.md §6). */
 main > .wrap {
-  max-width: 920px;
+  max-width: var(--measure);
   margin: 0 auto;
 }
 
@@ -318,6 +339,7 @@ p[role="alert"] {
   border: 0.5px solid var(--border);
   border-radius: var(--radius-card);
   padding: var(--space-4);
+  box-shadow: var(--shadow-sm);
 }
 
 /* A card holding a full-bleed table. */
@@ -819,8 +841,16 @@ tr.just-changed {
 }
 
 .dash-deadline {
-  color: var(--text-secondary);
-  font-size: 14px;
+  display: inline-block;
+  background: linear-gradient(160deg, var(--surface-2), var(--action-wash));
+  border: 1px solid var(--action);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-3) var(--space-4);
+  color: var(--text-accent);
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 600;
 }
 
 .card-foot {
@@ -1441,4 +1471,17 @@ th[aria-sort="descending"] .sortbtn::after {
   background: var(--surface-0);
   color: var(--text-accent);
   box-shadow: var(--shadow-sm);
+}
+
+/* ---------- sticky catalog search (fix 4): the search region pins to the
+   top while results scroll. Solid page background so rows never ghost
+   through; sits under the mobile topbar's z-index. */
+
+.search-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--surface-0);
+  padding-top: var(--space-2);
+  margin-top: calc(-1 * var(--space-2));
 }

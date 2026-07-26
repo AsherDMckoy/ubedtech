@@ -1,6 +1,8 @@
 {% extends "pages/base.html" %}
 {% import "components/ui.html" as ui %}
 {% block title %}Your documents{% endblock %}
+{% block rail %}{% call ui::student_nav("documents") %}{% endcall %}{% endblock %}
+
 {% block content %}
   <div class="wrap">
     <h1>Your documents</h1>

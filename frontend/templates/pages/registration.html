@@ -1,5 +1,7 @@
 {% extends "pages/base.html" %}
 {% block title %}My registration{% endblock %}
+{% block rail %}{% call ui::student_nav("registration") %}{% endcall %}{% endblock %}
+
 {% block content %}
   <h1>My registration</h1>
   {% if let Some(notice) = notice %}

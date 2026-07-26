@@ -23,16 +23,51 @@
   {% endif %}
 {% endmacro %}
 
+{#- One nav item. The ACTIVE item is a <span aria-current="page">, not a
+    link: clicking where you already are must be a no-op, not a reload
+    (dashboard-upgraded reference, fix 1). -#}
+{% macro nav_item(href, label, key, current) %}
+  {%- if key == current -%}
+    <span class="navlink" aria-current="page">{{ label }}</span>
+  {%- else -%}
+    <a class="navlink" href="{{ href }}">{{ label }}</a>
+  {%- endif -%}
+{% endmacro %}
+
 {#- Primary navigation links, rendered once in the desktop rail and once
-    in the mobile sheet (only one is ever in the accessibility tree). -#}
-{% macro nav_links() %}
-  <a class="navlink" href="/ui/dashboard">Dashboard</a>
-  <a class="navlink" href="/ui/catalog">Catalog</a>
-  <a class="navlink" href="/ui/registration">Registration</a>
-  <a class="navlink" href="/ui/schedule">Schedule</a>
-  <a class="navlink" href="/ui/grades">Grades</a>
-  <a class="navlink" href="/ui/history">History</a>
-  <a class="navlink" href="/ui/documents">Documents</a>
+    in the mobile sheet (only one is ever in the accessibility tree).
+    `current` marks the page we are on; "" marks none. -#}
+{% macro nav_links(current) %}
+  {% call nav_item("/ui/dashboard", "Dashboard", "dashboard", current) %}{% endcall %}
+  {% call nav_item("/ui/catalog", "Catalog", "catalog", current) %}{% endcall %}
+  {% call nav_item("/ui/registration", "Registration", "registration", current) %}{% endcall %}
+  {% call nav_item("/ui/schedule", "Schedule", "schedule", current) %}{% endcall %}
+  {% call nav_item("/ui/grades", "Grades", "grades", current) %}{% endcall %}
+  {% call nav_item("/ui/history", "History", "history", current) %}{% endcall %}
+  {% call nav_item("/ui/documents", "Documents", "documents", current) %}{% endcall %}
+{% endmacro %}
+
+{#- Student shell with the active page marked; student pages override the
+    rail block with this (same pattern as registrar_nav). -#}
+{% macro student_nav(current) %}
+  <header class="topbar">
+    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span>University of Belize</span>
+    <details class="nav-sheet">
+      <summary>Menu</summary>
+      <nav class="sheet-panel" aria-label="Primary">
+        {% call nav_links(current) %}{% endcall %}
+        {% call theme_toggle() %}{% endcall %}
+      </nav>
+    </details>
+  </header>
+  <nav class="rail" aria-label="Primary">
+    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span>University of Belize</span>
+    {% call nav_links(current) %}{% endcall %}
+    <div class="rail-foot">
+      {% call theme_toggle() %}{% endcall %}
+      <a href="/ui/signout">Sign out</a>
+    </div>
+  </nav>
 {% endmacro %}
 
 {#- Registrar shell: the same topbar + rail structure as base.html's default
@@ -40,24 +75,24 @@
     block with `{% call ui::registrar_nav("overview") %}{% endcall %}`;
     `current` marks the active link (aria-current, styled once). -#}
 {% macro registrar_nav_links(current) %}
-  <a class="navlink" href="/ui/registrar" {% if current == "overview" %}aria-current="page"{% endif %}>Overview</a>
-  <a class="navlink" href="/ui/registrar/terms" {% if current == "terms" %}aria-current="page"{% endif %}>Terms &amp; windows</a>
-  <a class="navlink" href="/ui/registrar/sections" {% if current == "sections" %}aria-current="page"{% endif %}>Sections</a>
-  <a class="navlink" href="/ui/registrar/courses" {% if current == "courses" %}aria-current="page"{% endif %}>Courses</a>
-  <a class="navlink" href="/ui/registrar/students" {% if current == "students" %}aria-current="page"{% endif %}>Students</a>
-  <a class="navlink" href="/ui/registrar/overrides" {% if current == "overrides" %}aria-current="page"{% endif %}>Overrides</a>
+  {% call nav_item("/ui/registrar", "Overview", "overview", current) %}{% endcall %}
+  {% call nav_item("/ui/registrar/terms", "Terms & windows", "terms", current) %}{% endcall %}
+  {% call nav_item("/ui/registrar/sections", "Sections", "sections", current) %}{% endcall %}
+  {% call nav_item("/ui/registrar/courses", "Courses", "courses", current) %}{% endcall %}
+  {% call nav_item("/ui/registrar/students", "Students", "students", current) %}{% endcall %}
+  {% call nav_item("/ui/registrar/overrides", "Overrides", "overrides", current) %}{% endcall %}
 {% endmacro %}
 
 {#- Institution-admin shell, same shape as registrar_nav. -#}
 {% macro admin_nav_links(current) %}
-  <a class="navlink" href="/ui/admin/calendar" {% if current == "calendar" %}aria-current="page"{% endif %}>Calendar</a>
-  <a class="navlink" href="/ui/admin/settings" {% if current == "settings" %}aria-current="page"{% endif %}>Settings</a>
-  <a class="navlink" href="/ui/admin/accounts" {% if current == "accounts" %}aria-current="page"{% endif %}>Accounts</a>
+  {% call nav_item("/ui/admin/calendar", "Calendar", "calendar", current) %}{% endcall %}
+  {% call nav_item("/ui/admin/settings", "Settings", "settings", current) %}{% endcall %}
+  {% call nav_item("/ui/admin/accounts", "Accounts", "accounts", current) %}{% endcall %}
 {% endmacro %}
 
 {% macro admin_nav(current) %}
   <header class="topbar">
-    <span class="brand">UB Administration</span>
+    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span>Administration</span>
     <details class="nav-sheet">
       <summary>Menu</summary>
       <nav class="sheet-panel" aria-label="Administration">
@@ -66,9 +101,10 @@
     </details>
   </header>
   <nav class="rail" aria-label="Administration">
-    <span class="brand">UB Administration</span>
+    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span>Administration</span>
     {% call admin_nav_links(current) %}{% endcall %}
     <div class="rail-foot">
+      {% call theme_toggle() %}{% endcall %}
       <a href="/ui/signout">Sign out</a>
     </div>
   </nav>
@@ -76,12 +112,12 @@
 
 {#- Platform-operator shell: one surface today (license management). -#}
 {% macro platform_nav_links(current) %}
-  <a class="navlink" href="/ui/platform/license" {% if current == "license" %}aria-current="page"{% endif %}>License</a>
+  {% call nav_item("/ui/platform/license", "License", "license", current) %}{% endcall %}
 {% endmacro %}
 
 {% macro platform_nav(current) %}
   <header class="topbar">
-    <span class="brand">UB Platform</span>
+    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span>Platform</span>
     <details class="nav-sheet">
       <summary>Menu</summary>
       <nav class="sheet-panel" aria-label="Platform">
@@ -90,9 +126,10 @@
     </details>
   </header>
   <nav class="rail" aria-label="Platform">
-    <span class="brand">UB Platform</span>
+    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span>Platform</span>
     {% call platform_nav_links(current) %}{% endcall %}
     <div class="rail-foot">
+      {% call theme_toggle() %}{% endcall %}
       <a href="/ui/signout">Sign out</a>
     </div>
   </nav>
@@ -100,7 +137,7 @@
 
 {% macro registrar_nav(current) %}
   <header class="topbar">
-    <span class="brand">UB Registrar</span>
+    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span>Registrar</span>
     <details class="nav-sheet">
       <summary>Menu</summary>
       <nav class="sheet-panel" aria-label="Registrar">
@@ -109,9 +146,10 @@
     </details>
   </header>
   <nav class="rail" aria-label="Registrar">
-    <span class="brand">UB Registrar</span>
+    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span>Registrar</span>
     {% call registrar_nav_links(current) %}{% endcall %}
     <div class="rail-foot">
+      {% call theme_toggle() %}{% endcall %}
       <a href="/ui/signout">Sign out</a>
     </div>
   </nav>

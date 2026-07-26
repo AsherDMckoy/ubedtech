@@ -1,6 +1,8 @@
 {% extends "pages/base.html" %}
 {% import "components/ui.html" as ui %}
 {% block title %}Registration{% endblock %}
+{% block rail %}{% call ui::student_nav("catalog") %}{% endcall %}{% endblock %}
+
 {% block content %}
   <div class="wrap">
     <h1>Registration</h1>
@@ -13,13 +15,17 @@
 
       {# Read path: filters instantly in-page (FRONTEND.md §4). With JS off
          this is a GET form that reloads with server-filtered results. #}
-      <form data-search-form role="search" method="get" action="/ui/catalog">
-        {% call ui::search("q", "q", "Search sections", "Search CMPS, calculus, Alvarez…", q) %}{% endcall %}
-      </form>
-      <p class="meta">
-        <span data-search-count>Showing all {{ rows.len() }} sections</span>
-        <span class="meta-hint">Search filters instantly · registering waits for the server</span>
-      </p>
+      {# Sticky search (fix 4): the search region stays put while results
+         scroll under it. #}
+      <div class="search-sticky">
+        <form data-search-form role="search" method="get" action="/ui/catalog">
+          {% call ui::search("q", "q", "Search sections", "Search CMPS, calculus, Alvarez…", q) %}{% endcall %}
+        </form>
+        <p class="meta">
+          <span data-search-count>Showing all {{ rows.len() }} sections</span>
+          <span class="meta-hint">Search filters instantly · registering waits for the server</span>
+        </p>
+      </div>
 
       <div class="card card-flush table-wrap">
         <table>

@@ -18,14 +18,14 @@
       <details class="nav-sheet">
         <summary>Menu</summary>
         <nav class="sheet-panel" aria-label="Primary">
-          {% call ui::nav_links() %}{% endcall %}
+          {% call ui::nav_links("") %}{% endcall %}
           {% call ui::theme_toggle() %}{% endcall %}
         </nav>
       </details>
     </header>
     <nav class="rail" aria-label="Primary">
       <span class="brand">University of Belize</span>
-      {% call ui::nav_links() %}{% endcall %}
+      {% call ui::nav_links("") %}{% endcall %}
       <div class="rail-foot">
         {% call ui::theme_toggle() %}{% endcall %}
         <a href="/ui/signout">Sign out</a>
