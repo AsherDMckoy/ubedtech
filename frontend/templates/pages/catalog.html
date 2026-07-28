@@ -13,17 +13,18 @@
         {% call ui::alert("danger", blocked) %}{% endcall %}
       {% endif %}
 
-      {# Read path: filters instantly in-page (FRONTEND.md §4). With JS off
-         this is a GET form that reloads with server-filtered results. #}
+      {# Search is a plain GET the server answers from the full catalog —
+         the catalog paginates, so an in-page filter over loaded rows would
+         silently miss everything past this page (ADR-15). #}
       {# Sticky search (fix 4): the search region stays put while results
          scroll under it. #}
       <div class="search-sticky">
-        <form data-search-form role="search" method="get" action="/ui/catalog">
+        <form role="search" method="get" action="/ui/catalog">
           {% call ui::search("q", "q", "Search sections", "Search CMPS, calculus, Alvarez…", q) %}{% endcall %}
         </form>
         <p class="meta">
-          <span data-search-count>Showing all {{ rows.len() }} sections</span>
-          <span class="meta-hint">Search filters instantly · registering waits for the server</span>
+          <span>Showing {{ rows.len() }} sections{% if !q.is_empty() %} matching “{{ q }}”{% endif %}</span>
+          <span class="meta-hint">Search covers the full catalog · registering waits for the server</span>
         </p>
       </div>
 
@@ -41,9 +42,6 @@
             {% for row in rows %}
               {% include "components/section_row.html" %}
             {% endfor %}
-            <tr data-search-empty hidden>
-              <td colspan="3" class="c-empty">No sections match your search. Try a course code or instructor.</td>
-            </tr>
           </tbody>
         </table>
       </div>

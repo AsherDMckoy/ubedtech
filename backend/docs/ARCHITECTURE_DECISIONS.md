@@ -270,3 +270,23 @@ repository, and CLAUDE.md §6 requires docs to be committed with code.
   refused); `design_tokens_meet_wcag_contrast` covers both dark blocks and
   proves them value-identical; the asset tests pin font serving and the
   per-file font budget.
+
+## ADR-15: catalog search is a server round trip, not the in-page filter
+
+- **Original (FRONTEND.md §4):** catalog search filters instantly in-page
+  over the loaded rows, zero round trips; the GET form is the JS-off
+  fallback.
+- **Replacement:** the catalog search form is a plain GET the server
+  answers from the full catalog (`search_catalog`, paginated). The
+  in-page instant filter (`data-search-form`) is removed from this screen;
+  it remains available for screens that load their entire dataset.
+- **Why:** the catalog paginates at 20 rows (demo scale: ~280 sections).
+  An in-page filter over one page silently misses everything past it —
+  a student searching "MATH" on page 1 concludes no MATH sections exist.
+  Truthful-but-slower beats instant-but-wrong; the read path stays one
+  request.
+- **Consequences:** searching costs a page load; the "Showing N sections"
+  line now reflects the server's answer and names the active query.
+- **Proof:** the existing `/ui/catalog?q=…` UI tests exercise the
+  server-filtered path (`enrollment::tests` catalog cases); with the
+  attribute gone, the form submits identically with and without JS.
