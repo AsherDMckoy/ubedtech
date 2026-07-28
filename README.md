@@ -68,3 +68,17 @@ the database, re-apply `seed.sql`, re-run. The `seed.sql` core scenarios
 exactly.
 
 Load-test dataset on top of that: `backend/load/README.md`.
+
+## Releases
+
+Pushing a version tag builds Linux and Windows binaries and attaches
+them to a GitHub Release (`.github/workflows/release.yml`):
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Each archive contains the server binary, the `dist/` frontend assets,
+the demo `seed.sql`, and `RUN.md` — the standalone instructions for
+running from a release package with a Docker PostgreSQL.

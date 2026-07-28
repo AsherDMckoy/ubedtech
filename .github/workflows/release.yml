@@ -1,0 +1,66 @@
+name: Release
+
+# Pushing a tag like v0.1.0 builds native binaries on Linux and Windows,
+# packages each with the frontend assets, the demo seed, and RUN.md, and
+# attaches both archives to a GitHub Release for that tag.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.artifact }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: ubedtech-linux-x86_64
+            binary: backend
+            packaged: ubedtech
+          - os: windows-latest
+            artifact: ubedtech-windows-x86_64
+            binary: backend.exe
+            packaged: ubedtech.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+
+      - name: Build release binary
+        working-directory: backend
+        run: cargo build --release
+
+      # The binary is self-contained except for the fingerprinted frontend
+      # assets (loaded from APP_FRONTEND_DIST at startup); migrations are
+      # embedded and apply automatically on first run.
+      - name: Stage package
+        shell: bash
+        run: |
+          mkdir -p stage/${{ matrix.artifact }}/dist
+          cp backend/target/release/${{ matrix.binary }} stage/${{ matrix.artifact }}/${{ matrix.packaged }}
+          cp frontend/dist/* stage/${{ matrix.artifact }}/dist/
+          cp backend/src/dev/seed.sql stage/${{ matrix.artifact }}/seed.sql
+          cp RUN.md stage/${{ matrix.artifact }}/RUN.md
+
+      - name: Archive (Linux)
+        if: runner.os == 'Linux'
+        run: tar -C stage -czf ${{ matrix.artifact }}.tar.gz ${{ matrix.artifact }}
+
+      - name: Archive (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path stage/${{ matrix.artifact }} -DestinationPath ${{ matrix.artifact }}.zip
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.artifact }}.*
