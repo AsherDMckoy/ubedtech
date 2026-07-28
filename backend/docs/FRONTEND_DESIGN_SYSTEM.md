@@ -84,7 +84,9 @@ box-shadow).
   nav sheet — animated surface #3, a `<details class="nav-sheet">` so it
   opens/closes with JS off. Only one nav is ever in the accessibility
   tree. Sign-in renders the bare shell (`shell-bare` + empty `rail`
-  block).
+  block) with `.wrap-auth`: one narrow (420px) centered column — brand
+  mark + university name above the heading, full-width primary button —
+  instead of form fields stretched to the measure.
 - **Buttons**: `button`/`.btn` default; `.btn-primary` (action tokens);
   `[disabled]` dims; in-progress = submit-once enhancement swaps in
   `data-busy-label` ("Checking…") and sets `form[aria-busy]` — honest

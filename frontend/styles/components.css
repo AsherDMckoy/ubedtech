@@ -21,6 +21,28 @@
   grid-template-columns: 1fr;
 }
 
+/* Sign-in: a single-decision screen (§6) — one narrow calm column with
+   the brand above it, instead of form fields stretched to the measure. */
+/* .wrap.wrap-auth so this outranks the later `main > .wrap` measure rule */
+main > .wrap.wrap-auth {
+  max-width: 420px;
+  padding-top: 8vh;
+}
+
+.wrap-auth .brand {
+  justify-content: center;
+  font-size: 18px;
+  padding: 0;
+}
+
+.wrap-auth h1 {
+  text-align: center;
+}
+
+.wrap-auth .btn-primary {
+  width: 100%;
+}
+
 .rail {
   background: var(--surface-1);
   border-right: 0.5px solid var(--border);
@@ -833,11 +855,11 @@ tr.just-changed {
   white-space: nowrap;
 }
 
+/* Lives inside the danger alert: the reasons and the message are one
+   announced unit; color and size inherit from .alert-danger. */
 .hold-list {
-  margin: 0 0 var(--space-4);
+  margin: var(--space-2) 0 0;
   padding-left: var(--space-5);
-  color: var(--text-danger);
-  font-size: 14px;
 }
 
 .dash-deadline {

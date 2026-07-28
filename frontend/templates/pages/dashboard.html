@@ -6,20 +6,24 @@
 {% block content %}
   <div class="wrap">
     <h1>Your dashboard</h1>
+    {% if let Some(term) = term %}
+      <p class="sub">{{ term.name }}</p>
+    {% endif %}
 
     {# Holds block registration — surface them loudly and first, with the
        specific flag named (color is never the only signal, FRONTEND.md §8). #}
     {% if !holds.is_empty() %}
-      {% call ui::alert("danger", "Registration is on hold. Clear these before you can add or drop classes.") %}{% endcall %}
-      <ul class="hold-list">
-        {% for flag in holds %}
-          <li>{{ flag }} hold</li>
-        {% endfor %}
-      </ul>
+      <div class="alert alert-danger" role="alert">
+        Registration is on hold. Clear these before you can add or drop classes.
+        <ul class="hold-list">
+          {% for flag in holds %}
+            <li>{{ flag }} hold</li>
+          {% endfor %}
+        </ul>
+      </div>
     {% endif %}
 
     {% if let Some(term) = term %}
-      {% call ui::alert("accent", term.name) %}{% endcall %}
       <p class="dash-deadline">Add/drop closes {{ term.add_drop_closes_at.format("%b %-d, %Y") }}</p>
 
       <h2>Your schedule</h2>
