@@ -234,7 +234,7 @@ async function submitRow(form) {
   try {
     const response = await fetch(form.action, {
       method: "POST",
-      body: new FormData(form),
+      body: new URLSearchParams(new FormData(form)),
       headers: { "X-Fragment": "row" },
       credentials: "same-origin",
     });
@@ -269,7 +269,7 @@ addEventListener(
     for (const button of document.querySelectorAll("[data-theme-form] button")) {
       button.setAttribute("aria-pressed", String(button.value === choice));
     }
-    const body = new FormData(form);
+    const body = new URLSearchParams(new FormData(form));
     body.set("theme", choice);
     fetch(form.action, { method: "POST", body, credentials: "same-origin" }).catch(() => {});
   },
