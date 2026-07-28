@@ -457,6 +457,7 @@ struct SchedulePage {
     days: Vec<DayColumn>,
     empty: bool,
     weekend: bool,
+    events: Vec<crate::institution::service::InstitutionEvent>,
 }
 
 /// One weekday's meetings, already time-sorted by the schedule query.
@@ -504,6 +505,7 @@ pub async fn schedule_page(
     actor: Actor,
     query_service: web::Data<ScheduleQuery>,
     academics: web::Data<AcademicsService>,
+    institution: web::Data<crate::institution::InstitutionService>,
 ) -> Result<HttpResponse, AppError> {
     let term = academics.current_term(&actor).await?;
     let meetings = match &term {
@@ -517,6 +519,7 @@ pub async fn schedule_page(
         days,
         empty,
         weekend,
+        events: institution.upcoming_events(&actor).await?,
     };
     Ok(html(StatusCode::OK, page.render()?))
 }
@@ -558,6 +561,13 @@ pub fn sample_schedule_html() -> Result<String, askama::Error> {
         days,
         empty: false,
         weekend,
+        events: vec![crate::institution::service::InstitutionEvent {
+            id: Uuid::nil(),
+            title: "Independence Day".into(),
+            event_type: "holiday".into(),
+            starts_on: (now + Duration::days(30)).date_naive(),
+            ends_on: (now + Duration::days(30)).date_naive(),
+        }],
     }
     .render()
 }

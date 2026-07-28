@@ -980,6 +980,10 @@ mod ui {
                         $pool.clone(),
                         crate::audit::AuditWriter,
                     )))
+                    .app_data(web::Data::new(crate::institution::InstitutionService::new(
+                        $pool.clone(),
+                        crate::audit::AuditWriter,
+                    )))
                     .wrap(actix_web::middleware::from_fn(
                         crate::identity_access::csrf::csrf_middleware,
                     ))

@@ -11,31 +11,48 @@
 
       {% if empty %}
         {% call ui::empty_state("No classes on your schedule this term.", "/ui/catalog", "Browse the catalog") %}{% endcall %}
+      {% endif %}
+
+      {# The week grid always renders — an empty week is still the week
+         (each day says "No classes"), so the page keeps its shape before
+         the first registration. One structure, two renderings: stacked
+         day list on small screens, grid columns on desktop (CSS only). #}
+      <div class="week{% if weekend %} week-7{% endif %}">
+        {% for day in days %}
+          <section class="day" aria-label="{{ day.name }}">
+            <h2>{{ day.name }}</h2>
+            {% if day.meetings.is_empty() %}
+              <p class="day-empty">No classes</p>
+            {% else %}
+              <ul class="day-list">
+                {% for meeting in day.meetings %}
+                  <li>
+                    <span class="day-time">{{ meeting.starts_at.format("%H:%M") }}–{{ meeting.ends_at.format("%H:%M") }}</span>
+                    <span class="day-course">{{ meeting.course_code }} · {{ meeting.course_title }}</span>
+                    <span class="day-room">
+                      Sec {{ meeting.section_code }}{% if let Some(room) = meeting.room_code %} · Rm {{ room }}{% endif %}
+                    </span>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          </section>
+        {% endfor %}
+      </div>
+
+      <h2>Campus events</h2>
+      {% if events.is_empty() %}
+        {% call ui::empty_state("No upcoming events on the calendar.", "", "") %}{% endcall %}
       {% else %}
-        {# One structure, two renderings: stacked day list on small screens,
-           weekly grid columns on desktop (CSS only — no duplicated content,
-           nothing animates in). #}
-        <div class="week{% if weekend %} week-7{% endif %}">
-          {% for day in days %}
-            <section class="day" aria-label="{{ day.name }}">
-              <h2>{{ day.name }}</h2>
-              {% if day.meetings.is_empty() %}
-                <p class="day-empty">No classes</p>
-              {% else %}
-                <ul class="day-list">
-                  {% for meeting in day.meetings %}
-                    <li>
-                      <span class="day-time">{{ meeting.starts_at.format("%H:%M") }}–{{ meeting.ends_at.format("%H:%M") }}</span>
-                      <span class="day-course">{{ meeting.course_code }} · {{ meeting.course_title }}</span>
-                      <span class="day-room">
-                        Sec {{ meeting.section_code }}{% if let Some(room) = meeting.room_code %} · Rm {{ room }}{% endif %}
-                      </span>
-                    </li>
-                  {% endfor %}
-                </ul>
-              {% endif %}
-            </section>
-          {% endfor %}
+        <div class="card">
+          <ul class="strip">
+            {% for event in events %}
+              <li>
+                <span class="strip-course">{{ event.title }}</span>
+                <span class="strip-meet">{{ event.starts_on.format("%b %-d") }}</span>
+              </li>
+            {% endfor %}
+          </ul>
         </div>
       {% endif %}
     {% else %}
