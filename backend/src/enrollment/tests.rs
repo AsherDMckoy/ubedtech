@@ -841,6 +841,64 @@ async fn prerequisites_deny_until_completed_with_the_minimum_grade(pool: sqlx::P
     register().await.expect("satisfied prerequisite admits");
 }
 
+/// A course already completed with a passing grade cannot be taken again;
+/// a failed attempt (0.0 points) stays retakeable (assumption A37).
+#[sqlx::test(migrations = "./migrations")]
+async fn completed_courses_cannot_be_retaken_unless_failed(pool: sqlx::PgPool) {
+    let fixture = seed_registration_fixture(&pool, 10).await;
+    let service =
+        crate::enrollment::EnrollmentService::new(pool.clone(), crate::audit::AuditWriter);
+    let register = || {
+        service.register_for(
+            &fixture.registrar,
+            fixture.student_a,
+            crate::enrollment::RegisterCommand {
+                section_id: fixture.section_id,
+                idempotency_key: uuid::Uuid::new_v4(),
+            },
+        )
+    };
+
+    // The same course, an earlier section, completed with a passing grade.
+    let target_course: uuid::Uuid =
+        sqlx::query_scalar("SELECT course_id FROM section WHERE id = $1")
+            .bind(fixture.section_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let earlier_section = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO section (id, institution_id, term_id, course_id, section_code, status) \
+         VALUES ($1, $2, $3, $4, '99', 'open')",
+    )
+    .bind(earlier_section)
+    .bind(fixture.registrar.institution_id)
+    .bind(fixture.term_id)
+    .bind(target_course)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let past_enrollment =
+        seed_completion(&pool, &fixture, earlier_section, fixture.student_a, 4.0).await;
+
+    assert!(matches!(
+        register().await,
+        Err(crate::enrollment::types::EnrollError::Denied(
+            crate::enrollment::types::Denial::CourseAlreadyCompleted
+        ))
+    ));
+
+    // Demote the pass to an F: the retake is allowed.
+    sqlx::query(
+        "UPDATE grade_record SET grade_code = 'F', grade_points = 0.0 WHERE enrollment_id = $1",
+    )
+    .bind(past_enrollment)
+    .execute(&pool)
+    .await
+    .unwrap();
+    register().await.expect("a failed course is retakeable");
+}
+
 /// Two concurrent drops of the same enrollment release exactly one seat.
 #[sqlx::test(migrations = "./migrations")]
 async fn concurrent_duplicate_drops_release_exactly_one_seat(pool: sqlx::PgPool) {

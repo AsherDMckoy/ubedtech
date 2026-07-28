@@ -276,4 +276,64 @@ VALUES ('00000000-0000-0000-0000-000000000075', '00000000-0000-0000-0000-0000000
         'Graduate school application', 'download', '00000000-0000-0000-0000-000000000076')
 ON CONFLICT (id) DO NOTHING;
 
+-- ---------------------------------------------------------------------------
+-- Academic history: Spring 2025 (fully in the past, every window closed;
+-- seed-demo owns the code SPRING-2026, so this term stays out of its way)
+-- gives demo.student three published grades, so History/Transcript have
+-- real content and the completed-course rule (A37) is demonstrable:
+--   CMPS-1121 passed (A)  → offered again in FALL-2026 → register DENIES.
+--   MATH-1151 failed (F)  → offered again in FALL-2026 → retake ALLOWED.
+--   ENGL-1101 passed (B)  → not offered this term (history fodder only).
+-- ---------------------------------------------------------------------------
+INSERT INTO academic_term (id, institution_id, code, name, starts_on, ends_on,
+                           registration_opens_at, add_drop_closes_at, grade_entry_closes_at)
+VALUES ('00000000-0000-0000-0000-000000000090', '00000000-0000-0000-0000-000000000001',
+        'SPRING-2025', 'Spring 2025', DATE '2025-01-13', DATE '2025-05-09',
+        TIMESTAMPTZ '2024-12-01 00:00:00+00', TIMESTAMPTZ '2025-01-27 00:00:00+00',
+        TIMESTAMPTZ '2025-05-23 00:00:00+00')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO course (id, institution_id, code, title, credit_hours) VALUES
+    ('00000000-0000-0000-0000-000000000091', '00000000-0000-0000-0000-000000000001', 'CMPS-1121', 'Intro to programming', 3.0),
+    ('00000000-0000-0000-0000-000000000092', '00000000-0000-0000-0000-000000000001', 'ENGL-1101', 'Composition',          3.0),
+    ('00000000-0000-0000-0000-000000000093', '00000000-0000-0000-0000-000000000001', 'MATH-1151', 'College algebra',      3.0)
+ON CONFLICT (id) DO NOTHING;
+
+-- Spring 2025 sections (roster history) and the two FALL-2026 re-offerings.
+INSERT INTO section (id, institution_id, term_id, course_id, section_code, status) VALUES
+    ('00000000-0000-0000-0000-000000000094', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000090', '00000000-0000-0000-0000-000000000091', '01', 'open'),
+    ('00000000-0000-0000-0000-000000000095', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000090', '00000000-0000-0000-0000-000000000092', '01', 'open'),
+    ('00000000-0000-0000-0000-000000000096', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000090', '00000000-0000-0000-0000-000000000093', '01', 'open'),
+    ('00000000-0000-0000-0000-000000000097', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0000-000000000091', '01', 'open'),
+    ('00000000-0000-0000-0000-000000000098', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0000-000000000093', '01', 'open')
+ON CONFLICT (id) DO NOTHING;
+
+-- Friday slots so the re-offerings never collide with the existing fodder.
+INSERT INTO section_meeting (id, section_id, day_of_week, starts_at, ends_at) VALUES
+    ('00000000-0000-0000-0000-000000000099', '00000000-0000-0000-0000-000000000097', 5, '09:00', '10:15'),
+    ('00000000-0000-0000-0000-00000000009a', '00000000-0000-0000-0000-000000000098', 5, '10:30', '11:45')
+ON CONFLICT (id) DO NOTHING;
+
+UPDATE section_capacity SET capacity = 30, enrolled_count = 0 WHERE section_id = '00000000-0000-0000-0000-000000000097';
+UPDATE section_capacity SET capacity = 30, enrolled_count = 0 WHERE section_id = '00000000-0000-0000-0000-000000000098';
+
+-- Spring 2025 seat counters match the one historical enrollment each.
+UPDATE section_capacity SET capacity = 25, enrolled_count = 1 WHERE section_id IN
+    ('00000000-0000-0000-0000-000000000094',
+     '00000000-0000-0000-0000-000000000095',
+     '00000000-0000-0000-0000-000000000096');
+
+-- demo.student's Spring 2025 enrollments and published grades.
+INSERT INTO enrollment (id, institution_id, student_id, section_id, status, registered_at, source, idempotency_key, created_by_user_id) VALUES
+    ('00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000012', '00000000-0000-0000-0000-000000000094', 'enrolled', TIMESTAMPTZ '2025-01-14 14:00:00+00', 'registrar', '00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-000000000016'),
+    ('00000000-0000-0000-0000-0000000000a2', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000012', '00000000-0000-0000-0000-000000000095', 'enrolled', TIMESTAMPTZ '2025-01-14 14:05:00+00', 'registrar', '00000000-0000-0000-0000-0000000000b2', '00000000-0000-0000-0000-000000000016'),
+    ('00000000-0000-0000-0000-0000000000a3', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000012', '00000000-0000-0000-0000-000000000096', 'enrolled', TIMESTAMPTZ '2025-01-14 14:10:00+00', 'registrar', '00000000-0000-0000-0000-0000000000b3', '00000000-0000-0000-0000-000000000016')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO grade_record (id, institution_id, enrollment_id, grade_code, grade_points, state, entered_by_user_id, published_at) VALUES
+    ('00000000-0000-0000-0000-0000000000a4', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-0000000000a1', 'A', 4.0, 'published', '00000000-0000-0000-0000-000000000015', TIMESTAMPTZ '2025-05-16 12:00:00+00'),
+    ('00000000-0000-0000-0000-0000000000a5', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-0000000000a2', 'B', 3.0, 'published', '00000000-0000-0000-0000-000000000015', TIMESTAMPTZ '2025-05-16 12:00:00+00'),
+    ('00000000-0000-0000-0000-0000000000a6', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-0000000000a3', 'F', 0.0, 'published', '00000000-0000-0000-0000-000000000015', TIMESTAMPTZ '2025-05-16 12:00:00+00')
+ON CONFLICT (id) DO NOTHING;
+
 COMMIT;

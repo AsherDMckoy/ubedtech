@@ -219,6 +219,30 @@ impl EnrollmentService {
             return Err(EnrollError::Denied(Denial::AlreadyEnrolled));
         }
 
+        // A course already completed with a passing grade cannot be taken
+        // again. Passing = best published grade above 0.0 points, so a
+        // failed course (F, 0.0) stays retakeable. Conservative default,
+        // no override path — recorded as assumption A37.
+        let already_completed: bool = sqlx::query_scalar(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                FROM records_student_course_completion c
+                WHERE c.student_id = $1
+                  AND c.course_id = $2
+                  AND c.best_grade_points > 0
+            )
+            "#,
+        )
+        .bind(student_id)
+        .bind(context.course_id)
+        .fetch_one(&mut *tx)
+        .await?;
+
+        if already_completed {
+            return Err(EnrollError::Denied(Denial::CourseAlreadyCompleted));
+        }
+
         let prerequisites_met: bool = sqlx::query_scalar(
             r#"
             SELECT NOT EXISTS (

@@ -83,13 +83,23 @@ const SEC_PHYS_2101: Uuid = Uuid::from_u128(0x34);
 const COURSE_MATH_2110: Uuid = Uuid::from_u128(0x25);
 /// seed.sql's core rows that predate this command and carry no audit events;
 /// backfilled below so audit coverage holds for the WHOLE database.
-const CORE_ENROLLMENTS: [Uuid; 4] = [
+const CORE_ENROLLMENTS: [Uuid; 7] = [
     Uuid::from_u128(0x51),
     Uuid::from_u128(0x52),
     Uuid::from_u128(0x53),
     Uuid::from_u128(0x54),
+    // demo.student's Spring 2025 history (seed.sql academic-history block).
+    Uuid::from_u128(0xA1),
+    Uuid::from_u128(0xA2),
+    Uuid::from_u128(0xA3),
 ];
-const CORE_GRADES: [Uuid; 2] = [Uuid::from_u128(0x71), Uuid::from_u128(0x72)];
+const CORE_GRADES: [Uuid; 5] = [
+    Uuid::from_u128(0x71),
+    Uuid::from_u128(0x72),
+    Uuid::from_u128(0xA4),
+    Uuid::from_u128(0xA5),
+    Uuid::from_u128(0xA6),
+];
 const CORE_DOC_REQUEST: Uuid = Uuid::from_u128(0x75);
 
 /// Deterministic UUIDs for generated rows, far from seed.sql's low range.

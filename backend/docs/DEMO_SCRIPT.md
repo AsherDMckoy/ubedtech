@@ -35,7 +35,10 @@ Seeded fodder (term FALL-2026, add/drop open): CMPS-2131 **full** with a
 mixed roster (published/draft/blank grades), CMPS-3141 **open** (register
 against this), MATH-3201 **3 seats left**, PHYS-2101 **blocked by an
 unmet prerequisite**, and one **pending** transcript request from
-demo.student.
+demo.student. demo.student also carries a Spring 2025 history (A / B / F,
+all published), which powers two more catalog states: CMPS-1121
+**already passed → register denies** ("course already completed with a
+passing grade"), MATH-1151 **failed → retake allowed**.
 
 Optional before starting: turn JS off in devtools for any journey — every
 mutation below is a plain form POST and behaves identically minus the
