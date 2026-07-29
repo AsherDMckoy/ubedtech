@@ -93,7 +93,12 @@ addEventListener(
     event.preventDefault();
     event.stopImmediatePropagation();
     pendingConfirm = form;
-    document.getElementById(form.dataset.confirmDialog)?.showModal();
+    const dialog = document.getElementById(form.dataset.confirmDialog);
+    const name = dialog?.querySelector("[data-drop-name]");
+    if (name && form.dataset.confirm) {
+      name.textContent = `You'll lose your seat in ${form.dataset.confirm}. You can re-register while add/drop is open, if seats remain.`;
+    }
+    dialog?.showModal();
   },
   true,
 );

@@ -1,0 +1,36 @@
+{#-
+  The student's current registrations with the metadata they act on —
+  meeting day/time/room, instructor, credits — plus a drop per item and
+  the running credits total (the one key number, gold-washed chip).
+  Course descriptions are not in the schema; the fields that exist carry
+  the panel (docs/CURRENT_STATE.md). Requires `enrollments`, `csrf_token`,
+  and `self.credits_total()` in scope. Drops confirm through the shared
+  dialog primitive; with JS off each form posts directly.
+-#}
+<h2>My registrations</h2>
+{% if enrollments.is_empty() %}
+  <p class="empty-state">You're not registered for any sections yet —
+    pick an open section in the <a href="/ui/catalog">catalog</a> to add one.</p>
+{% else %}
+  <p class="credits-chip"><span class="credits-n">{{ self.credits_total() }}</span> credits enrolled</p>
+  <ul class="enrolled-list">
+    {% for enrolled in enrollments %}
+      <li>
+        <div class="enrolled-main">
+          <p class="c-course">{{ enrolled.course_code }} · {{ enrolled.course_title }}</p>
+          <p class="c-detail">Sec {{ enrolled.section_code }} · {{ enrolled.credit_hours }} cr{% if !enrolled.meetings.is_empty() %} · {{ enrolled.meetings }}{% endif %}</p>
+          {% if !enrolled.instructors.is_empty() %}
+            <p class="c-detail">Instructor: {{ enrolled.instructors }}</p>
+          {% endif %}
+        </div>
+        <form method="post" action="/ui/registration/drop"
+              data-confirm-dialog="drop-dialog"
+              data-confirm="{{ enrolled.course_code }} · {{ enrolled.course_title }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="enrollment_id" value="{{ enrolled.enrollment_id }}">
+          <button type="submit" data-busy-label="Dropping…">Drop</button>
+        </form>
+      </li>
+    {% endfor %}
+  </ul>
+{% endif %}

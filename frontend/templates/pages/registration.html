@@ -1,55 +1,39 @@
 {% extends "pages/base.html" %}
+{% import "components/ui.html" as ui %}
 {% block title %}My registration{% endblock %}
 {% block rail %}{% call ui::student_nav("registration") %}{% endcall %}{% endblock %}
 
 {% block content %}
-  <h1>My registration</h1>
-  {% if let Some(notice) = notice %}
-    <p role="status">{{ notice }}</p>
-  {% endif %}
-  {% if let Some(error) = error %}
-    <p role="alert">{{ error }}</p>
-  {% endif %}
-
-  {% if let Some(term) = term %}
-    <h2>{{ term.name }} ({{ term.code }})</h2>
-    {% if enrollments.is_empty() %}
-      <p>You are not registered for any sections this term.</p>
-    {% else %}
-      <div class="table-wrap">
-      <table>
-        <caption>Current enrollments</caption>
-        <thead>
-          <tr>
-            <th scope="col">Course</th>
-            <th scope="col">Section</th>
-            <th scope="col">Meets</th>
-            <th scope="col"></th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for enrollment in enrollments %}
-            <tr>
-              <td>{{ enrollment.course_code }} — {{ enrollment.course_title }}</td>
-              <td>{{ enrollment.section_code }}</td>
-              <td>{{ enrollment.meetings }}</td>
-              <td>
-                <form method="post" action="/ui/registration/drop">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                  <input type="hidden" name="enrollment_id"
-                         value="{{ enrollment.enrollment_id }}">
-                  <button type="submit">Drop</button>
-                </form>
-              </td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      </div>
+  <div class="wrap">
+    <h1>My registration</h1>
+    {% if let Some(notice) = notice %}
+      {% call ui::alert("success", notice) %}{% endcall %}
     {% endif %}
-  {% else %}
-    <p>There is no active term right now.</p>
-  {% endif %}
+    {% if let Some(error) = error %}
+      {% call ui::alert("danger", error) %}{% endcall %}
+    {% endif %}
 
-  <p><a href="/ui/catalog">Browse the catalog</a></p>
+    {% if let Some(term) = term %}
+      <p class="sub">{{ term.name }} · add/drop closes {{ term.add_drop_closes_at.format("%b %-d, %Y") }}</p>
+
+      <section class="card enrolled-panel" aria-label="My registrations">
+        {% include "components/enrolled_panel.html" %}
+      </section>
+
+      <p class="foot"><a href="/ui/catalog">Browse the catalog</a> to add a section while add/drop is open.</p>
+
+      {# Destructive-confirm dialog (shared animated surface #2).
+         Enhancement only: with JS off each Drop form posts directly. #}
+      <dialog id="drop-dialog" aria-labelledby="drop-dialog-title">
+        <h2 id="drop-dialog-title">Drop this section?</h2>
+        <p data-drop-name>You'll lose your seat. You can re-register while add/drop is open, if seats remain.</p>
+        <div class="dialog-actions">
+          <button type="button" data-dialog-close>Keep it</button>
+          <button type="button" class="btn-primary" data-dialog-confirm>Drop section</button>
+        </div>
+      </dialog>
+    {% else %}
+      {% call ui::alert("accent", "There is no active term right now.") %}{% endcall %}
+    {% endif %}
+  </div>
 {% endblock %}

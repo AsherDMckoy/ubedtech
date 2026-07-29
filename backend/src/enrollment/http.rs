@@ -44,7 +44,9 @@ pub fn sample_dashboard_html() -> Result<String, askama::Error> {
             course_code: "CMPS 2131".into(),
             course_title: "Data structures".into(),
             section_code: "01".into(),
-            meetings: "Mon/Wed 09:00-10:15".into(),
+            credit_hours: 3.0,
+            meetings: "Mon/Wed 09:00-10:15 · FSB 214".into(),
+            instructors: "d.thompson".into(),
         }],
         events: vec![InstitutionEvent {
             id: Uuid::nil(),
@@ -323,6 +325,55 @@ struct RegistrationPage<'a> {
     enrollments: Vec<EnrolledSection>,
     notice: Option<&'a str>,
     error: Option<&'a str>,
+}
+
+impl RegistrationPage<'_> {
+    pub fn credits_total(&self) -> f64 {
+        crate::enrollment::types::credits_total(&self.enrollments)
+    }
+}
+
+/// Renders the "My registration" page with representative data and no
+/// database, for the frontend axe harness.
+pub fn sample_registration_html() -> Result<String, askama::Error> {
+    use chrono::{Duration, Utc};
+    let now = Utc::now();
+    RegistrationPage {
+        csrf_token: "sample",
+        term: Some(TermSummary {
+            id: Uuid::nil(),
+            code: "FA26".into(),
+            name: "Fall 2026".into(),
+            starts_on: now.date_naive(),
+            ends_on: (now + Duration::days(100)).date_naive(),
+            registration_opens_at: now - Duration::days(20),
+            add_drop_closes_at: now + Duration::days(14),
+            grade_entry_closes_at: None,
+        }),
+        enrollments: vec![
+            EnrolledSection {
+                enrollment_id: Uuid::nil(),
+                course_code: "CMPS 2131".into(),
+                course_title: "Data structures".into(),
+                section_code: "01".into(),
+                credit_hours: 3.0,
+                meetings: "Mon/Wed 09:00-10:15 · FSB 214".into(),
+                instructors: "d.thompson".into(),
+            },
+            EnrolledSection {
+                enrollment_id: Uuid::nil(),
+                course_code: "MATH 3201".into(),
+                course_title: "Linear algebra".into(),
+                section_code: "02".into(),
+                credit_hours: 4.0,
+                meetings: "Tue/Thu 13:00-14:15".into(),
+                instructors: String::new(),
+            },
+        ],
+        notice: Some("You are registered."),
+        error: None,
+    }
+    .render()
 }
 
 async fn render_registration(

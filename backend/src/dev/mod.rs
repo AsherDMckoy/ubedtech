@@ -41,6 +41,13 @@ pub fn render_pages(out_dir: &str) -> std::io::Result<()> {
             ),
         ),
         (
+            "my_registration.html",
+            render(
+                "my_registration",
+                crate::enrollment::http::sample_registration_html(),
+            ),
+        ),
+        (
             "schedule.html",
             render("schedule", crate::records::http::sample_schedule_html()),
         ),

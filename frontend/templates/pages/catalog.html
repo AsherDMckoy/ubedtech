@@ -28,38 +28,51 @@
         </p>
       </div>
 
-      <div class="card card-flush table-wrap">
-        <table>
-          <caption>Available sections for {{ term.name }}</caption>
-          <thead>
-            <tr>
-              <th scope="col">Course</th>
-              <th scope="col">Seats</th>
-              <th scope="col"><span class="sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in rows %}
-              {% include "components/section_row.html" %}
-            {% endfor %}
-          </tbody>
-        </table>
+      {# The list answers "what can I add?"; the aside beside it answers
+         "what am I in?" — supporting context, so it stacks below the list
+         on narrow screens. #}
+      <div class="cat-layout">
+        <div class="cat-main">
+          <div class="card card-flush table-wrap">
+            <table>
+              <caption>Available sections for {{ term.name }}</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Course</th>
+                  <th scope="col">Seats</th>
+                  <th scope="col"><span class="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in rows %}
+                  {% include "components/section_row.html" %}
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          {% if rows.is_empty() %}
+            <p class="c-empty">No open sections match.</p>
+          {% endif %}
+
+          <p class="foot">Registering reserves your seat only when the server confirms it — you'll never see “Enrolled” before it's real.</p>
+
+          <nav aria-label="Catalog pages" class="pager">
+            {% if page > 0 %}
+              <a href="/ui/catalog?q={{ q }}&amp;page={{ page - 1 }}">Previous</a>
+            {% endif %}
+            {% if rows.len() == 20 %}
+              <a href="/ui/catalog?q={{ q }}&amp;page={{ page + 1 }}">Next</a>
+            {% endif %}
+          </nav>
+        </div>
+
+        {% if is_student %}
+          <aside class="cat-aside card" aria-label="My registrations">
+            {% include "components/enrolled_panel.html" %}
+          </aside>
+        {% endif %}
       </div>
-
-      {% if rows.is_empty() %}
-        <p class="c-empty">No open sections match.</p>
-      {% endif %}
-
-      <p class="foot">Registering reserves your seat only when the server confirms it — you'll never see “Enrolled” before it's real.</p>
-
-      <nav aria-label="Catalog pages" class="pager">
-        {% if page > 0 %}
-          <a href="/ui/catalog?q={{ q }}&amp;page={{ page - 1 }}">Previous</a>
-        {% endif %}
-        {% if rows.len() == 20 %}
-          <a href="/ui/catalog?q={{ q }}&amp;page={{ page + 1 }}">Next</a>
-        {% endif %}
-      </nav>
     {% else %}
       {% call ui::alert("accent", "There is no active term right now.") %}{% endcall %}
     {% endif %}
@@ -73,7 +86,10 @@
       <p data-drop-name>You'll lose your seat. You can re-register while add/drop is open, if seats remain.</p>
       <div class="dialog-actions">
         <button type="button" data-dialog-close>Keep it</button>
-        <button type="button" class="btn-primary" data-drop-confirm>Drop section</button>
+        {# Confirms both drop flows: the row swap (data-drop-confirm) and
+           the aside's full-page form (data-dialog-confirm) — whichever is
+           pending resumes; the other handler no-ops. #}
+        <button type="button" class="btn-primary" data-drop-confirm data-dialog-confirm>Drop section</button>
       </div>
     </dialog>
   </div>

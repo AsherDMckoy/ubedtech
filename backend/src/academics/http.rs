@@ -146,6 +146,18 @@ struct CatalogPage {
     /// A named condition that blocks every registration right now (hold,
     /// window not open, window closed) — rendered as one loud banner.
     blocked: Option<String>,
+    /// The student's current registrations, shown beside the list so the
+    /// page answers "what am I in?" next to "what can I add?".
+    enrollments: Vec<crate::enrollment::types::EnrolledSection>,
+    /// Staff browsing the catalog get no "my registrations" aside; a
+    /// student with none gets its inviting empty state instead.
+    is_student: bool,
+}
+
+impl CatalogPage {
+    pub fn credits_total(&self) -> f64 {
+        crate::enrollment::types::credits_total(&self.enrollments)
+    }
 }
 
 /// Seats at or below this remaining count render as "low" (amber) — still
@@ -258,6 +270,12 @@ async fn catalog_page(
         }
     }
 
+    let is_student = actor.student_id.is_some();
+    let enrollments = match (&term, is_student) {
+        (Some(term), true) => enrollment.list_own_active(&actor, term.id).await?,
+        _ => Vec::new(),
+    };
+
     let body = CatalogPage {
         csrf_token: current.csrf_token.clone(),
         term,
@@ -265,6 +283,8 @@ async fn catalog_page(
         page: query.page,
         rows,
         blocked,
+        enrollments,
+        is_student,
     }
     .render()?;
     Ok(HttpResponse::Ok()
@@ -330,6 +350,16 @@ pub fn sample_catalog_html() -> Result<String, askama::Error> {
             ),
         ],
         blocked: None,
+        enrollments: vec![crate::enrollment::types::EnrolledSection {
+            enrollment_id: Uuid::nil(),
+            course_code: "CMPS 2131".into(),
+            course_title: "Data structures".into(),
+            section_code: "01".into(),
+            credit_hours: 3.0,
+            meetings: "Mon/Wed 09:00-10:15 · FSB 214".into(),
+            instructors: "d.thompson".into(),
+        }],
+        is_student: true,
     }
     .render()
 }

@@ -843,7 +843,8 @@ impl AcademicsService {
             JOIN section_capacity cap ON cap.section_id = s.id
             LEFT JOIN LATERAL (
                 SELECT string_agg(
-                           day_of_week || ' ' || to_char(starts_at, 'HH24:MI')
+                           (ARRAY['Mon','Tue','Wed','Thu','Fri','Sat','Sun'])[day_of_week]
+                           || ' ' || to_char(starts_at, 'HH24:MI')
                            || '-' || to_char(ends_at, 'HH24:MI'),
                            ', ' ORDER BY day_of_week, starts_at
                        ) AS summary
@@ -899,7 +900,8 @@ impl AcademicsService {
             JOIN section_capacity cap ON cap.section_id = s.id
             LEFT JOIN LATERAL (
                 SELECT string_agg(
-                           day_of_week || ' ' || to_char(starts_at, 'HH24:MI')
+                           (ARRAY['Mon','Tue','Wed','Thu','Fri','Sat','Sun'])[day_of_week]
+                           || ' ' || to_char(starts_at, 'HH24:MI')
                            || '-' || to_char(ends_at, 'HH24:MI'),
                            ', ' ORDER BY day_of_week, starts_at
                        ) AS summary
@@ -962,7 +964,8 @@ impl AcademicsService {
             JOIN section_capacity cap ON cap.section_id = s.id
             LEFT JOIN LATERAL (
                 SELECT string_agg(
-                           day_of_week || ' ' || to_char(starts_at, 'HH24:MI')
+                           (ARRAY['Mon','Tue','Wed','Thu','Fri','Sat','Sun'])[day_of_week]
+                           || ' ' || to_char(starts_at, 'HH24:MI')
                            || '-' || to_char(ends_at, 'HH24:MI'),
                            ', ' ORDER BY day_of_week, starts_at
                        ) AS summary

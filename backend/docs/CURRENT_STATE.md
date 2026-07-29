@@ -628,9 +628,10 @@ wiring, demo seed, and axe harness — no feature screens (next session).
    test-pinned.
 4. **Catalog count text**: "Showing all 20 sections" renders on every
    page of ~280 matches — "all" is only true when one page exists.
-5. **Meeting days render as ISO numbers** in catalog and registration
-   tables ("2 13:00–14:15" for Tuesday); the schedule grid uses day
-   names. Cryptic across hundreds of rows.
+5. ~~Meeting days render as ISO numbers~~ **Resolved 2026-07-28**: all
+   four SQL meeting summaries (catalog, section row, registrar
+   overview, own enrollments) now map `day_of_week` to Mon–Sun names,
+   matching the schedule grid.
 6. **Live worker drains transient document states**: within ~a minute of
    server start the queued/approved jobs render to `ready` and the
    reaper requeues the frozen `generating` rows — exactly as designed.
@@ -640,3 +641,8 @@ wiring, demo seed, and axe harness — no feature screens (next session).
 7. **Academic history has no GPA/credit totals**: with two fully graded
    terms the table is a long wall of rows with no term or cumulative
    summary line.
+8. **No course description field in the schema**: the "My registrations"
+   panel (catalog aside + My registration page) shows code, title,
+   credits, meetings/room, and instructor — the fields that exist. If a
+   catalog description is ever wanted, it is a `course` column + one
+   line in the panel, not a redesign.

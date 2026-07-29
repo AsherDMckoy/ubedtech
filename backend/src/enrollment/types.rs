@@ -68,14 +68,24 @@ impl From<EnrollError> for AppError {
 }
 
 /// One row of the student's registration panel: an active enrollment with
-/// its course and meeting summary, from a single query.
+/// its course, credits, meeting summary (rooms included), and instructors,
+/// from a single query.
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct EnrolledSection {
     pub enrollment_id: Uuid,
     pub course_code: String,
     pub course_title: String,
     pub section_code: String,
+    pub credit_hours: f64,
     pub meetings: String,
+    /// Comma-joined usernames; empty when no instructor is assigned yet.
+    pub instructors: String,
+}
+
+/// Total credit hours across a set of enrollments — the one key number on
+/// the registration panel.
+pub fn credits_total(enrollments: &[EnrolledSection]) -> f64 {
+    enrollments.iter().map(|e| e.credit_hours).sum()
 }
 
 /// Registrar command creating a registration override: the full record

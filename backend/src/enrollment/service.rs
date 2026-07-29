@@ -869,19 +869,30 @@ impl EnrollmentService {
                 c.code AS course_code,
                 c.title AS course_title,
                 s.section_code,
-                COALESCE(m.summary, '') AS meetings
+                c.credit_hours::float8 AS credit_hours,
+                COALESCE(m.summary, '') AS meetings,
+                COALESCE(i.names, '') AS instructors
             FROM enrollment e
             JOIN section s ON s.id = e.section_id
             JOIN course c ON c.id = s.course_id
             LEFT JOIN LATERAL (
                 SELECT string_agg(
-                           day_of_week || ' ' || to_char(starts_at, 'HH24:MI')
-                           || '-' || to_char(ends_at, 'HH24:MI'),
-                           ', ' ORDER BY day_of_week, starts_at
+                           (ARRAY['Mon','Tue','Wed','Thu','Fri','Sat','Sun'])[sm.day_of_week]
+                           || ' ' || to_char(sm.starts_at, 'HH24:MI')
+                           || '-' || to_char(sm.ends_at, 'HH24:MI')
+                           || COALESCE(' · ' || r.room_code, ''),
+                           ', ' ORDER BY sm.day_of_week, sm.starts_at
                        ) AS summary
-                FROM section_meeting
-                WHERE section_id = s.id
+                FROM section_meeting sm
+                LEFT JOIN room r ON r.id = sm.room_id
+                WHERE sm.section_id = s.id
             ) m ON true
+            LEFT JOIN LATERAL (
+                SELECT string_agg(ua.username, ', ' ORDER BY ua.username) AS names
+                FROM instructor_assignment ia
+                JOIN user_account ua ON ua.id = ia.instructor_user_id
+                WHERE ia.section_id = s.id
+            ) i ON true
             WHERE e.student_id = $1
               AND e.institution_id = $2
               AND e.status = 'enrolled'

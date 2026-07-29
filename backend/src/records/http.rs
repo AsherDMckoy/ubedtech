@@ -771,7 +771,9 @@ pub fn sample_proof_html() -> Result<String, askama::Error> {
             course_code: "CMPS 2131".into(),
             course_title: "Data structures".into(),
             section_code: "01".into(),
+            credit_hours: 3.0,
             meetings: "Mon/Wed 09:00-10:15".into(),
+            instructors: "d.thompson".into(),
         }],
         generated_on: generated_on(),
     }
