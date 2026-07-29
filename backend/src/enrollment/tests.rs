@@ -1304,6 +1304,10 @@ mod ui {
                         $pool.clone(),
                         crate::audit::AuditWriter,
                     )))
+                    .app_data(web::Data::new(crate::records::GradeService::new(
+                        $pool.clone(),
+                        crate::audit::AuditWriter,
+                    )))
                     // Same order as main.rs: theme inside csrf inside
                     // session resolution.
                     .wrap(actix_web::middleware::from_fn(

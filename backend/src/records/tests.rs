@@ -17,6 +17,7 @@ struct GradeFixture {
     officer: Actor,
     student: Actor,
     section_id: Uuid,
+    other_section_id: Uuid,
     term_id: Uuid,
     enrollment_id: Uuid,
 }
@@ -158,6 +159,7 @@ async fn seed_grade_fixture(pool: &PgPool) -> GradeFixture {
             Some(student_id),
         ),
         section_id,
+        other_section_id,
         term_id,
         enrollment_id,
     }
@@ -732,6 +734,79 @@ async fn academic_history_spans_terms_and_hides_drafts(pool: PgPool) {
     // A non-student actor has no history to read.
     assert!(matches!(
         grades.academic_history(&fx.officer).await,
+        Err(AppError::Forbidden)
+    ));
+}
+
+/// The dashboard's GPA history: only COMPLETED terms count, only
+/// published/amended grades count, and the weighting is by credit hours.
+/// A term in progress never has a GPA row.
+#[sqlx::test(migrations = "./migrations")]
+async fn term_gpa_history_counts_only_completed_terms_and_published_grades(pool: PgPool) {
+    let fx = seed_grade_fixture(&pool).await;
+    let service = GradeService::new(pool.clone(), crate::audit::AuditWriter);
+
+    // A published grade in the CURRENT term: no GPA row — the term is not
+    // complete, so nothing about it is final.
+    service
+        .save_draft(&fx.instructor, save_command(fx.enrollment_id, "B", 0))
+        .await
+        .unwrap();
+    service
+        .publish_section(&fx.officer, fx.section_id)
+        .await
+        .unwrap();
+    assert!(
+        service.own_term_gpas(&fx.student).await.unwrap().is_empty(),
+        "an in-progress term must not appear"
+    );
+
+    // The term ends: exactly one row, 3.0 GPA over the course's 3 credits.
+    sqlx::query(
+        "UPDATE academic_term SET starts_on = current_date - 100, ends_on = current_date - 1",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    let terms = service.own_term_gpas(&fx.student).await.unwrap();
+    assert_eq!(terms.len(), 1);
+    assert_eq!(terms[0].credits, 3.0);
+    assert!((terms[0].gpa() - 3.0).abs() < 1e-9);
+
+    // A draft in the same completed term contributes nothing.
+    let draft_enrollment = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO enrollment (id, institution_id, student_id, section_id, status, \
+         registered_at, source, idempotency_key, created_by_user_id) \
+         SELECT $1, institution_id, student_id, $2, 'enrolled', now(), 'registrar', $3, \
+                created_by_user_id \
+         FROM enrollment WHERE id = $4",
+    )
+    .bind(draft_enrollment)
+    .bind(fx.other_section_id)
+    .bind(Uuid::new_v4())
+    .bind(fx.enrollment_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO grade_record (id, institution_id, enrollment_id, grade_code, \
+         grade_points, state, entered_by_user_id) \
+         SELECT $1, institution_id, $2, 'A', 4.0, 'draft', entered_by_user_id \
+         FROM grade_record WHERE enrollment_id = $3",
+    )
+    .bind(Uuid::new_v4())
+    .bind(draft_enrollment)
+    .bind(fx.enrollment_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let terms = service.own_term_gpas(&fx.student).await.unwrap();
+    assert_eq!(terms[0].credits, 3.0, "the draft must not add credits");
+
+    // Not a student: nothing to read.
+    assert!(matches!(
+        service.own_term_gpas(&fx.officer).await,
         Err(AppError::Forbidden)
     ));
 }

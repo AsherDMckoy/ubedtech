@@ -19,8 +19,34 @@ struct DashboardPage {
     term: Option<TermSummary>,
     holds: Vec<String>,
     enrollments: Vec<EnrolledSection>,
+    /// Completed past terms only, published/amended grades only — a course
+    /// in progress has no final grade, so the current term never appears.
+    gpa_terms: Vec<crate::records::TermGpa>,
     events: Vec<InstitutionEvent>,
     cal: MiniCal,
+}
+
+impl DashboardPage {
+    /// Whole days until add/drop closes (negative once it has closed).
+    pub fn deadline_days(&self) -> i64 {
+        self.term
+            .as_ref()
+            .map(|term| {
+                (term.add_drop_closes_at.date_naive() - chrono::Utc::now().date_naive()).num_days()
+            })
+            .unwrap_or(0)
+    }
+
+    /// Credit-weighted GPA across all completed terms.
+    pub fn cumulative_gpa(&self) -> String {
+        let credits: f64 = self.gpa_terms.iter().map(|t| t.credits).sum();
+        let quality: f64 = self.gpa_terms.iter().map(|t| t.quality_points).sum();
+        if credits > 0.0 {
+            format!("{:.2}", quality / credits)
+        } else {
+            "0.00".to_owned()
+        }
+    }
 }
 
 /// One cell of the dashboard mini calendar.
@@ -129,6 +155,18 @@ pub fn sample_dashboard_html() -> Result<String, askama::Error> {
             meetings: "Mon/Wed 09:00-10:15 · FSB 214".into(),
             instructors: "d.thompson".into(),
         }],
+        gpa_terms: vec![
+            crate::records::TermGpa {
+                term_name: "Spring 2025".into(),
+                credits: 9.0,
+                quality_points: 21.0,
+            },
+            crate::records::TermGpa {
+                term_name: "Fall 2025".into(),
+                credits: 12.0,
+                quality_points: 42.0,
+            },
+        ],
         cal: mini_cal(&events),
         events,
     }
@@ -144,6 +182,7 @@ pub async fn dashboard_page(
     enrollment: web::Data<EnrollmentService>,
     academics: web::Data<AcademicsService>,
     institution: web::Data<InstitutionService>,
+    grades: web::Data<crate::records::GradeService>,
 ) -> Result<HttpResponse, AppError> {
     let term = academics.current_term(&actor).await?;
     let (holds, enrollments) = match &term {
@@ -158,6 +197,7 @@ pub async fn dashboard_page(
         term,
         holds,
         enrollments,
+        gpa_terms: grades.own_term_gpas(&actor).await?,
         cal: mini_cal(&events),
         events,
     };

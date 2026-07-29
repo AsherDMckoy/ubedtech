@@ -1026,16 +1026,87 @@ tr.just-changed {
   padding-left: var(--space-5);
 }
 
-/* ---------- dashboard mini calendar: the current month beside the events
-   list. Event days carry a static dot; hovering an event lights its span
-   (.cal-hot via app.js). Decorative for AT — the list has the dates. */
+/* ---------- dashboard: two zones — main column (classes, GPA history,
+   registration) and rail (deadline, calendar, events). The deadline card
+   is its own grid area so phones can pull it to the top: the one
+   time-critical number never sinks below the fold. */
 
-.events-cols {
+.dash-grid {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 2fr 1fr;
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "main deadline"
+    "main rail";
   gap: var(--space-5);
   align-items: start;
 }
+
+.dash-main {
+  grid-area: main;
+  display: grid;
+  gap: var(--space-5);
+}
+
+.dash-rail {
+  grid-area: rail;
+  display: grid;
+  gap: var(--space-5);
+}
+
+@media (max-width: 960px) {
+  .dash-grid {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    grid-template-areas:
+      "deadline"
+      "main"
+      "rail";
+  }
+}
+
+.gpa-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.gpa-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-top: 0.5px solid var(--border);
+}
+
+.gpa-list li:first-child {
+  border-top: none;
+}
+
+.gpa-term {
+  font-weight: 500;
+}
+
+.gpa-n {
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.gpa-cume {
+  display: flex;
+  justify-content: space-between;
+  border-top: 1px solid var(--border-strong);
+  margin: var(--space-2) 0 0;
+  padding-top: var(--space-2);
+  font-weight: 500;
+}
+
+/* ---------- dashboard mini calendar: event days carry a static dot;
+   hovering an event lights its span (.cal-hot via app.js). Decorative for
+   AT — the events list has the dates. */
 
 .minical-label {
   font-size: 12px;
@@ -1094,27 +1165,32 @@ tr.just-changed {
   color: var(--text-primary);
 }
 
-@media (max-width: 760px) {
-  .events-cols {
-    grid-template-columns: 1fr;
-  }
-
-  .minical-grid {
-    justify-content: start;
-  }
-}
-
+/* The page's one key gold number: the add/drop deadline card. */
 .dash-deadline {
-  display: inline-block;
+  grid-area: deadline;
   background: linear-gradient(160deg, var(--surface-2), var(--action-wash));
   border: 1px solid var(--action);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-sm);
-  padding: var(--space-3) var(--space-4);
-  color: var(--text-accent);
+}
+
+.dl-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.dl-date {
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: 24px;
   font-weight: 600;
+  color: var(--text-accent);
+  margin: 2px 0 0;
+}
+
+.dl-days {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 2px 0 0;
 }
 
 .card-foot {

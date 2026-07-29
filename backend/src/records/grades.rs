@@ -56,6 +56,31 @@ pub struct InstructorSection {
     pub enrolled_count: i64,
 }
 
+/// Credit-weighted grade sums for one completed term. GPA = quality points
+/// over credits; keeping the sums (not just the quotient) lets the caller
+/// compute the cumulative GPA without a second query.
+#[derive(Debug, sqlx::FromRow)]
+pub struct TermGpa {
+    pub term_name: String,
+    pub credits: f64,
+    pub quality_points: f64,
+}
+
+impl TermGpa {
+    pub fn gpa(&self) -> f64 {
+        if self.credits > 0.0 {
+            self.quality_points / self.credits
+        } else {
+            0.0
+        }
+    }
+
+    /// Two-decimal display form ("3.50") for templates.
+    pub fn gpa_display(&self) -> String {
+        format!("{:.2}", self.gpa())
+    }
+}
+
 /// One line of the student's academic history (published/amended only).
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct HistoryRow {
@@ -444,6 +469,38 @@ impl GradeService {
               AND g.institution_id = $2
               AND g.state IN ('published', 'amended')
             ORDER BY t.starts_on, c.code
+            "#,
+        )
+        .bind(student_id)
+        .bind(actor.institution_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    /// One row per COMPLETED term (already ended) with the credit-weighted
+    /// sums a GPA needs — published/amended grades only, the same
+    /// visibility rule as every student grade view. The current term never
+    /// appears: a course in progress has no final grade.
+    pub async fn own_term_gpas(&self, actor: &Actor) -> Result<Vec<TermGpa>, AppError> {
+        let student_id = actor.require_student_self()?;
+        let rows = sqlx::query_as::<_, TermGpa>(
+            r#"
+            SELECT
+                t.name AS term_name,
+                sum(c.credit_hours)::float8 AS credits,
+                sum(g.grade_points * c.credit_hours)::float8 AS quality_points
+            FROM grade_record g
+            JOIN enrollment e ON e.id = g.enrollment_id
+            JOIN section s ON s.id = e.section_id
+            JOIN academic_term t ON t.id = s.term_id
+            JOIN course c ON c.id = s.course_id
+            WHERE e.student_id = $1
+              AND g.institution_id = $2
+              AND g.state IN ('published', 'amended')
+              AND t.ends_on < CURRENT_DATE
+            GROUP BY t.id, t.name, t.starts_on
+            ORDER BY t.starts_on
             "#,
         )
         .bind(student_id)

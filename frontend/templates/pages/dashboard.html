@@ -5,78 +5,132 @@
 
 {% block content %}
   <div class="wrap">
-    <h1>Your dashboard</h1>
-    {% if let Some(term) = term %}
-      <p class="sub">{{ term.name }}</p>
-    {% endif %}
-
-    {# Holds block registration — surface them loudly and first, with the
-       specific flag named (color is never the only signal, FRONTEND.md §8). #}
-    {% if !holds.is_empty() %}
-      <div class="alert alert-danger" role="alert">
-        Registration is on hold. Clear these before you can add or drop classes.
-        <ul class="hold-list">
-          {% for flag in holds %}
-            <li>{{ flag }} hold</li>
-          {% endfor %}
-        </ul>
+    <div class="head">
+      <div>
+        <h1>Your dashboard</h1>
+        {% if let Some(term) = term %}<p class="sub">{{ term.name }}</p>{% endif %}
       </div>
-    {% endif %}
+    </div>
 
     {% if let Some(term) = term %}
-      <p class="dash-deadline">Add/drop closes {{ term.add_drop_closes_at.format("%b %-d, %Y") }}</p>
+      {# Two zones: main column (classes, GPA history, registration) and a
+         rail (deadline, calendar, events). The deadline card is its own
+         grid area so it can move to the top on phones — the one
+         time-critical number never sinks below the fold. #}
+      <div class="dash-grid">
+        <section class="dash-deadline card" aria-label="Registration deadline">
+          <p class="dl-label">Add/drop closes</p>
+          <p class="dl-date">{{ term.add_drop_closes_at.format("%b %-d, %Y") }}</p>
+          {% if self.deadline_days() > 1 %}
+            <p class="dl-days">in {{ self.deadline_days() }} days</p>
+          {% else if self.deadline_days() == 1 %}
+            <p class="dl-days">tomorrow</p>
+          {% else if self.deadline_days() == 0 %}
+            <p class="dl-days">today</p>
+          {% else %}
+            <p class="dl-days">closed</p>
+          {% endif %}
+        </section>
 
-      <h2>Your schedule</h2>
-      {% if enrollments.is_empty() %}
-        {% call ui::empty_state("You have no classes this term.", "/ui/catalog", "Browse the catalog") %}{% endcall %}
-      {% else %}
-        <div class="card">
-          <ul class="strip">
-            {% for enrollment in enrollments %}
-              <li>
-                <span class="strip-course">{{ enrollment.course_code }} · {{ enrollment.course_title }}</span>
-                <span class="strip-meet">{{ enrollment.meetings }}</span>
-              </li>
-            {% endfor %}
-          </ul>
-          <p class="card-foot"><a href="/ui/schedule">View full schedule</a></p>
+        <div class="dash-main">
+          <section class="card" aria-labelledby="classes-h">
+            <h2 id="classes-h">Your classes</h2>
+            {% if enrollments.is_empty() %}
+              {% call ui::empty_state("You're not registered for any sections yet.", "/ui/catalog", "Browse the catalog") %}{% endcall %}
+            {% else %}
+              <ul class="enrolled-list">
+                {% for enrollment in enrollments %}
+                  <li>
+                    <div class="enrolled-main">
+                      <p class="c-course">{{ enrollment.course_code }} · {{ enrollment.course_title }}</p>
+                      <p class="c-detail">{% if !enrollment.meetings.is_empty() %}{{ enrollment.meetings }}{% else %}Meeting times to be announced{% endif %}</p>
+                    </div>
+                    {# 'enrolled' is the only active state the schema models
+                       (enrolled | dropped | withdrawn) — this list shows
+                       enrolled rows only, so the one honest badge is
+                       "Registered". No invented waitlist/pending states. #}
+                    <span class="badge badge-ok">Registered</span>
+                  </li>
+                {% endfor %}
+              </ul>
+              <p class="card-foot"><a href="/ui/schedule">View full schedule</a></p>
+            {% endif %}
+          </section>
+
+          {# Completed terms only, published/amended grades only — omitted
+             entirely until a first term is complete. Never current-term
+             grades: a course in progress has no final grade. #}
+          {% if !gpa_terms.is_empty() %}
+            <section class="card" aria-labelledby="gpa-h">
+              <h2 id="gpa-h">GPA history</h2>
+              <ul class="gpa-list">
+                {% for row in gpa_terms %}
+                  <li>
+                    <span class="gpa-term">{{ row.term_name }}</span>
+                    <span class="c-detail">{{ row.credits }} credits</span>
+                    <span class="gpa-n">{{ row.gpa_display() }}</span>
+                  </li>
+                {% endfor %}
+              </ul>
+              <p class="gpa-cume"><span>Cumulative</span> <span class="gpa-n">{{ self.cumulative_gpa() }}</span></p>
+              <p class="card-foot"><a href="/ui/history">Full academic history</a></p>
+            </section>
+          {% endif %}
+
+          <section class="card" aria-labelledby="reg-h">
+            <h2 id="reg-h">Registration</h2>
+            {% if !holds.is_empty() %}
+              <div class="alert alert-danger" role="alert">
+                Registration is on hold. Clear these before you can add or drop classes.
+                <ul class="hold-list">
+                  {% for flag in holds %}
+                    <li>{{ flag }} hold</li>
+                  {% endfor %}
+                </ul>
+              </div>
+            {% endif %}
+            {# The student's program has no modeled link to courses or
+               departments, so this is honestly the whole catalog — see the
+               session report. #}
+            <p>Add or drop sections while the add/drop window is open.</p>
+            <p class="card-foot"><a href="/ui/catalog">Browse the catalog</a></p>
+          </section>
         </div>
-      {% endif %}
+
+        <div class="dash-rail">
+          <section class="card" aria-label="Calendar">
+            <div class="minical" aria-hidden="true">
+              <p class="minical-label">{{ cal.label }}</p>
+              <div class="minical-grid">
+                <span class="minical-dow">M</span><span class="minical-dow">T</span><span class="minical-dow">W</span><span class="minical-dow">T</span><span class="minical-dow">F</span><span class="minical-dow">S</span><span class="minical-dow">S</span>
+                {% for _blank in 0..cal.lead %}<span></span>{% endfor %}
+                {% for d in cal.days %}
+                  <span class="minical-day{% if d.today %} is-today{% endif %}{% if d.has_event %} has-event{% endif %}"
+                        data-date="{{ d.iso }}">{{ d.day }}</span>
+                {% endfor %}
+              </div>
+            </div>
+          </section>
+
+          <section class="card" aria-labelledby="events-h">
+            <h2 id="events-h">Campus events</h2>
+            {% if events.is_empty() %}
+              {% call ui::empty_state("No upcoming events on the calendar.", "", "") %}{% endcall %}
+            {% else %}
+              <ul class="strip">
+                {% for event in events %}
+                  <li data-event data-from="{{ event.starts_on }}" data-to="{{ event.ends_on }}">
+                    <span class="strip-course">{{ event.title }}</span>
+                    <span class="strip-meet">{{ event.starts_on.format("%b %-d") }}</span>
+                  </li>
+                {% endfor %}
+              </ul>
+            {% endif %}
+          </section>
+        </div>
+      </div>
     {% else %}
       {% call ui::alert("accent", "There is no active term right now.") %}{% endcall %}
     {% endif %}
-
-    <h2>Campus events</h2>
-    <div class="card">
-      <div class="events-cols">
-        {% if events.is_empty() %}
-          {% call ui::empty_state("No upcoming events on the calendar.", "", "") %}{% endcall %}
-        {% else %}
-          <ul class="strip">
-            {% for event in events %}
-              <li data-event data-from="{{ event.starts_on }}" data-to="{{ event.ends_on }}">
-                <span class="strip-course">{{ event.title }}</span>
-                <span class="strip-meet">{{ event.starts_on.format("%b %-d") }}</span>
-              </li>
-            {% endfor %}
-          </ul>
-        {% endif %}
-
-        {# Visual echo of the list above — the list carries the accessible
-           dates, so the grid is decorative for AT. Hovering an event
-           highlights its days (JS enhancement; the dots are static). #}
-        <div class="minical" aria-hidden="true">
-          <p class="minical-label">{{ cal.label }}</p>
-          <div class="minical-grid">
-            <span class="minical-dow">M</span><span class="minical-dow">T</span><span class="minical-dow">W</span><span class="minical-dow">T</span><span class="minical-dow">F</span><span class="minical-dow">S</span><span class="minical-dow">S</span>
-            {% for _blank in 0..cal.lead %}<span></span>{% endfor %}
-            {% for d in cal.days %}
-              <span class="minical-day{% if d.today %} is-today{% endif %}{% if d.has_event %} has-event{% endif %}"
-                    data-date="{{ d.iso }}">{{ d.day }}</span>
-            {% endfor %}
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 {% endblock %}
