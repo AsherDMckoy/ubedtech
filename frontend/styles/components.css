@@ -21,18 +21,37 @@
   grid-template-columns: 1fr;
 }
 
-/* Sign-in: a single-decision screen (§6) — one narrow calm column with
-   the brand above it, instead of form fields stretched to the measure. */
-/* .wrap.wrap-auth so this outranks the later `main > .wrap` measure rule */
-main > .wrap.wrap-auth {
-  max-width: 420px;
-  padding-top: 8vh;
+/* Sign-in: split front door (§6 single-decision, but it is also the first
+   impression). Left: the form, vertically centered at a narrow calm
+   measure. Right: a full-bleed brand panel — pure CSS gradient with the
+   purple overlay baked in, so there is no image request, no layout shift,
+   and nothing that could delay the form. */
+.shell-auth main {
+  padding: 0;
+}
+
+.auth-split {
+  display: grid;
+  grid-template-columns: minmax(360px, 44%) 1fr;
+  min-height: 100vh;
+}
+
+.auth-form {
+  display: flex;
+  align-items: center;
+  padding: var(--space-6) var(--space-5);
+}
+
+.wrap-auth {
+  width: 100%;
+  max-width: 400px;
+  margin: 0 auto;
 }
 
 .wrap-auth .brand {
   justify-content: center;
   font-size: 18px;
-  padding: 0;
+  padding: 0 0 var(--space-2);
 }
 
 .wrap-auth h1 {
@@ -41,6 +60,64 @@ main > .wrap.wrap-auth {
 
 .wrap-auth .btn-primary {
   width: 100%;
+}
+
+/* The ramp values are allowed here: this is a brand-gradient surface, the
+   same carve-out the logo mark uses (tokens.css header note). Identical in
+   both themes on purpose — the front door is the brand, not the theme. */
+.auth-visual {
+  display: flex;
+  align-items: flex-end;
+  padding: var(--space-6);
+  background:
+    radial-gradient(120% 90% at 85% 8%, rgba(212, 160, 23, 0.16), transparent 55%),
+    radial-gradient(140% 110% at 12% 92%, rgba(115, 75, 179, 0.55), transparent 60%),
+    linear-gradient(150deg, var(--purple-800), var(--purple-900));
+}
+
+.auth-inst {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: #fff;
+  margin: 0 0 var(--space-2);
+}
+
+.auth-line {
+  font-size: 16px;
+  color: var(--gold-400);
+  margin: 0;
+}
+
+/* Phones: the visual collapses to a slim brand band above the form so the
+   form itself is never pushed below the fold. */
+@media (max-width: 760px) {
+  .auth-split {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .auth-visual {
+    order: -1;
+    align-items: center;
+    min-height: 96px;
+    padding: var(--space-4) var(--space-5);
+  }
+
+  .auth-inst {
+    font-size: 20px;
+    margin-bottom: 0;
+  }
+
+  .auth-line {
+    display: none;
+  }
+
+  .auth-form {
+    align-items: flex-start;
+    padding-top: var(--space-6);
+  }
 }
 
 .rail {
