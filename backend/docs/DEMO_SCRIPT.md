@@ -1,7 +1,13 @@
-# Demo script — four journeys, in order
+# Demo script — the registrar journey, then four student/staff journeys
 
-Rehearsed 2026-07-22. Every step below is backed by a green acceptance
-test; nothing in this script depends on luck or timing.
+Rehearsed 2026-07-22; Journey R added 2026-07-28. Every step below is
+backed by a green acceptance test; nothing in this script depends on
+luck or timing.
+
+Lead with Journey R if the audience cares about the institutional/
+administrative story — it sets the rules every later journey lives
+inside. If the audience is student-experience-first, run it after
+Journey 1 instead; it stands alone either way.
 
 ## Setup (once)
 
@@ -27,7 +33,7 @@ All demo passwords are `ub-demo-password`.
 | `demo.student` | student | journeys 1–4 (the "ordinary user") |
 | `demo.held` | student (advising hold) | the blocked-registration aside |
 | `demo.instructor` | instructor | journey 2, grade entry |
-| `demo.registrar` | registrar + records officer + document officer | journeys 2–3, staff side |
+| `demo.registrar` | registrar + records officer + document officer | journey R, journeys 2–3 staff side |
 | `demo.admin` | institution admin | optional detour (calendar/settings/accounts) |
 | `demo.platform` | platform licensing admin | journey 4 |
 
@@ -44,6 +50,52 @@ Optional before starting: turn JS off in devtools for any journey — every
 mutation below is a plain form POST and behaves identically minus the
 enhancements. That is the demo's strongest claim; consider doing journey
 1 with JS off and saying so.
+
+## Journey R — registrar: the rules the university runs on
+
+Open with: "Everything you're about to see students and lecturers do
+happens inside rules a registrar sets. Here's that side."
+
+1. Sign in as `demo.registrar` → registrar overview. **Point out**: this
+   is a different density on purpose — where the student view is calm and
+   guided, this is a dense operational console: the four term tiles
+   (sections, seats filled, needs-attention, active holds), the
+   needs-attention worklist, the window-status panel, and the sortable/
+   filterable sections table. Same design system, expert density
+   (FRONTEND.md §6 made visible — worth saying to a technical evaluator).
+2. Terms & windows. **Point out**: registration and drops share a single
+   add/drop window that opens and closes together — a deliberate policy
+   decision (ADR-8). Show the current term's window open. Optionally
+   open "Edit windows" and save a change — it commits on the server and
+   is audited in the same transaction; no optimistic "saved".
+3. Sections & capacity. Filter the sections table to a course, open a
+   section. **Point out**: capacity lives here, and a section always has
+   a capacity row (created by trigger in the same transaction as the
+   section — a missing row can never masquerade as "full"). Adjust
+   capacity and save. Tie it back: "the seat counts the student saw are
+   this number, live."
+4. Holds. Open `demo.held`'s student page (Students → search). **Point
+   out the connective tissue**: "This is exactly the hold that blocks
+   that student from registering — they see it named inline, and this is
+   where it comes from. Nothing hidden on either side." Place/release a
+   hold on another student to show the form; both commit audited.
+5. Overrides. From a student's page, grant an override (prerequisite or
+   capacity), then show the Overrides review list. **Point out**: an
+   override is an explicit, recorded grant — who authorized it, which
+   rule, why, when it expires, and which enrollment consumed it.
+   Single-use, audited. "There are no hidden admin bypasses in this
+   system; a rule can only be waived on the record, with a name
+   attached." (A genuine trust-and-integrity beat — lean on it.)
+6. Optional close: back to the overview's needs-attention worklist —
+   full sections, unassigned instructors. "This is what a registrar
+   opens each morning. The system surfaces the work, it doesn't just
+   store data."
+
+Connective payoff, said out loud: "So when you watch the student
+register in a moment, they're registering into a window this person
+opened, against a capacity this person set — and if they're blocked,
+it's by a hold or a prerequisite this person can see and override, on
+the record. Three roles, one system."
 
 ## Journey 1 — student: register → schedule → drop
 
@@ -119,3 +171,34 @@ enhancements. That is the demo's strongest claim; consider doing journey
 - "Accessibility?" — axe over all 29 pages in CI plus structural
   assertions in every flow test; the manual screen-reader pass is the
   remaining human step (docs/FRONTEND_DESIGN_SYSTEM.md checklist).
+
+- "Is there a mobile app?" — exact framing, honest and strong:
+
+  "There's no separate mobile app today, and that's deliberate for this
+  stage — but the important part is what makes one cheap when we want
+  it. The backend is API-first: every action you've seen — sign in,
+  register, drop, view schedule, request a document — is a server
+  endpoint with the business rules enforced server-side, in the database
+  transaction. The seat-reservation logic, the licensing, the
+  authentication, the audit trail — none of that lives in the web page;
+  the page is just one client of the API. So a native iOS or Android app
+  would be an additional *client* of the same endpoints, not a rewrite
+  of the system. The hard part — correctness under concurrency,
+  security, the institutional rules — is already built and already
+  tested. Mobile is additional surface, not additional foundation."
+
+  If pressed on timeline: "It's a real project — a native app is its own
+  codebase and app-store cycle — but it starts from a finished, tested
+  API rather than from scratch, which is the expensive part most teams
+  underestimate."
+
+  Do NOT imply a mobile app exists, is in progress, or is trivial. The
+  strength of the claim is that it's true, and that only holds if it's
+  stated as a natural extension, not a near-done feature.
+
+- "Can it host course content / act like Moodle or Canvas?" — same
+  discipline: name it as a natural Phase-2 direction the existing
+  document-generation and storage patterns extend toward, but do not
+  demo it, imply it exists, or build any of it this round. The sharp
+  story is "the university's system of record, done correctly," not
+  "we also do everything Canvas does."
