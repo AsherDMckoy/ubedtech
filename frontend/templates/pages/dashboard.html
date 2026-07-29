@@ -47,19 +47,36 @@
     {% endif %}
 
     <h2>Campus events</h2>
-    {% if events.is_empty() %}
-      {% call ui::empty_state("No upcoming events on the calendar.", "", "") %}{% endcall %}
-    {% else %}
-      <div class="card">
-        <ul class="strip">
-          {% for event in events %}
-            <li>
-              <span class="strip-course">{{ event.title }}</span>
-              <span class="strip-meet">{{ event.starts_on.format("%b %-d") }}</span>
-            </li>
-          {% endfor %}
-        </ul>
+    <div class="card">
+      <div class="events-cols">
+        {% if events.is_empty() %}
+          {% call ui::empty_state("No upcoming events on the calendar.", "", "") %}{% endcall %}
+        {% else %}
+          <ul class="strip">
+            {% for event in events %}
+              <li data-event data-from="{{ event.starts_on }}" data-to="{{ event.ends_on }}">
+                <span class="strip-course">{{ event.title }}</span>
+                <span class="strip-meet">{{ event.starts_on.format("%b %-d") }}</span>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+
+        {# Visual echo of the list above — the list carries the accessible
+           dates, so the grid is decorative for AT. Hovering an event
+           highlights its days (JS enhancement; the dots are static). #}
+        <div class="minical" aria-hidden="true">
+          <p class="minical-label">{{ cal.label }}</p>
+          <div class="minical-grid">
+            <span class="minical-dow">M</span><span class="minical-dow">T</span><span class="minical-dow">W</span><span class="minical-dow">T</span><span class="minical-dow">F</span><span class="minical-dow">S</span><span class="minical-dow">S</span>
+            {% for _blank in 0..cal.lead %}<span></span>{% endfor %}
+            {% for d in cal.days %}
+              <span class="minical-day{% if d.today %} is-today{% endif %}{% if d.has_event %} has-event{% endif %}"
+                    data-date="{{ d.iso }}">{{ d.day }}</span>
+            {% endfor %}
+          </div>
+        </div>
       </div>
-    {% endif %}
+    </div>
   </div>
 {% endblock %}

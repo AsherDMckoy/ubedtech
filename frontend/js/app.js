@@ -114,6 +114,26 @@ addEventListener("click", (event) => {
   }
 });
 
+// Dashboard mini calendar: hovering an event highlights its day span in
+// the month grid. Pure enhancement — event days keep their static dot
+// without JS, and the list itself carries the dates.
+function calHot(li, on) {
+  if (!li) return;
+  for (const day of document.querySelectorAll(".minical [data-date]")) {
+    const hit =
+      li.dataset.from <= day.dataset.date && day.dataset.date <= li.dataset.to;
+    day.classList.toggle("cal-hot", on && hit);
+  }
+}
+
+addEventListener("mouseover", (event) => {
+  calHot(event.target.closest("[data-event]"), true);
+});
+
+addEventListener("mouseout", (event) => {
+  calHot(event.target.closest("[data-event]"), false);
+});
+
 // Honest status polling (documents): rows carrying data-poll re-fetch
 // their server-rendered fragment and swap it in — the status shown is
 // always the real backend row, never a predicted one. Terminal rows render

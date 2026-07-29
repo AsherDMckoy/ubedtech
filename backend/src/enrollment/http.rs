@@ -20,6 +20,71 @@ struct DashboardPage {
     holds: Vec<String>,
     enrollments: Vec<EnrolledSection>,
     events: Vec<InstitutionEvent>,
+    cal: MiniCal,
+}
+
+/// One cell of the dashboard mini calendar.
+pub struct CalDay {
+    pub day: u32,
+    pub iso: String,
+    pub today: bool,
+    pub has_event: bool,
+}
+
+/// The current month as a Monday-first grid, event days marked. A visual
+/// echo of the events list (aria-hidden in the template — the list itself
+/// carries the accessible dates).
+pub struct MiniCal {
+    pub label: String,
+    /// Blank leading cells before the 1st.
+    pub lead: usize,
+    pub days: Vec<CalDay>,
+}
+
+fn mini_cal(events: &[InstitutionEvent]) -> MiniCal {
+    use chrono::{Datelike, Utc};
+    // ponytail: "today" is the UTC date, not institution-local — the
+    // marker can lag a few hours around midnight; thread the institution
+    // timezone through if anyone ever notices.
+    let today = Utc::now().date_naive();
+    let this_first = today.with_day(1).expect("day 1 exists in every month");
+    let next_of_this = this_first
+        .checked_add_months(chrono::Months::new(1))
+        .expect("next month exists");
+    // Anchor on the current month when it has event days; otherwise jump
+    // to the first upcoming event's month, so the grid always has
+    // something to say (events is upcoming-only, sorted by start).
+    let event_this_month = events.iter().any(|e| e.starts_on < next_of_this);
+    let first = if events.is_empty() || event_this_month {
+        this_first
+    } else {
+        events[0]
+            .starts_on
+            .with_day(1)
+            .expect("day 1 exists in every month")
+    };
+    let next_month = first
+        .checked_add_months(chrono::Months::new(1))
+        .expect("next month exists");
+    let count = (next_month - first).num_days() as u32;
+    let days = (1..=count)
+        .map(|n| {
+            let date = first.with_day(n).expect("n is within the month");
+            CalDay {
+                day: n,
+                iso: date.format("%Y-%m-%d").to_string(),
+                today: date == today,
+                has_event: events
+                    .iter()
+                    .any(|e| e.starts_on <= date && date <= e.ends_on),
+            }
+        })
+        .collect();
+    MiniCal {
+        label: first.format("%B %Y").to_string(),
+        lead: first.weekday().num_days_from_monday() as usize,
+        days,
+    }
 }
 
 /// Renders the dashboard with representative data and no database, for the
@@ -27,6 +92,22 @@ struct DashboardPage {
 pub fn sample_dashboard_html() -> Result<String, askama::Error> {
     use chrono::{Duration, Utc};
     let now = Utc::now();
+    let events = vec![
+        InstitutionEvent {
+            id: Uuid::nil(),
+            title: "Independence Day".into(),
+            event_type: "holiday".into(),
+            starts_on: now.date_naive() + Duration::days(3),
+            ends_on: now.date_naive() + Duration::days(3),
+        },
+        InstitutionEvent {
+            id: Uuid::nil(),
+            title: "Mid-semester examinations".into(),
+            event_type: "academic".into(),
+            starts_on: now.date_naive() + Duration::days(7),
+            ends_on: now.date_naive() + Duration::days(11),
+        },
+    ];
     DashboardPage {
         term: Some(TermSummary {
             id: Uuid::nil(),
@@ -48,13 +129,8 @@ pub fn sample_dashboard_html() -> Result<String, askama::Error> {
             meetings: "Mon/Wed 09:00-10:15 · FSB 214".into(),
             instructors: "d.thompson".into(),
         }],
-        events: vec![InstitutionEvent {
-            id: Uuid::nil(),
-            title: "Independence Day".into(),
-            event_type: "holiday".into(),
-            starts_on: (now + Duration::days(30)).date_naive(),
-            ends_on: (now + Duration::days(30)).date_naive(),
-        }],
+        cal: mini_cal(&events),
+        events,
     }
     .render()
 }
@@ -77,11 +153,13 @@ pub async fn dashboard_page(
         ),
         None => (Vec::new(), Vec::new()),
     };
+    let events = institution.upcoming_events(&actor).await?;
     let page = DashboardPage {
         term,
         holds,
         enrollments,
-        events: institution.upcoming_events(&actor).await?,
+        cal: mini_cal(&events),
+        events,
     };
     Ok(HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
@@ -986,4 +1064,54 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .service(release_hold_form)
         .service(grant_override_form)
         .service(registrar_overrides_page);
+}
+
+#[cfg(test)]
+mod mini_cal_tests {
+    use super::*;
+    use chrono::{Datelike, Utc};
+
+    #[test]
+    fn mini_cal_covers_the_current_month_and_marks_event_spans() {
+        let today = Utc::now().date_naive();
+        let event = InstitutionEvent {
+            id: Uuid::nil(),
+            title: "x".into(),
+            event_type: "holiday".into(),
+            starts_on: today,
+            ends_on: today,
+        };
+        let cal = mini_cal(&[event]);
+        assert!(cal.lead < 7);
+        assert!((28..=31).contains(&cal.days.len()));
+        assert_eq!(cal.days.iter().filter(|d| d.today).count(), 1);
+        let today_cell = cal.days.iter().find(|d| d.today).unwrap();
+        assert!(today_cell.has_event);
+        assert_eq!(today_cell.iso, today.format("%Y-%m-%d").to_string());
+        assert_eq!(cal.days[0].day, 1);
+        assert_eq!(cal.days.last().unwrap().day, cal.days.len() as u32);
+        assert!(cal.label.contains(&today.year().to_string()));
+    }
+
+    #[test]
+    fn mini_cal_jumps_to_the_first_event_month_when_this_month_is_empty() {
+        let today = Utc::now().date_naive();
+        let future = today
+            .checked_add_months(chrono::Months::new(2))
+            .unwrap()
+            .with_day(15)
+            .unwrap();
+        let event = InstitutionEvent {
+            id: Uuid::nil(),
+            title: "x".into(),
+            event_type: "holiday".into(),
+            starts_on: future,
+            ends_on: future,
+        };
+        let cal = mini_cal(&[event]);
+        assert!(cal.days.iter().all(|d| !d.today));
+        assert!(cal.days.iter().any(|d| d.has_event && d.day == 15));
+        // No events at all: fall back to the current month.
+        assert_eq!(mini_cal(&[]).label, today.format("%B %Y").to_string());
+    }
 }

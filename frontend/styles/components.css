@@ -1026,6 +1026,84 @@ tr.just-changed {
   padding-left: var(--space-5);
 }
 
+/* ---------- dashboard mini calendar: the current month beside the events
+   list. Event days carry a static dot; hovering an event lights its span
+   (.cal-hot via app.js). Decorative for AT — the list has the dates. */
+
+.events-cols {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.minical-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-align: center;
+  margin: 0 0 var(--space-2);
+}
+
+.minical-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 28px);
+  gap: 2px;
+  justify-content: center;
+}
+
+.minical-dow {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.minical-day {
+  position: relative;
+  height: 26px;
+  line-height: 26px;
+  text-align: center;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  border-radius: 6px;
+  transition: background var(--dur-fast) var(--ease-enter);
+}
+
+.minical-day.has-event::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 2px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+
+.minical-day.is-today {
+  background: var(--bg-accent);
+  color: var(--text-accent);
+  font-weight: 600;
+}
+
+.minical-day.cal-hot {
+  background: var(--action-wash);
+  box-shadow: inset 0 0 0 1px var(--action);
+  color: var(--text-primary);
+}
+
+@media (max-width: 760px) {
+  .events-cols {
+    grid-template-columns: 1fr;
+  }
+
+  .minical-grid {
+    justify-content: start;
+  }
+}
+
 .dash-deadline {
   display: inline-block;
   background: linear-gradient(160deg, var(--surface-2), var(--action-wash));
