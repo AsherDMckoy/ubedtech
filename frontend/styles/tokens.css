@@ -35,9 +35,11 @@
   --gold-400: #e6b93a;
   --gold-100: #fbf3d9;
 
-  /* surfaces: page < panel < card */
-  --surface-0: #f7f5fb;
-  --surface-1: #faf8fd;
+  /* surfaces: page < panel < card. The page sits a full step below the
+     white cards (2026-07-28: brightness toned down — the near-white page
+     made light mode glare; cards now carry the lift, like dark mode). */
+  --surface-0: #eee9f5;
+  --surface-1: #f4f0fa;
   --surface-2: #ffffff;
 
   /* text */
@@ -46,8 +48,8 @@
   --text-muted: #6b6178;
 
   /* borders */
-  --border: rgba(42, 26, 74, 0.1);
-  --border-strong: rgba(42, 26, 74, 0.22);
+  --border: rgba(42, 26, 74, 0.16);
+  --border-strong: rgba(42, 26, 74, 0.32);
 
   /* brand (purple): identity and structure. --text-accent is brand ink,
      --bg-accent the brand wash, --border-accent the focus/structure line. */
