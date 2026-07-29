@@ -154,6 +154,40 @@ a correct small-table seq scan; the only real pessimizations at scale
 remain the unpaginated registrar/officer HTML pages already recorded as
 UI findings.
 
+## Generator-isolated class B re-measure (2026-07-29)
+
+Question tested: was the colocated `wrk` stealing server CPU and
+understating the class B ceiling? Method: same `ubedtech_bench` dataset
+(post `VACUUM ANALYZE`), same binary, fresh session as `demo.student`,
+warm + measured 30 s runs — first an unpinned control, then server
+pinned to physical cores 0–7 (`taskset -acp 0-7,12-19`) and wrk pinned
+to cores 8–11 (`taskset -c 8-11,20-23`; CPUs 12–23 are SMT siblings of
+0–11 on this 3900X, so isolation is by whole core). PostgreSQL left
+unpinned. Server process ran at nice 5 (background launch) — noted
+because the box saturates during the run; postgres ran at nice 0.
+
+| Run | Throughput | p50 / p90 / p99 | Errors |
+|---|---|---|---|
+| control, unpinned t8/c64 | 5,079 req/s | 12.0 / 18.9 / 27.0 ms | 0 |
+| pinned t8/c64 | 5,038 req/s | 12.2 / 18.8 / 26.4 ms | 0 |
+| pinned t4/c16 | 4,176 req/s | 3.7 / 4.7 / 6.1 ms | 0 |
+
+**Answer: no.** Pinned and unpinned are statistically identical (−0.8 %),
+and both match the 2026-07-25 realistic-scale record (5,590 / 4,598 —
+within ambient variance). Generator interference is not a factor at
+class B throughput; the hypothesis is closed.
+
+Where the ceiling actually is, from a mid-run CPU sample (box 97.6 %
+busy): the Rust server used ~1.75 cores; PostgreSQL backends — one per
+pool connection, all runnable at 35–50 % each — consumed the bulk of the
+remaining 24 threads executing the ~1.5 ms catalog query. Class B is
+**PostgreSQL-CPU-bound**, exactly as the plan inspection predicted. The
+levers, still in order and still unearned at UB scale: the recorded
+LIMIT-first query rewrite (trigger: 1,000+ open sections), then more/
+faster database cores. (Generator isolation would still matter for
+class A, where the server itself can consume every core — untested
+here.)
+
 ## Query plans (Phase 8 inspection, hot enrollment + document paths)
 
 `EXPLAIN ANALYZE` on the load dataset (caveat: 200 sections / ~3.9k
