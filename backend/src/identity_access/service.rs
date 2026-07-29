@@ -68,6 +68,18 @@ impl AuthService {
     /// `Unauthenticated` and counts against the account+IP throttle window.
     /// Argon2 verification always runs (against a dummy hash if needed) and
     /// runs on the blocking pool, never an async worker thread.
+    /// Role codes for a user — the HTML login uses this to pick a landing
+    /// page the account is actually allowed to open.
+    pub async fn role_codes(&self, user_id: Uuid) -> Result<Vec<String>, AppError> {
+        Ok(sqlx::query_scalar(
+            "SELECT r.code FROM user_role ur JOIN role r ON r.id = ur.role_id \
+             WHERE ur.user_id = $1",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+
     pub async fn login(
         &self,
         institution_id: Uuid,

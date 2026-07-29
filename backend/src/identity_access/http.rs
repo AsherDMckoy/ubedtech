@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::identity_access::middleware::SESSION_COOKIE;
-use crate::identity_access::service::AuthService;
+use crate::identity_access::service::{AuthService, LoginOutcome};
 use crate::identity_access::sessions::{CurrentSession, NewSession, SessionService};
 use crate::licensing::LicenseGate;
 use crate::shared::actor::{Actor, Role};
@@ -51,7 +51,7 @@ pub async fn login(
     policy: web::Data<SessionCookiePolicy>,
     body: web::Json<LoginRequest>,
 ) -> Result<HttpResponse, AppError> {
-    let session = authenticate(
+    let outcome = authenticate(
         &req,
         &auth,
         &sessions,
@@ -60,7 +60,7 @@ pub async fn login(
         &body.password,
     )
     .await?;
-    Ok(session_response(&policy, session))
+    Ok(session_response(&policy, outcome.session))
 }
 
 /// The shared login sequence for the JSON API and the HTML form: throttle by
@@ -74,7 +74,7 @@ async fn authenticate(
     gate: &LicenseGate,
     username: &str,
     password: &str,
-) -> Result<NewSession, AppError> {
+) -> Result<LoginOutcome, AppError> {
     let client_ip = req
         .peer_addr()
         .map(|addr| addr.ip().to_string())
@@ -101,7 +101,7 @@ async fn authenticate(
         session_id = %outcome.session.session_id,
         "login succeeded"
     );
-    Ok(outcome.session)
+    Ok(outcome)
 }
 
 #[derive(Template)]
@@ -143,10 +143,13 @@ pub async fn login_form(
     )
     .await
     {
-        Ok(session) => Ok(HttpResponse::SeeOther()
-            .cookie(session_cookie(&policy, &session))
-            .insert_header(("Location", "/ui/registration"))
-            .finish()),
+        Ok(outcome) => {
+            let landing = landing_for(&auth.role_codes(outcome.user_id).await?);
+            Ok(HttpResponse::SeeOther()
+                .cookie(session_cookie(&policy, &outcome.session))
+                .insert_header(("Location", landing))
+                .finish())
+        }
         // The uniform 401 renders inline; everything else (throttling,
         // faults) keeps its JSON error shape and status.
         Err(AppError::Unauthenticated) => Ok(HttpResponse::build(StatusCode::UNAUTHORIZED)
@@ -158,6 +161,30 @@ pub async fn login_form(
                 .render()?,
             )),
         Err(other) => Err(other),
+    }
+}
+
+/// Where the browser lands after sign-in: the first page this account's
+/// roles can actually open. One landing for everyone 403'd every staff
+/// account (they all used to go to the student registration page).
+fn landing_for(roles: &[String]) -> &'static str {
+    let has = |code: &str| roles.iter().any(|r| r == code);
+    if has("student") {
+        "/ui/dashboard"
+    } else if has("instructor") {
+        "/ui/instructor"
+    } else if has("registrar") {
+        "/ui/registrar"
+    } else if has("institution_admin") {
+        "/ui/admin/settings"
+    } else if has("document_officer") {
+        "/ui/admin/documents"
+    } else if has("platform_licensing_admin") {
+        "/ui/platform/license"
+    } else {
+        // Records-officer-only or roleless accounts keep the old landing;
+        // none are seeded, and the page names its denial honestly.
+        "/ui/registration"
     }
 }
 

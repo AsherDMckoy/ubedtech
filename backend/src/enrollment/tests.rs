@@ -1393,9 +1393,17 @@ mod ui {
         )
         .await;
         assert_eq!(response.status(), StatusCode::SEE_OTHER);
-        assert_eq!(
-            response.headers().get("Location").unwrap(),
-            "/ui/registration"
+        // The landing is role-dependent (identity_access::tests pins the
+        // per-role choice); here it only matters that it goes somewhere UI.
+        assert!(
+            response
+                .headers()
+                .get("Location")
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("/ui/"),
+            "login must land on a UI page"
         );
         response
             .response()

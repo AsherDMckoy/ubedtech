@@ -1404,6 +1404,43 @@ async fn signed_out_browsers_land_on_sign_in_but_api_clients_keep_401(pool: PgPo
 }
 
 #[sqlx::test(migrations = "./migrations")]
+async fn html_login_lands_each_role_on_a_page_it_can_open(pool: PgPool) {
+    let institution_id = seed_institution(&pool).await;
+    for (username, role, landing) in [
+        ("land.student", "student", "/ui/dashboard"),
+        ("land.instructor", "instructor", "/ui/instructor"),
+        ("land.registrar", "registrar", "/ui/registrar"),
+    ] {
+        let user_id =
+            seed_credentialed_user(&pool, institution_id, username, "pw-landing-test", "active")
+                .await;
+        assign_role(&pool, institution_id, user_id, role).await;
+        let app = test_app!(&pool, institution_id);
+
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/ui/login")
+                .peer_addr("127.0.0.1:9999".parse().unwrap())
+                .set_form(serde_json::json!({
+                    "username": username,
+                    "password": "pw-landing-test",
+                }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        // Each landing page rendering 200 for its role is proven in that
+        // feature's own tests; this app only mounts the identity routes.
+        assert_eq!(
+            response.headers().get("location").unwrap(),
+            landing,
+            "{role} must land on its own page"
+        );
+    }
+}
+
+#[sqlx::test(migrations = "./migrations")]
 async fn ui_signout_revokes_the_session_and_clears_the_cookie(pool: PgPool) {
     let institution_id = seed_institution(&pool).await;
     seed_credentialed_user(
