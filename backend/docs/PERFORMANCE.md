@@ -2,10 +2,11 @@
 
 ## Frontend budgets (Phase 7, rebased on the frontend/ pipeline — ADR-12)
 
-| Budget | Limit | Actual (2026-07-26, UB-identity session) | Enforced by |
+| Budget | Limit | Actual (2026-07-28, demo-polish session) | Enforced by |
 |---|---|---|---|
-| Stylesheet bundle (tokens + base + components) | ≤ 32 KiB uncompressed | 21.0 KiB (4.8 KiB gzipped) | `asset_sizes_stay_inside_the_budget` |
-| Script bundle (Alpine CSP build + enhancements) | ≤ 80 KiB uncompressed | 63.6 KiB (20.9 KiB gzipped) | same |
+| Stylesheet bundle (tokens + base + components) | ≤ 32 KiB uncompressed | 24.7 KiB (5.6 KiB gzipped) | `asset_sizes_stay_inside_the_budget` |
+| Script bundle (Alpine CSP build + enhancements) | ≤ 80 KiB uncompressed | 64.3 KiB (21.1 KiB gzipped) | same |
+| Sign-in visual | image-free | pure-CSS gradient panel — 0 image bytes, no layout shift | (nothing to measure) |
 | Fonts (2 latin variable woff2, self-hosted, `font-display: swap`) | ≤ 72 KiB per file | Inter 47.1 KiB + Fraunces 65.7 KiB, immutable-cached, never block paint | same |
 | Images on workflow pages | none | none | `templates_carry_no_images_or_csp_violations` |
 | Third-party/external resources at runtime | none (Alpine is bundled, same-origin) | none | same |

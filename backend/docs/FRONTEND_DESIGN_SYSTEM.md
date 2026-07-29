@@ -131,6 +131,32 @@ box-shadow).
   a blocked row names its reason in `.reason`, never just a color). The
   page-level `.meta` line + `data-search` attributes feed the instant
   filter.
+- **Row CTA sizing** (`.c-action button`, 2026-07-28): Register is THE
+  action of the catalog page, so every row action shares a larger 42 px
+  footprint (register gold, drop neutral, blocked disabled — alignment
+  without making blocked rows look actionable).
+- **My-registrations panel** (`components/enrolled_panel.html`,
+  2026-07-28): the student's current enrollments with the metadata they
+  act on (credits, meetings + room, instructor — the schema has no course
+  description; CURRENT_STATE #8) plus a per-item confirmed drop and the
+  gold `.credits-chip` total (same washed-chip treatment as
+  `.dash-deadline` — gold frames the number, AA ink carries it). Rendered
+  twice: as `.cat-aside` beside the catalog list (`.cat-layout` grid,
+  stacks below at ≤1100 px — supporting context yields the primary
+  column; staff see no aside) and as the body of My registration. Drops
+  use the generic `data-confirm-dialog` primitive, which now also stamps
+  the course name into `[data-drop-name]` when the form carries
+  `data-confirm`.
+- **Split sign-in** (`.auth-split`, 2026-07-28): the front door is a
+  two-column grid — form column at a 400 px measure, vertically centered;
+  visual column a full-bleed **pure-CSS brand gradient** (purple ramps +
+  gold radial, the same ramp carve-out as the logo mark) with the
+  institution name + tagline. No image asset: zero bytes, zero layout
+  shift, nothing for the CSP to except. A consented campus photo can be
+  layered under the same overlay later as a drop-in (self-hosted through
+  the esbuild pipeline; keep the purple overlay for text contrast). At
+  ≤760 px the visual collapses to a slim brand band above the form — the
+  form never falls below the fold.
 - **Dashboard strip** (`.strip`): compact label/value list rows inside a
   card (schedule strip, campus events).
 - **Weekly schedule** (`.week`/`.day`): day sections with time-sorted
