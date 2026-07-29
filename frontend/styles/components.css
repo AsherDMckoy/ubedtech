@@ -778,6 +778,21 @@ details.menu[open] > .menu-panel {
   width: 1%;
 }
 
+/* Register is THE action of the page, so its CTA is bigger than the base
+   control — but bounded, so a 20-row list still scans. Every row action
+   (register, drop, disabled) shares the footprint so columns align;
+   blocked rows keep the honest disabled look, never gold. */
+.c-action button {
+  height: 42px;
+  padding: 0 var(--space-5);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.c-action .btn-primary {
+  box-shadow: var(--shadow-sm);
+}
+
 .c-empty {
   text-align: center;
   color: var(--text-secondary);
