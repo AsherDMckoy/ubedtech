@@ -1104,33 +1104,63 @@ tr.just-changed {
   font-weight: 500;
 }
 
-/* ---------- dashboard mini calendar: event days carry a static dot;
-   hovering an event lights its span (.cal-hot via app.js). Decorative for
-   AT — the events list has the dates. */
+/* ---------- dashboard smart calendar: one table per month (current month
+   visible; event months hidden until an event row is hovered/focused —
+   app.js only toggles visibility). Two deliberate marker treatments,
+   neither color-alone (FRONTEND.md §8): TODAY = purple brand fill, round,
+   bold (shape + weight + color); the jumped EVENT span = gold acting
+   tint + inset gold ring + bold. Gold marks the thing being acted on. */
 
-.minical-label {
+.minical-table {
+  width: auto;
+  margin: 0 auto;
+  border-collapse: separate;
+  border-spacing: 2px;
+}
+
+/* The global caption rule hides captions offscreen; here the caption IS
+   the visible month label. */
+.minical caption {
+  position: static;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-secondary);
   text-align: center;
-  margin: 0 0 var(--space-2);
+  padding: 0 0 var(--space-2);
 }
 
-.minical-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 28px);
-  gap: 2px;
-  justify-content: center;
+/* The month name lights up while the grid is jumped to an event month, so
+   the month change is unmistakable. */
+.minical.is-jumped caption {
+  color: var(--text-accent);
+  background: var(--action-wash);
+  font-weight: 600;
+  border-radius: var(--radius);
 }
 
-.minical-dow {
+.minical-table th {
+  background: transparent;
+  border: 0;
   font-size: 10px;
+  font-weight: 400;
   color: var(--text-muted);
   text-align: center;
+  width: 28px;
+  padding: 0 0 2px;
+}
+
+.minical-table td {
+  border: 0;
+  padding: 0;
+}
+
+.minical-table tbody tr:hover {
+  background: transparent;
 }
 
 .minical-day {
   position: relative;
+  width: 28px;
   height: 26px;
   line-height: 26px;
   text-align: center;
@@ -1138,7 +1168,6 @@ tr.just-changed {
   font-variant-numeric: tabular-nums;
   color: var(--text-secondary);
   border-radius: 6px;
-  transition: background var(--dur-fast) var(--ease-enter);
 }
 
 .minical-day.has-event::after {
@@ -1154,15 +1183,27 @@ tr.just-changed {
 }
 
 .minical-day.is-today {
-  background: var(--bg-accent);
-  color: var(--text-accent);
+  background: var(--brand);
+  color: #fff;
   font-weight: 600;
+  border-radius: var(--radius-pill);
+}
+
+.minical-day.is-today.has-event::after {
+  background: #fff;
 }
 
 .minical-day.cal-hot {
   background: var(--action-wash);
-  box-shadow: inset 0 0 0 1px var(--action);
+  box-shadow: inset 0 0 0 1.5px var(--action);
+  font-weight: 600;
   color: var(--text-primary);
+}
+
+/* Event rows are focusable so the calendar responds to keyboard focus the
+   same as hover; the global :focus-visible ring applies. */
+.strip li[tabindex] {
+  cursor: default;
 }
 
 /* The page's one key gold number: the add/drop deadline card. */

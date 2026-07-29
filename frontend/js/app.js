@@ -114,24 +114,41 @@ addEventListener("click", (event) => {
   }
 });
 
-// Dashboard mini calendar: hovering an event highlights its day span in
-// the month grid. Pure enhancement — event days keep their static dot
-// without JS, and the list itself carries the dates.
-function calHot(li, on) {
-  if (!li) return;
-  for (const day of document.querySelectorAll(".minical [data-date]")) {
+// Dashboard smart calendar: hovering OR focusing an event row jumps the
+// grid to that event's month, lights its date span, and tints the month
+// name; leaving/blurring returns to the current month with today marked.
+// Every month is server-rendered — this only toggles visibility (an
+// instant content change, not an animated surface).
+function calJump(li, on) {
+  const cal = document.querySelector("[data-minical]");
+  if (!li || !cal) return;
+  const month = on ? li.dataset.from.slice(0, 7) : null;
+  let index = 0;
+  for (const table of cal.querySelectorAll("[data-cal-month]")) {
+    table.hidden = month ? table.dataset.calMonth !== month : index !== 0;
+    index += 1;
+  }
+  cal.classList.toggle("is-jumped", !!month);
+  for (const day of cal.querySelectorAll("[data-date]")) {
     const hit =
-      li.dataset.from <= day.dataset.date && day.dataset.date <= li.dataset.to;
-    day.classList.toggle("cal-hot", on && hit);
+      !!month &&
+      li.dataset.from <= day.dataset.date &&
+      day.dataset.date <= li.dataset.to;
+    day.classList.toggle("cal-hot", hit);
   }
 }
 
 addEventListener("mouseover", (event) => {
-  calHot(event.target.closest("[data-event]"), true);
+  calJump(event.target.closest("[data-event]"), true);
 });
-
 addEventListener("mouseout", (event) => {
-  calHot(event.target.closest("[data-event]"), false);
+  calJump(event.target.closest("[data-event]"), false);
+});
+addEventListener("focusin", (event) => {
+  calJump(event.target.closest("[data-event]"), true);
+});
+addEventListener("focusout", (event) => {
+  calJump(event.target.closest("[data-event]"), false);
 });
 
 // Honest status polling (documents): rows carrying data-poll re-fetch

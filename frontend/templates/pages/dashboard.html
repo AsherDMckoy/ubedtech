@@ -98,17 +98,42 @@
         </div>
 
         <div class="dash-rail">
+          {# Smart calendar: the current month renders first (the JS-off
+             baseline, today marked); every event month is also rendered,
+             hidden — hovering or focusing an event row swaps the visible
+             month and lights the event's dates (app.js toggles only). #}
           <section class="card" aria-label="Calendar">
-            <div class="minical" aria-hidden="true">
-              <p class="minical-label">{{ cal.label }}</p>
-              <div class="minical-grid">
-                <span class="minical-dow">M</span><span class="minical-dow">T</span><span class="minical-dow">W</span><span class="minical-dow">T</span><span class="minical-dow">F</span><span class="minical-dow">S</span><span class="minical-dow">S</span>
-                {% for _blank in 0..cal.lead %}<span></span>{% endfor %}
-                {% for d in cal.days %}
-                  <span class="minical-day{% if d.today %} is-today{% endif %}{% if d.has_event %} has-event{% endif %}"
-                        data-date="{{ d.iso }}">{{ d.day }}</span>
-                {% endfor %}
-              </div>
+            <div class="minical" data-minical>
+              {% for month in cal.months %}
+                <table class="minical-table" data-cal-month="{{ month.key }}"{% if !loop.first %} hidden{% endif %}>
+                  <caption>{{ month.label }}</caption>
+                  <thead>
+                    <tr>
+                      <th scope="col" abbr="Monday">M</th>
+                      <th scope="col" abbr="Tuesday">T</th>
+                      <th scope="col" abbr="Wednesday">W</th>
+                      <th scope="col" abbr="Thursday">T</th>
+                      <th scope="col" abbr="Friday">F</th>
+                      <th scope="col" abbr="Saturday">S</th>
+                      <th scope="col" abbr="Sunday">S</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for week in month.weeks %}
+                      <tr>
+                        {% for cell in week %}
+                          {% if let Some(d) = cell %}
+                            <td class="minical-day{% if d.today %} is-today{% endif %}{% if d.has_event %} has-event{% endif %}"
+                                data-date="{{ d.iso }}"{% if d.today %} aria-current="date"{% endif %}>{{ d.day }}</td>
+                          {% else %}
+                            <td class="minical-day"></td>
+                          {% endif %}
+                        {% endfor %}
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              {% endfor %}
             </div>
           </section>
 
@@ -117,9 +142,11 @@
             {% if events.is_empty() %}
               {% call ui::empty_state("No upcoming events on the calendar.", "", "") %}{% endcall %}
             {% else %}
+              {# tabindex: keyboard focus drives the calendar jump exactly
+                 like hover — hover-only would exclude keyboard users. #}
               <ul class="strip">
                 {% for event in events %}
-                  <li data-event data-from="{{ event.starts_on }}" data-to="{{ event.ends_on }}">
+                  <li data-event tabindex="0" data-from="{{ event.starts_on }}" data-to="{{ event.ends_on }}">
                     <span class="strip-course">{{ event.title }}</span>
                     <span class="strip-meet">{{ event.starts_on.format("%b %-d") }}</span>
                   </li>

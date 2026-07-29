@@ -157,6 +157,24 @@ box-shadow).
   the esbuild pipeline; keep the purple overlay for text contrast). At
   ≤760 px the visual collapses to a slim brand band above the form — the
   form never falls below the fold.
+- **Two-zone dashboard** (`.dash-grid`, 2026-07-29): main column (2fr:
+  classes, GPA history, registration) + rail (1fr: deadline, calendar,
+  events) via grid-template-areas. The deadline card is its own area so
+  phones pull it to the top — the one time-critical gold number never
+  sinks below the fold. GPA history renders only completed terms from
+  published/amended grades (`own_term_gpas`); the current term never
+  shows a GPA.
+- **Smart calendar** (`.minical`, 2026-07-29): one `<table>` per month
+  (proper captions + day headers, current month visible, event months
+  server-rendered hidden). Hover OR keyboard focus on an event row
+  (`tabindex="0"`) swaps the visible month, lights the span, and tints
+  the month name; leave/blur restores the current month. The swap is an
+  instant content change, not a fourth animated surface. Marker
+  treatments, neither color-alone (§8): **today = purple brand fill,
+  round, bold** (`aria-current="date"`); **jumped event span = gold
+  acting tint + inset gold ring + bold** — gold marks the thing being
+  acted on. Behavior pinned by `frontend/test/calendar.mjs` (jsdom runs
+  the real bundle).
 - **Dashboard strip** (`.strip`): compact label/value list rows inside a
   card (schedule strip, campus events).
 - **Weekly schedule** (`.week`/`.day`): day sections with time-sorted

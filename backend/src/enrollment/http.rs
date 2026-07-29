@@ -49,7 +49,8 @@ impl DashboardPage {
     }
 }
 
-/// One cell of the dashboard mini calendar.
+/// One day cell of the dashboard calendar.
+#[derive(Clone)]
 pub struct CalDay {
     pub day: u32,
     pub iso: String,
@@ -57,14 +58,53 @@ pub struct CalDay {
     pub has_event: bool,
 }
 
-/// The current month as a Monday-first grid, event days marked. A visual
-/// echo of the events list (aria-hidden in the template — the list itself
-/// carries the accessible dates).
-pub struct MiniCal {
+/// One month as Monday-first week rows (None pads the first/last week).
+pub struct CalMonth {
+    /// "2026-09" — the script matches an event's date prefix against this.
+    pub key: String,
     pub label: String,
-    /// Blank leading cells before the 1st.
-    pub lead: usize,
-    pub days: Vec<CalDay>,
+    pub weeks: Vec<Vec<Option<CalDay>>>,
+}
+
+/// The smart calendar: the CURRENT month first (the JS-off baseline, with
+/// today marked), then one grid per event month. Every month a hover or
+/// focus can jump to is server-rendered — the script only toggles
+/// visibility, no client-side date math.
+pub struct MiniCal {
+    pub months: Vec<CalMonth>,
+}
+
+fn cal_month(
+    first: chrono::NaiveDate,
+    today: chrono::NaiveDate,
+    events: &[InstitutionEvent],
+) -> CalMonth {
+    use chrono::Datelike;
+    let next = first
+        .checked_add_months(chrono::Months::new(1))
+        .expect("next month exists");
+    let count = (next - first).num_days() as u32;
+    let lead = first.weekday().num_days_from_monday() as usize;
+    let mut cells: Vec<Option<CalDay>> = (0..lead).map(|_| None).collect();
+    for n in 1..=count {
+        let date = first.with_day(n).expect("n is within the month");
+        cells.push(Some(CalDay {
+            day: n,
+            iso: date.format("%Y-%m-%d").to_string(),
+            today: date == today,
+            has_event: events
+                .iter()
+                .any(|e| e.starts_on <= date && date <= e.ends_on),
+        }));
+    }
+    while !cells.len().is_multiple_of(7) {
+        cells.push(None);
+    }
+    CalMonth {
+        key: first.format("%Y-%m").to_string(),
+        label: first.format("%B %Y").to_string(),
+        weeks: cells.chunks(7).map(<[_]>::to_vec).collect(),
+    }
 }
 
 fn mini_cal(events: &[InstitutionEvent]) -> MiniCal {
@@ -74,42 +114,21 @@ fn mini_cal(events: &[InstitutionEvent]) -> MiniCal {
     // timezone through if anyone ever notices.
     let today = Utc::now().date_naive();
     let this_first = today.with_day(1).expect("day 1 exists in every month");
-    let next_of_this = this_first
-        .checked_add_months(chrono::Months::new(1))
-        .expect("next month exists");
-    // Anchor on the current month when it has event days; otherwise jump
-    // to the first upcoming event's month, so the grid always has
-    // something to say (events is upcoming-only, sorted by start).
-    let event_this_month = events.iter().any(|e| e.starts_on < next_of_this);
-    let first = if events.is_empty() || event_this_month {
-        this_first
-    } else {
-        events[0]
+    let mut firsts = vec![this_first];
+    for event in events {
+        let first = event
             .starts_on
             .with_day(1)
-            .expect("day 1 exists in every month")
-    };
-    let next_month = first
-        .checked_add_months(chrono::Months::new(1))
-        .expect("next month exists");
-    let count = (next_month - first).num_days() as u32;
-    let days = (1..=count)
-        .map(|n| {
-            let date = first.with_day(n).expect("n is within the month");
-            CalDay {
-                day: n,
-                iso: date.format("%Y-%m-%d").to_string(),
-                today: date == today,
-                has_event: events
-                    .iter()
-                    .any(|e| e.starts_on <= date && date <= e.ends_on),
-            }
-        })
-        .collect();
+            .expect("day 1 exists in every month");
+        if !firsts.contains(&first) {
+            firsts.push(first);
+        }
+    }
     MiniCal {
-        label: first.format("%B %Y").to_string(),
-        lead: first.weekday().num_days_from_monday() as usize,
-        days,
+        months: firsts
+            .into_iter()
+            .map(|first| cal_month(first, today, events))
+            .collect(),
     }
 }
 
@@ -130,8 +149,10 @@ pub fn sample_dashboard_html() -> Result<String, askama::Error> {
             id: Uuid::nil(),
             title: "Mid-semester examinations".into(),
             event_type: "academic".into(),
-            starts_on: now.date_naive() + Duration::days(7),
-            ends_on: now.date_naive() + Duration::days(11),
+            // Deliberately 6+ weeks out: the sample page always exercises
+            // the hidden event-month grid the focus/hover jump reveals.
+            starts_on: now.date_naive() + Duration::days(45),
+            ends_on: now.date_naive() + Duration::days(49),
         },
     ];
     DashboardPage {
@@ -1111,47 +1132,63 @@ mod mini_cal_tests {
     use super::*;
     use chrono::{Datelike, Utc};
 
-    #[test]
-    fn mini_cal_covers_the_current_month_and_marks_event_spans() {
-        let today = Utc::now().date_naive();
-        let event = InstitutionEvent {
+    fn event(starts_on: chrono::NaiveDate, ends_on: chrono::NaiveDate) -> InstitutionEvent {
+        InstitutionEvent {
             id: Uuid::nil(),
             title: "x".into(),
             event_type: "holiday".into(),
-            starts_on: today,
-            ends_on: today,
-        };
-        let cal = mini_cal(&[event]);
-        assert!(cal.lead < 7);
-        assert!((28..=31).contains(&cal.days.len()));
-        assert_eq!(cal.days.iter().filter(|d| d.today).count(), 1);
-        let today_cell = cal.days.iter().find(|d| d.today).unwrap();
-        assert!(today_cell.has_event);
-        assert_eq!(today_cell.iso, today.format("%Y-%m-%d").to_string());
-        assert_eq!(cal.days[0].day, 1);
-        assert_eq!(cal.days.last().unwrap().day, cal.days.len() as u32);
-        assert!(cal.label.contains(&today.year().to_string()));
+            starts_on,
+            ends_on,
+        }
+    }
+
+    fn days(month: &CalMonth) -> Vec<&CalDay> {
+        month.weeks.iter().flatten().flatten().collect()
     }
 
     #[test]
-    fn mini_cal_jumps_to_the_first_event_month_when_this_month_is_empty() {
+    fn the_first_month_is_always_the_current_one_with_today_marked() {
+        let today = Utc::now().date_naive();
+        let cal = mini_cal(&[event(today, today)]);
+        assert_eq!(cal.months.len(), 1, "event this month adds no extra grid");
+        let month = &cal.months[0];
+        assert_eq!(month.key, today.format("%Y-%m").to_string());
+        assert!(month.label.contains(&today.year().to_string()));
+        let cells = days(month);
+        assert!((28..=31).contains(&cells.len()));
+        assert_eq!(cells[0].day, 1);
+        assert_eq!(cells.last().unwrap().day, cells.len() as u32);
+        assert!(month.weeks.iter().all(|week| week.len() == 7));
+        let today_cell = cells.iter().find(|d| d.today).expect("today marked");
+        assert!(today_cell.has_event);
+        // No events at all: still exactly the current month.
+        assert_eq!(mini_cal(&[]).months.len(), 1);
+    }
+
+    #[test]
+    fn event_months_get_their_own_grids_with_spans_marked() {
         let today = Utc::now().date_naive();
         let future = today
             .checked_add_months(chrono::Months::new(2))
             .unwrap()
-            .with_day(15)
+            .with_day(10)
             .unwrap();
-        let event = InstitutionEvent {
-            id: Uuid::nil(),
-            title: "x".into(),
-            event_type: "holiday".into(),
-            starts_on: future,
-            ends_on: future,
-        };
-        let cal = mini_cal(&[event]);
-        assert!(cal.days.iter().all(|d| !d.today));
-        assert!(cal.days.iter().any(|d| d.has_event && d.day == 15));
-        // No events at all: fall back to the current month.
-        assert_eq!(mini_cal(&[]).label, today.format("%B %Y").to_string());
+        let span_end = future.with_day(14).unwrap();
+        // Two events in the same future month: one grid, not two.
+        let cal = mini_cal(&[
+            event(future, span_end),
+            event(future.with_day(20).unwrap(), future.with_day(20).unwrap()),
+        ]);
+        assert_eq!(cal.months.len(), 2);
+        assert_eq!(cal.months[1].key, future.format("%Y-%m").to_string());
+        let cells = days(&cal.months[1]);
+        assert!(cells.iter().all(|d| !d.today), "today only in its month");
+        for day in [10, 12, 14, 20] {
+            assert!(
+                cells.iter().any(|d| d.has_event && d.day == day),
+                "day {day} carries the event mark"
+            );
+        }
+        assert!(!cells.iter().any(|d| d.has_event && d.day == 15));
     }
 }
