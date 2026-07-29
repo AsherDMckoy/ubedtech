@@ -7,7 +7,7 @@
   <div class="wrap">
     <h1>Your grades</h1>
     {% if let Some(term) = term %}
-      <p class="sub">{{ term.name }} · published grades only</p>
+      <p class="sub">{{ term.name }} · grades appear here as your lecturers publish them — a mid-term entry is your current standing, not a final result</p>
       {% if grades.is_empty() %}
         {% call ui::empty_state("No published grades yet this term.", "/ui/history", "See your academic history") %}{% endcall %}
       {% else %}

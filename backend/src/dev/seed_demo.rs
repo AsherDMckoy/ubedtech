@@ -83,7 +83,7 @@ const SEC_PHYS_2101: Uuid = Uuid::from_u128(0x34);
 const COURSE_MATH_2110: Uuid = Uuid::from_u128(0x25);
 /// seed.sql's core rows that predate this command and carry no audit events;
 /// backfilled below so audit coverage holds for the WHOLE database.
-const CORE_ENROLLMENTS: [Uuid; 7] = [
+const CORE_ENROLLMENTS: [Uuid; 9] = [
     Uuid::from_u128(0x51),
     Uuid::from_u128(0x52),
     Uuid::from_u128(0x53),
@@ -92,13 +92,19 @@ const CORE_ENROLLMENTS: [Uuid; 7] = [
     Uuid::from_u128(0xA1),
     Uuid::from_u128(0xA2),
     Uuid::from_u128(0xA3),
+    // demo.student's in-progress FALL-2026 courses (progress-grades block).
+    Uuid::from_u128(0xA7),
+    Uuid::from_u128(0xA8),
 ];
-const CORE_GRADES: [Uuid; 5] = [
+const CORE_GRADES: [Uuid; 7] = [
     Uuid::from_u128(0x71),
     Uuid::from_u128(0x72),
     Uuid::from_u128(0xA4),
     Uuid::from_u128(0xA5),
     Uuid::from_u128(0xA6),
+    // In-progress FALL-2026 standing (published B+, draft A-).
+    Uuid::from_u128(0xA9),
+    Uuid::from_u128(0xAA),
 ];
 const CORE_DOC_REQUEST: Uuid = Uuid::from_u128(0x75);
 
@@ -1969,8 +1975,9 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            instructor_sections, 2,
-            "demo.instructor keeps exactly CMPS-2131 + CMPS-3141"
+            instructor_sections, 4,
+            "demo.instructor keeps exactly CMPS-2131 + CMPS-3141 + the two \
+             progress-graded sections (CMPS-2515, STAT-2101)"
         );
 
         // The brief's empty states are real accounts: a loginable student

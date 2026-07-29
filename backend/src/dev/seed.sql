@@ -336,4 +336,50 @@ INSERT INTO grade_record (id, institution_id, enrollment_id, grade_code, grade_p
     ('00000000-0000-0000-0000-0000000000a6', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-0000000000a3', 'F', 0.0, 'published', '00000000-0000-0000-0000-000000000015', TIMESTAMPTZ '2025-05-16 12:00:00+00')
 ON CONFLICT (id) DO NOTHING;
 
+-- ---------------------------------------------------------------------------
+-- Current-semester progress grades: demo.student carries two more FALL-2026
+-- enrollments whose lecturers grade during the term, so the Grades page
+-- shows a live "current standing" mid-semester:
+--   CMPS-2515 B+ PUBLISHED  → visible to the student now.
+--   STAT-2101 A- DRAFT      → invisible until published (publish it live in
+--                             a demo to show the boundary flip).
+-- Codes deliberately absent from seed-demo's COURSES list. CMPS-2131 keeps
+-- no grade so journey 2's live entry stays untouched.
+-- ---------------------------------------------------------------------------
+INSERT INTO course (id, institution_id, code, title, credit_hours) VALUES
+    ('00000000-0000-0000-0000-0000000000c1', '00000000-0000-0000-0000-000000000001', 'CMPS-2515', 'Web application development', 3.0),
+    ('00000000-0000-0000-0000-0000000000c2', '00000000-0000-0000-0000-000000000001', 'STAT-2101', 'Introduction to statistics',  3.0)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO section (id, institution_id, term_id, course_id, section_code, status) VALUES
+    ('00000000-0000-0000-0000-0000000000c3', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0000-0000000000c1', '01', 'open'),
+    ('00000000-0000-0000-0000-0000000000c4', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000020', '00000000-0000-0000-0000-0000000000c2', '01', 'open')
+ON CONFLICT (id) DO NOTHING;
+
+-- Slots clear of demo.student's CMPS-2131 (Mon/Wed 09:00-10:15).
+INSERT INTO section_meeting (id, section_id, day_of_week, starts_at, ends_at) VALUES
+    ('00000000-0000-0000-0000-0000000000c5', '00000000-0000-0000-0000-0000000000c3', 2, '15:00', '16:15'),
+    ('00000000-0000-0000-0000-0000000000c6', '00000000-0000-0000-0000-0000000000c3', 4, '15:00', '16:15'),
+    ('00000000-0000-0000-0000-0000000000c7', '00000000-0000-0000-0000-0000000000c4', 3, '13:00', '14:15')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO instructor_assignment (section_id, instructor_user_id) VALUES
+    ('00000000-0000-0000-0000-0000000000c3', '00000000-0000-0000-0000-000000000015'),
+    ('00000000-0000-0000-0000-0000000000c4', '00000000-0000-0000-0000-000000000015')
+ON CONFLICT DO NOTHING;
+
+UPDATE section_capacity SET capacity = 30, enrolled_count = 1 WHERE section_id IN
+    ('00000000-0000-0000-0000-0000000000c3',
+     '00000000-0000-0000-0000-0000000000c4');
+
+INSERT INTO enrollment (id, institution_id, student_id, section_id, status, registered_at, source, idempotency_key, created_by_user_id) VALUES
+    ('00000000-0000-0000-0000-0000000000a7', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000012', '00000000-0000-0000-0000-0000000000c3', 'enrolled', now() - interval '5 days', 'registrar', '00000000-0000-0000-0000-0000000000b4', '00000000-0000-0000-0000-000000000016'),
+    ('00000000-0000-0000-0000-0000000000a8', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000012', '00000000-0000-0000-0000-0000000000c4', 'enrolled', now() - interval '5 days', 'registrar', '00000000-0000-0000-0000-0000000000b5', '00000000-0000-0000-0000-000000000016')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO grade_record (id, institution_id, enrollment_id, grade_code, grade_points, state, entered_by_user_id, published_at) VALUES
+    ('00000000-0000-0000-0000-0000000000a9', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-0000000000a7', 'B+', 3.3, 'published', '00000000-0000-0000-0000-000000000015', now() - interval '2 days'),
+    ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-0000000000a8', 'A-', 3.7, 'draft',     '00000000-0000-0000-0000-000000000015', NULL)
+ON CONFLICT (id) DO NOTHING;
+
 COMMIT;

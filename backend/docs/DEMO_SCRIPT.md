@@ -46,6 +46,13 @@ all published), which powers two more catalog states: CMPS-1121
 **already passed → register denies** ("course already completed with a
 passing grade"), MATH-1151 **failed → retake allowed**.
 
+demo.student is also mid-semester in two graded courses: CMPS-2515 has a
+**published B+** (the Grades page shows it as current standing — the
+lecturer grades into the system during the term, so students watch their
+progress), and STAT-2101 has a **draft A-** the student cannot see —
+publish it live (as `demo.registrar`) for a second, quicker version of
+the journey-2 boundary flip.
+
 Optional before starting: turn JS off in devtools for any journey — every
 mutation below is a plain form POST and behaves identically minus the
 enhancements. That is the demo's strongest claim; consider doing journey
