@@ -188,6 +188,30 @@ faster database cores. (Generator isolation would still matter for
 class A, where the server itself can consume every core — untested
 here.)
 
+### PostgreSQL-side audit + pool-size A/B (same session)
+
+Server-side cache state, checked not assumed: 100.00 % shared-buffer hit
+ratio lifetime on `ubedtech_bench` (43 MB database inside the default
+128 MB `shared_buffers`) — PostgreSQL's page cache is already fully
+engaged, and PostgreSQL has no query-result cache to "enable". `work_mem`
+(4 MB vs a 278-row sort), JIT (`jit_above_cost` 100k vs a ~40-cost
+query), and parallel workers (LIMIT 20) are all non-factors at this
+data size. No PostgreSQL configuration change is indicated.
+
+Pool-size A/B at t8/c64 (64 runnable backends vs 24 hardware threads
+looked like oversubscription — measured instead of assumed):
+
+| `APP_DB_MAX_CONNECTIONS` | Throughput | p50 / p99 | Latency stdev |
+|---|---|---|---|
+| 64 (default) | 5,038 req/s | 12.2 / 26.4 ms | 4.7 ms |
+| 20 | 4,622 req/s | 13.7 / **16.4 ms** | **0.9 ms** |
+
+A tradeoff, not a pessimization: the big pool buys ~9 % throughput at
+saturation; the small pool collapses the p99 by 40 % because requests
+queue briefly at the pool instead of context-switching inside PostgreSQL.
+At realistic load (~200 req/s) neither setting is ever felt. Default
+stays 64; the knob already exists for a latency-sensitive deployment.
+
 ## Query plans (Phase 8 inspection, hot enrollment + document paths)
 
 `EXPLAIN ANALYZE` on the load dataset (caveat: 200 sections / ~3.9k
