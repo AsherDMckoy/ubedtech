@@ -1,7 +1,7 @@
 {% extends "pages/base.html" %}
 {% import "components/ui.html" as ui %}
 {% block title %}{{ core.course_code }} {{ core.section_code }} — section management{% endblock %}
-{% block rail %}{% call ui::registrar_nav("sections") %}{% endcall %}{% endblock %}
+{% block rail %}{% call ui::primary_nav("sections") %}{% endcall %}{% endblock %}
 {% block content %}
   <div class="wrap">
     <p class="crumb"><a href="/ui/registrar/sections">Sections</a> · {{ core.term_name }}</p>

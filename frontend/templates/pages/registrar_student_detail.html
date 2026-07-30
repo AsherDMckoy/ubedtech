@@ -1,7 +1,7 @@
 {% extends "pages/base.html" %}
 {% import "components/ui.html" as ui %}
 {% block title %}{{ student.student_number }} — student management{% endblock %}
-{% block rail %}{% call ui::registrar_nav("students") %}{% endcall %}{% endblock %}
+{% block rail %}{% call ui::primary_nav("students") %}{% endcall %}{% endblock %}
 {% block content %}
   <div class="wrap">
     <p class="crumb"><a href="/ui/registrar/students">Students</a></p>

@@ -18,8 +18,11 @@ use actix_web::middleware::Next;
 use actix_web::{HttpMessage, HttpRequest, HttpResponse, cookie::Cookie, web};
 use serde::Deserialize;
 
+use std::collections::HashSet;
+
 use crate::identity_access::http::SessionCookiePolicy;
 use crate::identity_access::sessions::CurrentSession;
+use crate::shared::actor::{Actor, Role};
 use crate::shared::error::AppError;
 
 pub const THEME_COOKIE: &str = "ub_theme";
@@ -29,6 +32,7 @@ tokio::task_local! {
     static THEME: &'static str;
     static RAIL: &'static str;
     static CSRF: Option<String>;
+    static NAV_ROLES: HashSet<Role>;
 }
 
 fn cookie_theme(req: &ServiceRequest) -> &'static str {
@@ -48,9 +52,9 @@ fn cookie_rail(req: &ServiceRequest) -> &'static str {
     }
 }
 
-/// Innermost middleware: scope the UI preferences (theme, rail state) and
-/// the session's CSRF token for the duration of the request, so base.html
-/// can render all three.
+/// Innermost middleware: scope the UI preferences (theme, rail state),
+/// the session's CSRF token, and the actor's roles (for the role-aware
+/// nav) for the duration of the request, so base.html can render chrome.
 pub async fn theme_middleware(
     req: ServiceRequest,
     next: Next<impl MessageBody>,
@@ -61,9 +65,41 @@ pub async fn theme_middleware(
         .extensions()
         .get::<CurrentSession>()
         .map(|session| session.csrf_token.clone());
+    let roles = req
+        .extensions()
+        .get::<Actor>()
+        .map(|actor| actor.roles.clone())
+        .unwrap_or_default();
     THEME
-        .scope(theme, RAIL.scope(rail, CSRF.scope(csrf, next.call(req))))
+        .scope(
+            theme,
+            RAIL.scope(
+                rail,
+                CSRF.scope(csrf, NAV_ROLES.scope(roles, next.call(req))),
+            ),
+        )
         .await
+}
+
+/// The actor's roles, for `shared::nav::items()`; empty when signed out
+/// or outside a request.
+pub(crate) fn nav_roles() -> HashSet<Role> {
+    NAV_ROLES.try_with(Clone::clone).unwrap_or_default()
+}
+
+/// `render-pages` runs without a request: render samples with every role
+/// so the axe harness sees the full union nav on every shell.
+pub fn sample_nav_scope<R>(f: impl FnOnce() -> R) -> R {
+    let all = HashSet::from([
+        Role::Student,
+        Role::Instructor,
+        Role::Registrar,
+        Role::RecordsOfficer,
+        Role::DocumentOfficer,
+        Role::InstitutionAdmin,
+        Role::PlatformLicensingAdmin,
+    ]);
+    NAV_ROLES.sync_scope(all, f)
 }
 
 /// ` data-theme=dark` / ` data-theme=light` for `<html>`, empty for

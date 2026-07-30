@@ -1,7 +1,7 @@
 {% extends "pages/base.html" %}
 {% import "components/ui.html" as ui %}
 {% block title %}Registrar overview{% endblock %}
-{% block rail %}{% call ui::registrar_nav("overview") %}{% endcall %}{% endblock %}
+{% block rail %}{% call ui::primary_nav("overview") %}{% endcall %}{% endblock %}
 {% block content %}
   <div class="wrap wrap-wide">
     {% if let Some(term) = term %}

@@ -20,185 +20,189 @@ pub fn render_pages(out_dir: &str) -> std::io::Result<()> {
     let render = |template: &str, result: Result<String, askama::Error>| {
         result.unwrap_or_else(|error| panic!("rendering {template} failed: {error}"))
     };
-    let pages = [
-        (
-            "signin.html",
-            render("signin", crate::identity_access::http::signin_html(None)),
-        ),
-        ("gallery.html", render("gallery", GalleryPage.render())),
-        (
-            "dashboard.html",
-            render(
-                "dashboard",
-                crate::enrollment::http::sample_dashboard_html(),
+    // Samples render under the full role set so every shell carries the
+    // complete union nav for the axe pass (no request scope here).
+    let pages = crate::shared::theme::sample_nav_scope(|| {
+        [
+            (
+                "signin.html",
+                render("signin", crate::identity_access::http::signin_html(None)),
             ),
-        ),
-        (
-            "registration.html",
-            render(
-                "registration",
-                crate::academics::http::sample_catalog_html(),
+            ("gallery.html", render("gallery", GalleryPage.render())),
+            (
+                "dashboard.html",
+                render(
+                    "dashboard",
+                    crate::enrollment::http::sample_dashboard_html(),
+                ),
             ),
-        ),
-        (
-            "my_registration.html",
-            render(
-                "my_registration",
-                crate::enrollment::http::sample_registration_html(),
+            (
+                "registration.html",
+                render(
+                    "registration",
+                    crate::academics::http::sample_catalog_html(),
+                ),
             ),
-        ),
-        (
-            "schedule.html",
-            render("schedule", crate::records::http::sample_schedule_html()),
-        ),
-        (
-            "grades.html",
-            render("grades", crate::records::http::sample_grades_html()),
-        ),
-        (
-            "history.html",
-            render("history", crate::records::http::sample_history_html()),
-        ),
-        (
-            "transcript.html",
-            render("transcript", crate::records::http::sample_transcript_html()),
-        ),
-        (
-            "proof_of_enrollment.html",
-            render(
-                "proof_of_enrollment",
-                crate::records::http::sample_proof_html(),
+            (
+                "my_registration.html",
+                render(
+                    "my_registration",
+                    crate::enrollment::http::sample_registration_html(),
+                ),
             ),
-        ),
-        (
-            "instructor_sections.html",
-            render(
-                "instructor_sections",
-                crate::records::http::sample_instructor_sections_html(),
+            (
+                "schedule.html",
+                render("schedule", crate::records::http::sample_schedule_html()),
             ),
-        ),
-        (
-            "roster.html",
-            render("roster", crate::records::http::sample_roster_html()),
-        ),
-        (
-            "grade_history.html",
-            render(
-                "grade_history",
-                crate::records::http::sample_grade_history_html(),
+            (
+                "grades.html",
+                render("grades", crate::records::http::sample_grades_html()),
             ),
-        ),
-        (
-            "documents.html",
-            render("documents", crate::documents::http::sample_documents_html()),
-        ),
-        (
-            "document_queue.html",
-            render(
-                "document_queue",
-                crate::documents::http::sample_queue_html(),
+            (
+                "history.html",
+                render("history", crate::records::http::sample_history_html()),
             ),
-        ),
-        (
-            "registrar_overview.html",
-            render(
-                "registrar_overview",
-                crate::academics::http::sample_registrar_overview_html(),
+            (
+                "transcript.html",
+                render("transcript", crate::records::http::sample_transcript_html()),
             ),
-        ),
-        (
-            "registrar_terms.html",
-            render(
-                "registrar_terms",
-                crate::academics::http::sample_registrar_terms_html(),
+            (
+                "proof_of_enrollment.html",
+                render(
+                    "proof_of_enrollment",
+                    crate::records::http::sample_proof_html(),
+                ),
             ),
-        ),
-        (
-            "registrar_sections.html",
-            render(
-                "registrar_sections",
-                crate::academics::http::sample_registrar_sections_html(),
+            (
+                "instructor_sections.html",
+                render(
+                    "instructor_sections",
+                    crate::records::http::sample_instructor_sections_html(),
+                ),
             ),
-        ),
-        (
-            "registrar_section_detail.html",
-            render(
-                "registrar_section_detail",
-                crate::academics::http::sample_registrar_section_detail_html(),
+            (
+                "roster.html",
+                render("roster", crate::records::http::sample_roster_html()),
             ),
-        ),
-        (
-            "registrar_courses.html",
-            render(
-                "registrar_courses",
-                crate::academics::http::sample_registrar_courses_html(),
+            (
+                "grade_history.html",
+                render(
+                    "grade_history",
+                    crate::records::http::sample_grade_history_html(),
+                ),
             ),
-        ),
-        (
-            "registrar_students.html",
-            render(
-                "registrar_students",
-                crate::enrollment::http::sample_registrar_students_html(),
+            (
+                "documents.html",
+                render("documents", crate::documents::http::sample_documents_html()),
             ),
-        ),
-        (
-            "registrar_student_detail.html",
-            render(
-                "registrar_student_detail",
-                crate::enrollment::http::sample_registrar_student_detail_html(),
+            (
+                "document_queue.html",
+                render(
+                    "document_queue",
+                    crate::documents::http::sample_queue_html(),
+                ),
             ),
-        ),
-        (
-            "registrar_overrides.html",
-            render(
-                "registrar_overrides",
-                crate::enrollment::http::sample_registrar_overrides_html(),
+            (
+                "registrar_overview.html",
+                render(
+                    "registrar_overview",
+                    crate::academics::http::sample_registrar_overview_html(),
+                ),
             ),
-        ),
-        (
-            "calendar_admin.html",
-            render(
-                "calendar_admin",
-                crate::institution::http::sample_calendar_admin_html(),
+            (
+                "registrar_terms.html",
+                render(
+                    "registrar_terms",
+                    crate::academics::http::sample_registrar_terms_html(),
+                ),
             ),
-        ),
-        (
-            "institution_settings.html",
-            render(
-                "institution_settings",
-                crate::institution::http::sample_settings_html(),
+            (
+                "registrar_sections.html",
+                render(
+                    "registrar_sections",
+                    crate::academics::http::sample_registrar_sections_html(),
+                ),
             ),
-        ),
-        (
-            "accounts_admin.html",
-            render(
-                "accounts_admin",
-                crate::identity_access::http::sample_accounts_html(),
+            (
+                "registrar_section_detail.html",
+                render(
+                    "registrar_section_detail",
+                    crate::academics::http::sample_registrar_section_detail_html(),
+                ),
             ),
-        ),
-        (
-            "account_detail.html",
-            render(
-                "account_detail",
-                crate::identity_access::http::sample_account_detail_html(),
+            (
+                "registrar_courses.html",
+                render(
+                    "registrar_courses",
+                    crate::academics::http::sample_registrar_courses_html(),
+                ),
             ),
-        ),
-        (
-            "license_panel.html",
-            render(
-                "license_panel",
-                crate::licensing::http::sample_license_panel_html(),
+            (
+                "registrar_students.html",
+                render(
+                    "registrar_students",
+                    crate::enrollment::http::sample_registrar_students_html(),
+                ),
             ),
-        ),
-        ("locked.html", render("locked", crate::app::locked_html())),
-        (
-            "license_panel_selfhosted.html",
-            render(
-                "license_panel_selfhosted",
-                crate::licensing::http::sample_license_panel_selfhosted_html(),
+            (
+                "registrar_student_detail.html",
+                render(
+                    "registrar_student_detail",
+                    crate::enrollment::http::sample_registrar_student_detail_html(),
+                ),
             ),
-        ),
-    ];
+            (
+                "registrar_overrides.html",
+                render(
+                    "registrar_overrides",
+                    crate::enrollment::http::sample_registrar_overrides_html(),
+                ),
+            ),
+            (
+                "calendar_admin.html",
+                render(
+                    "calendar_admin",
+                    crate::institution::http::sample_calendar_admin_html(),
+                ),
+            ),
+            (
+                "institution_settings.html",
+                render(
+                    "institution_settings",
+                    crate::institution::http::sample_settings_html(),
+                ),
+            ),
+            (
+                "accounts_admin.html",
+                render(
+                    "accounts_admin",
+                    crate::identity_access::http::sample_accounts_html(),
+                ),
+            ),
+            (
+                "account_detail.html",
+                render(
+                    "account_detail",
+                    crate::identity_access::http::sample_account_detail_html(),
+                ),
+            ),
+            (
+                "license_panel.html",
+                render(
+                    "license_panel",
+                    crate::licensing::http::sample_license_panel_html(),
+                ),
+            ),
+            ("locked.html", render("locked", crate::app::locked_html())),
+            (
+                "license_panel_selfhosted.html",
+                render(
+                    "license_panel_selfhosted",
+                    crate::licensing::http::sample_license_panel_selfhosted_html(),
+                ),
+            ),
+        ]
+    });
     for (name, html) in pages {
         let path = format!("{out_dir}/{name}");
         std::fs::write(&path, html)?;

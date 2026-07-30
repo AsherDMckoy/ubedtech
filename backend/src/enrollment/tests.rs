@@ -1308,6 +1308,21 @@ mod ui {
                         $pool.clone(),
                         crate::audit::AuditWriter,
                     )))
+                    .app_data(web::Data::new($pool.clone()))
+                    .app_data(web::Data::new(crate::records::TranscriptSnapshotService))
+                    .app_data(web::Data::new(crate::records::ScheduleQuery::new(
+                        $pool.clone(),
+                    )))
+                    .app_data(web::Data::new(crate::documents::DocumentService::new(
+                        $pool.clone(),
+                        crate::audit::AuditWriter,
+                        crate::records::TranscriptSnapshotService,
+                    )))
+                    .app_data(web::Data::new(
+                        crate::documents::storage::FilesystemDocumentStore::new(
+                            std::env::temp_dir().join(format!("ubed-navtest-{}", Uuid::new_v4())),
+                        ),
+                    ))
                     // Same order as main.rs: theme inside csrf inside
                     // session resolution.
                     .wrap(actix_web::middleware::from_fn(
@@ -1322,6 +1337,9 @@ mod ui {
                     .configure(crate::identity_access::http::routes)
                     .configure(crate::academics::http::routes)
                     .configure(crate::enrollment::http::routes)
+                    .configure(crate::records::http::routes)
+                    .configure(crate::documents::http::routes)
+                    .configure(crate::institution::http::routes)
                     .configure(crate::shared::theme::routes),
             )
             .await
@@ -2339,6 +2357,168 @@ mod ui {
         )
         .await;
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    /// D.2: nav visibility equals authorization. For every role: the
+    /// rendered nav is exactly `shared::nav`'s answer, every shown link
+    /// answers 200, and every other role's link does NOT — so a student
+    /// item can never reappear in an instructor's rail (the reported
+    /// 403-link bug) without this test failing.
+    ///
+    /// Documented exception: /ui/catalog answers 200 for staff (browsing
+    /// the catalog is deliberately open — the page renders a no-aside
+    /// staff variant) but is only navved for students.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn nav_matches_policy_for_every_role(pool: PgPool) {
+        let fixture = seed_registration_fixture(&pool, 1).await;
+        let institution_id = fixture.registrar.institution_id;
+        let app = ui_app!(&pool, institution_id);
+
+        let student: &[&str] = &[
+            "/ui/dashboard",
+            "/ui/catalog",
+            "/ui/registration",
+            "/ui/schedule",
+            "/ui/grades",
+            "/ui/history",
+            "/ui/documents",
+        ];
+        let instructor: &[&str] = &["/ui/instructor"];
+        let registrar: &[&str] = &[
+            "/ui/registrar",
+            "/ui/registrar/terms",
+            "/ui/registrar/sections",
+            "/ui/registrar/courses",
+            "/ui/registrar/students",
+            "/ui/registrar/overrides",
+        ];
+        let queue: &[&str] = &["/ui/admin/documents"];
+        let admin: &[&str] = &[
+            "/ui/admin/calendar",
+            "/ui/admin/settings",
+            "/ui/admin/accounts",
+        ];
+
+        // The student case uses the fixture's real student (nav targets
+        // like the dashboard need a student_profile row, not just the
+        // role); staff roles need no profile.
+        let student_username = credential_student(&pool, &fixture).await;
+
+        // (username, roles, expected nav) — includes the demo.registrar
+        // shape (three roles, union nav).
+        let cases: &[(&str, &[&str], Vec<&str>)] = &[
+            (&student_username, &[], student.to_vec()),
+            ("nav.instructor", &["instructor"], instructor.to_vec()),
+            ("nav.registrar", &["registrar"], registrar.to_vec()),
+            ("nav.docofficer", &["document_officer"], queue.to_vec()),
+            // Admins hold the academics side of the registrar area by
+            // policy (require_can_manage_academics accepts either role)
+            // but NOT students/overrides (require_can_manage_holds and
+            // require_can_grant_override are registrar-only).
+            (
+                "nav.admin",
+                &["institution_admin"],
+                registrar
+                    .iter()
+                    .filter(|href| {
+                        !matches!(**href, "/ui/registrar/students" | "/ui/registrar/overrides")
+                    })
+                    .chain(admin)
+                    .copied()
+                    .collect(),
+            ),
+            (
+                "nav.frontdesk",
+                &["registrar", "records_officer", "document_officer"],
+                registrar.iter().chain(queue).copied().collect(),
+            ),
+        ];
+        let union: std::collections::BTreeSet<&str> = cases
+            .iter()
+            .flat_map(|(_, _, expected)| expected.iter().copied())
+            .collect();
+
+        for (username, roles, expected) in cases {
+            if !roles.is_empty() {
+                let user_id = Uuid::new_v4();
+                sqlx::query(
+                    "INSERT INTO user_account (id, institution_id, username, email, status) \
+                     VALUES ($1, $2, $3, $4, 'active'::user_status)",
+                )
+                .bind(user_id)
+                .bind(institution_id)
+                .bind(username)
+                .bind(format!("{username}@test.invalid"))
+                .execute(&pool)
+                .await
+                .unwrap();
+                let hash = PasswordService::new(8, 1, 1)
+                    .unwrap()
+                    .hash(PASSWORD)
+                    .unwrap();
+                sqlx::query(
+                    "INSERT INTO password_credential (user_id, password_hash) VALUES ($1, $2)",
+                )
+                .bind(user_id)
+                .bind(&hash)
+                .execute(&pool)
+                .await
+                .unwrap();
+                for role in *roles {
+                    sqlx::query(
+                        "INSERT INTO user_role (institution_id, user_id, role_id) \
+                         SELECT $1, $2, id FROM role WHERE code = $3",
+                    )
+                    .bind(institution_id)
+                    .bind(user_id)
+                    .bind(role)
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+                }
+            }
+            let cookie = login(&app, username, PASSWORD).await;
+
+            // Rendered nav (the signout page uses the shared shell and is
+            // reachable by every role).
+            let page = get_page(&app, &cookie, "/ui/signout").await;
+            let mut shown = std::collections::BTreeSet::new();
+            for capture in page.split("class=\"navlink\" href=\"").skip(1) {
+                shown.insert(capture.split('"').next().unwrap().to_owned());
+            }
+            let expected_set: std::collections::BTreeSet<String> =
+                expected.iter().map(|href| (*href).to_owned()).collect();
+            assert_eq!(
+                shown, expected_set,
+                "{username}: rendered nav must be its roles' items"
+            );
+
+            // Authorization sweep across the union of every role's items.
+            for href in &union {
+                let response = actix_test::call_service(
+                    &app,
+                    actix_test::TestRequest::get()
+                        .uri(href)
+                        .cookie(cookie.clone())
+                        .to_request(),
+                )
+                .await;
+                let permitted = expected.contains(href);
+                if permitted {
+                    assert_eq!(
+                        response.status(),
+                        StatusCode::OK,
+                        "{username}: shown link {href} must answer 200"
+                    );
+                } else if *href != "/ui/catalog" {
+                    assert!(
+                        !response.status().is_success(),
+                        "{username}: hidden link {href} must not answer 200 (got {})",
+                        response.status()
+                    );
+                }
+            }
+        }
     }
 
     /// Holds and academic standing over plain forms. The proof of honesty:

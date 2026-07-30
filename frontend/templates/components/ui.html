@@ -56,9 +56,9 @@
     <path d="M5 20v-6M12 20V5M19 20v-9"/>
   {%- else if key == "history" -%}
     <circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2.5"/>
-  {%- else if key == "documents" || key == "license" -%}
+  {%- else if key == "documents" || key == "license" || key == "queue" -%}
     <path d="M13.5 3H7a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 7 21h10a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M13.5 3v5h5"/>
-  {%- else if key == "sections" -%}
+  {%- else if key == "sections" || key == "instructor" -%}
     <path d="M12 3.5 21 8.5l-9 5-9-5z"/><path d="m4 13.5 8 4.5 8-4.5"/>
   {%- else if key == "students" || key == "accounts" -%}
     <circle cx="12" cy="8" r="4"/><path d="M5 20.5c.7-3.5 3.5-5.5 7-5.5s6.3 2 7 5.5"/>
@@ -85,28 +85,27 @@
   {%- endif -%}
 {% endmacro %}
 
-{#- Primary navigation links, rendered once in the desktop rail and once
-    in the mobile sheet (only one is ever in the accessibility tree).
+{#- Role-aware primary navigation (ADR-16 rail + D.2): the items come
+    from crate::shared::nav::items(), the ONE role->item source — a link
+    cannot render without the actor holding the role that grants it.
+    Rendered once in the desktop rail and once in the mobile sheet.
     `current` marks the page we are on; "" marks none. -#}
-{% macro nav_links(current) %}
-  {% call nav_item("/ui/dashboard", "Dashboard", "dashboard", current) %}{% endcall %}
-  {% call nav_item("/ui/catalog", "Catalog", "catalog", current) %}{% endcall %}
-  {% call nav_item("/ui/registration", "Registration", "registration", current) %}{% endcall %}
-  {% call nav_item("/ui/schedule", "Schedule", "schedule", current) %}{% endcall %}
-  {% call nav_item("/ui/grades", "Grades", "grades", current) %}{% endcall %}
-  {% call nav_item("/ui/history", "History", "history", current) %}{% endcall %}
-  {% call nav_item("/ui/documents", "Documents", "documents", current) %}{% endcall %}
+{% macro nav_items(current) %}
+  {% for entry in crate::shared::nav::items() %}
+    {% call nav_item(entry.href, entry.label, entry.key, current) %}{% endcall %}
+  {% endfor %}
 {% endmacro %}
 
-{#- Student shell with the active page marked; student pages override the
-    rail block with this (same pattern as registrar_nav). -#}
-{% macro student_nav(current) %}
+{#- The app shell chrome every signed-in page uses: mobile topbar +
+    sheet, desktop rail with collapse toggle, theme toggle and sign out
+    in the rail foot. -#}
+{% macro primary_nav(current) %}
   <header class="topbar">
     <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">University of Belize</span></span>
     <details class="nav-sheet">
       <summary>Menu</summary>
       <nav class="sheet-panel" aria-label="Primary">
-        {% call nav_links(current) %}{% endcall %}
+        {% call nav_items(current) %}{% endcall %}
         {% call theme_toggle() %}{% endcall %}
       </nav>
     </details>
@@ -114,95 +113,7 @@
   <nav class="rail" aria-label="Primary">
     <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">University of Belize</span></span>
     {% call rail_toggle() %}{% endcall %}
-    {% call nav_links(current) %}{% endcall %}
-    <div class="rail-foot">
-      {% call theme_toggle() %}{% endcall %}
-      <a href="/ui/signout">Sign out</a>
-    </div>
-  </nav>
-{% endmacro %}
-
-{#- Registrar shell: the same topbar + rail structure as base.html's default
-    rail block, with the registrar's own sections. Pages override the rail
-    block with `{% call ui::registrar_nav("overview") %}{% endcall %}`;
-    `current` marks the active link (aria-current, styled once). -#}
-{% macro registrar_nav_links(current) %}
-  {% call nav_item("/ui/registrar", "Overview", "overview", current) %}{% endcall %}
-  {% call nav_item("/ui/registrar/terms", "Terms & windows", "terms", current) %}{% endcall %}
-  {% call nav_item("/ui/registrar/sections", "Sections", "sections", current) %}{% endcall %}
-  {% call nav_item("/ui/registrar/courses", "Courses", "courses", current) %}{% endcall %}
-  {% call nav_item("/ui/registrar/students", "Students", "students", current) %}{% endcall %}
-  {% call nav_item("/ui/registrar/overrides", "Overrides", "overrides", current) %}{% endcall %}
-{% endmacro %}
-
-{#- Institution-admin shell, same shape as registrar_nav. -#}
-{% macro admin_nav_links(current) %}
-  {% call nav_item("/ui/admin/calendar", "Calendar", "calendar", current) %}{% endcall %}
-  {% call nav_item("/ui/admin/settings", "Settings", "settings", current) %}{% endcall %}
-  {% call nav_item("/ui/admin/accounts", "Accounts", "accounts", current) %}{% endcall %}
-{% endmacro %}
-
-{% macro admin_nav(current) %}
-  <header class="topbar">
-    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">Administration</span></span>
-    <details class="nav-sheet">
-      <summary>Menu</summary>
-      <nav class="sheet-panel" aria-label="Administration">
-        {% call admin_nav_links(current) %}{% endcall %}
-      </nav>
-    </details>
-  </header>
-  <nav class="rail" aria-label="Administration">
-    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">Administration</span></span>
-    {% call rail_toggle() %}{% endcall %}
-    {% call admin_nav_links(current) %}{% endcall %}
-    <div class="rail-foot">
-      {% call theme_toggle() %}{% endcall %}
-      <a href="/ui/signout">Sign out</a>
-    </div>
-  </nav>
-{% endmacro %}
-
-{#- Platform-operator shell: one surface today (license management). -#}
-{% macro platform_nav_links(current) %}
-  {% call nav_item("/ui/platform/license", "License", "license", current) %}{% endcall %}
-{% endmacro %}
-
-{% macro platform_nav(current) %}
-  <header class="topbar">
-    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">Platform</span></span>
-    <details class="nav-sheet">
-      <summary>Menu</summary>
-      <nav class="sheet-panel" aria-label="Platform">
-        {% call platform_nav_links(current) %}{% endcall %}
-      </nav>
-    </details>
-  </header>
-  <nav class="rail" aria-label="Platform">
-    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">Platform</span></span>
-    {% call rail_toggle() %}{% endcall %}
-    {% call platform_nav_links(current) %}{% endcall %}
-    <div class="rail-foot">
-      {% call theme_toggle() %}{% endcall %}
-      <a href="/ui/signout">Sign out</a>
-    </div>
-  </nav>
-{% endmacro %}
-
-{% macro registrar_nav(current) %}
-  <header class="topbar">
-    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">Registrar</span></span>
-    <details class="nav-sheet">
-      <summary>Menu</summary>
-      <nav class="sheet-panel" aria-label="Registrar">
-        {% call registrar_nav_links(current) %}{% endcall %}
-      </nav>
-    </details>
-  </header>
-  <nav class="rail" aria-label="Registrar">
-    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">Registrar</span></span>
-    {% call rail_toggle() %}{% endcall %}
-    {% call registrar_nav_links(current) %}{% endcall %}
+    {% call nav_items(current) %}{% endcall %}
     <div class="rail-foot">
       {% call theme_toggle() %}{% endcall %}
       <a href="/ui/signout">Sign out</a>
