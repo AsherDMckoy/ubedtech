@@ -79,11 +79,13 @@ them from the gallery. All are reduced-motion aware (global kill switch in
 `base.css`) and focus-visible ringed (one global rule, the only permitted
 box-shadow).
 
-- **App shell** (`base.html`): desktop = persistent nav rail
-  (`nav.rail`, 200 px grid column); ≤ 860 px = top bar with the mobile
-  nav sheet — animated surface #3, a `<details class="nav-sheet">` so it
-  opens/closes with JS off. Only one nav is ever in the accessibility
-  tree. Sign-in renders the bare shell (`shell-bare` + empty `rail`
+- **App shell** (`base.html` + `ui::primary_nav`): desktop = persistent
+  nav rail (`nav.rail`, expanded 240 px / collapsible to a 48 px icon
+  rail — see Icon rail below and ADR-16); ≤ 860 px = top bar with the
+  mobile nav sheet — animated surface #3, a `<details class="nav-sheet">`
+  so it opens/closes with JS off. Only one nav is ever in the
+  accessibility tree. One `primary_nav(current)` macro serves every role
+  (items are role-aware, D.2); the old per-role nav macros are gone. Sign-in renders the bare shell (`shell-bare` + empty `rail`
   block) with `.wrap-auth`: one narrow (420px) centered column — brand
   mark + university name above the heading, full-width primary button —
   instead of form fields stretched to the measure.
@@ -180,6 +182,27 @@ box-shadow).
 - **Weekly schedule** (`.week`/`.day`): day sections with time-sorted
   lists; stacked mobile-first, grid columns (5, or 7 with `.week-7`) from
   861 px — one structure, CSS-only, nothing duplicated.
+- **Schedule month calendar** (`.month-table`, 2026-07-29): a full month
+  of ONLY real occurrences — `section_meeting` rows expanded onto dates
+  bounded by the term (the enrollment query already excludes dropped
+  sections), campus events, and the add/drop deadline; no invented
+  coursework data (scope decision, CURRENT_STATE). Shares the
+  mini-calendar's visual language exactly: **today = purple brand fill +
+  `aria-current="date"`; occupied day = gold acting tint + inset gold
+  ring**, with an item-count chip so occupancy is never color-alone.
+  Month prev/next and day cells are REAL links (`?month=`, `?day=` —
+  the day detail renders inline, no new surface); `data-cal-nav`
+  enhancement swaps just the `#month-cal` region and `replaceState`s the
+  URL. Expansion bounds pinned by `records::http::month_grid_tests`.
+- **Icon rail** (`.rail` + `shared/nav.rs`, 2026-07-29, ADR-16): the
+  fourth animated surface — expanded by default, collapsible to a 48 px
+  icon rail (24 px stroke icons keyed by nav `key` in `ui::nav_icon`),
+  preference in the `ub_rail` cookie via `POST /ui/rail` (theme
+  mechanism), `--dur-base` motion, reduced-motion → instant. Collapsed,
+  hover/`:focus-within` expands it OVER the content. Nav items are
+  role-aware from ONE source (`crate::shared::nav::items()`), matched to
+  policy by `nav_matches_policy_for_every_role` — a link cannot render
+  without the role that grants its page.
 - **Grade-entry roster** (session 2, instructor-grades reference): context
   header (`.crumb`, `.ctx`) with the section switcher — the dropdown-menu
   primitive extended with `.menu-sub` (group label) and `.cur` (current
@@ -345,7 +368,7 @@ What automation and code inspection could verify, verified:
   map (pinned unit test); blocked rows name their reason in text.
 - Print: `@media print` hides the shell chrome (`components.css`).
 - Structure per page: `assert_page_a11y` in every UI flow test plus
-  axe-core over all 29 rendered pages (`npm test`), both green today.
+  axe-core over all rendered pages (`npm test`), both green today.
 
 What still needs a human with real assistive tech (cannot be run in this
 environment): the NVDA/VoiceOver pass (item 2), rendered-contrast +

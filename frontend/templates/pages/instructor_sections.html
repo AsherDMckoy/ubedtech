@@ -1,6 +1,7 @@
 {% extends "pages/base.html" %}
 {% import "components/ui.html" as ui %}
 {% block title %}Your sections{% endblock %}
+{% block rail %}{% call ui::primary_nav("instructor") %}{% endcall %}{% endblock %}
 {% block content %}
   <div class="wrap">
     <h1>Your sections</h1>

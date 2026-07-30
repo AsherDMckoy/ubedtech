@@ -175,7 +175,7 @@ the record. Three roles, one system."
 - "Self-hosted?" — the same panel renders read-only; license state then
   changes only via a platform-signed license file import, enforced in
   the service.
-- "Accessibility?" — axe over all 29 pages in CI plus structural
+- "Accessibility?" — axe over all 30 pages in CI plus structural
   assertions in every flow test; the manual screen-reader pass is the
   remaining human step (docs/FRONTEND_DESIGN_SYSTEM.md checklist).
 

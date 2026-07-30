@@ -1,6 +1,7 @@
 {% extends "pages/base.html" %}
 {% import "components/ui.html" as ui %}
 {% block title %}Document requests{% endblock %}
+{% block rail %}{% call ui::primary_nav("queue") %}{% endcall %}{% endblock %}
 {% block content %}
   <div class="wrap">
     <h1>Document requests</h1>
