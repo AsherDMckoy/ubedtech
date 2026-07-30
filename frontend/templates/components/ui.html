@@ -116,9 +116,26 @@
     {% call nav_items(current) %}{% endcall %}
     <div class="rail-foot">
       {% call theme_toggle() %}{% endcall %}
-      <a href="/ui/signout">Sign out</a>
+      <a href="/ui/signout" data-dialog-open="signout-dialog">Sign out</a>
     </div>
   </nav>
+  {#- Sign-out confirmation (animated surface #2, slice C). Enhancement
+      only: with JS off the link above goes to the full confirmation page
+      (/ui/signout GET) — that path stays. Cancel is first in the DOM so
+      a stray Enter keeps the session; Escape closes natively. -#}
+  {% if !crate::shared::theme::csrf_token().is_empty() %}
+    <dialog id="signout-dialog" aria-labelledby="signout-dialog-title">
+      <h2 id="signout-dialog-title">Sign out?</h2>
+      <p>Signing out ends your session on this device and returns you to the sign-in page.</p>
+      <form method="post" action="/ui/signout">
+        <input type="hidden" name="csrf_token" value="{{ crate::shared::theme::csrf_token() }}">
+        <div class="dialog-actions">
+          <button type="button" data-dialog-close>Stay signed in</button>
+          <button type="submit" class="btn-primary" data-busy-label="Signing out…">Sign out</button>
+        </div>
+      </form>
+    </dialog>
+  {% endif %}
 {% endmacro %}
 
 {#- Submit button with an honest in-progress label ("Checking…",

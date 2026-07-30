@@ -66,6 +66,9 @@ addEventListener("pageshow", (event) => {
 addEventListener("click", (event) => {
   const opener = event.target.closest("[data-dialog-open]");
   if (opener) {
+    // Links double as JS-off fallbacks (sign out -> the confirmation
+    // page); with the dialog available, stay on this page.
+    event.preventDefault();
     document.getElementById(opener.dataset.dialogOpen)?.showModal();
     return;
   }
