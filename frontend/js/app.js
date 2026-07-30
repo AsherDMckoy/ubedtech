@@ -154,12 +154,72 @@ addEventListener("focusout", (event) => {
   calJump(event.target.closest("[data-event]"), false);
 });
 
+// Shell-persistent navigation (slice E): a nav click fetches the target
+// page FRESH from the server and swaps only the main region (plus the
+// nav's active marks), so the shell isn't re-parsed on every hop. This
+// is perceived speed WITHOUT client-side caching: no page data is ever
+// stored (docs/SECURITY.md — grades/schedules must not persist on a
+// shared machine), and the no-store response headers are untouched.
+// Real URLs and working back/forward via the History API; JS off, every
+// link is a plain href.
+async function swapMain(href, push) {
+  const main = document.getElementById("main");
+  if (!main) {
+    window.location.assign(href);
+    return;
+  }
+  main.setAttribute("aria-busy", "true");
+  try {
+    const response = await fetch(href, { credentials: "same-origin" });
+    const text = await response.text();
+    const doc = new DOMParser().parseFromString(text, "text/html");
+    const freshMain = doc.getElementById("main");
+    // Anything unexpected (signed out -> login page markup, error page,
+    // non-shell page): honest full navigation instead of a wrong swap.
+    if (!response.ok || !freshMain || !doc.querySelector(".rail")) {
+      window.location.assign(href);
+      return;
+    }
+    main.replaceWith(freshMain);
+    for (const selector of [".rail", ".sheet-panel"]) {
+      const current = document.querySelector(selector);
+      const fresh = doc.querySelector(selector);
+      if (current && fresh) current.innerHTML = fresh.innerHTML;
+    }
+    document.title = doc.title;
+    if (push) history.pushState({ swap: true }, "", href);
+    scrollTo(0, 0);
+    freshMain.tabIndex = -1;
+    freshMain.focus({ preventScroll: true });
+    announce(doc.title);
+  } catch {
+    window.location.assign(href);
+  }
+}
+
+addEventListener("click", (event) => {
+  const link = event.target.closest(".rail a.navlink, .sheet-panel a.navlink");
+  if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+    return;
+  }
+  event.preventDefault();
+  history.replaceState({ swap: true }, "", location.href);
+  link.closest("details.nav-sheet")?.removeAttribute("open");
+  swapMain(link.href, true);
+});
+
+addEventListener("popstate", (event) => {
+  if (event.state?.swap) swapMain(location.href, false);
+});
+
 // Honest status polling (documents): rows carrying data-poll re-fetch
 // their server-rendered fragment and swap it in — the status shown is
 // always the real backend row, never a predicted one. Terminal rows render
 // without data-poll, so polling stops by itself. Pure enhancement: with JS
-// off, a reload shows the same truth.
-if (document.querySelector("[data-poll]")) {
+// off, a reload shows the same truth. The interval always runs (a page
+// with no data-poll rows costs an empty query) so rows reached via the
+// shell-persistent nav swap still poll.
+{
   setInterval(async () => {
     for (const row of document.querySelectorAll("[data-poll]")) {
       try {

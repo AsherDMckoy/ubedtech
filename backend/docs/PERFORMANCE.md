@@ -22,6 +22,33 @@ chrome (notices are server-rendered; the shell reserves its regions), and
 no blank-screen state (PRG keeps the previous page until the response
 arrives; the submitting form shows a busy state via `aria-busy`).
 
+## What is deliberately NOT cached (2026-07-29, shell-persistent nav)
+
+A request to "cache grades/history/schedule so navigation feels faster"
+was resolved WITHOUT caching, and the distinction is load-bearing:
+
+- **Never cached, anywhere:** grades, schedule, history, documents — any
+  per-student page. `Cache-Control: private, no-store` on every dynamic
+  response is a deliberate Phase 8 security finding (SECURITY.md item 2:
+  a shared lab machine must never hold a prior student's records), and
+  the measured read path gives no reason to trade against it: the
+  catalog/read pages answer in ~3.4–3.7 ms p50 at low concurrency
+  (realistic-scale + generator-isolated benchmarks above) — there is no
+  measured slowness to fix. Test pinning the header stays present:
+  `sensitive_pages_keep_the_no_store_header`.
+- **What actually felt slow** was re-downloading and re-parsing the full
+  shell on every nav click. Fix: the shell-persistent nav swap (app.js) —
+  a nav click fetches the target page FRESH and swaps only the main
+  region and nav active marks; History API keeps real URLs and
+  back/forward. Nothing is stored client-side; the server does the same
+  work per navigation as before.
+- **Server-side reference-data cache (term list, campus events):**
+  considered and skipped — those queries are already sub-millisecond
+  index scans on tiny tables (plan inspection above), so an in-memory
+  cache would be infrastructure compensating for nothing. Revisit only
+  if a profile ever shows them. If added, it must stay server-side
+  in-memory; the browser-visible Cache-Control does not change.
+
 ## Backend benchmarks (Phase 8, run 2026-07-17 — `load/README.md` to reproduce)
 
 **Shared metadata for all three classes.** Hardware: AMD Ryzen 9 3900X

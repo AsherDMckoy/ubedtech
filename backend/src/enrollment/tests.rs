@@ -1285,6 +1285,9 @@ mod ui {
             });
             actix_test::init_service(
                 actix_web::App::new()
+                    .wrap(crate::app::security_headers(
+                        crate::config::Environment::Development,
+                    ))
                     .app_data(web::Data::new(sessions))
                     .app_data(web::Data::new(auth))
                     .app_data(web::Data::new(gate))
@@ -2388,6 +2391,41 @@ mod ui {
         )
         .await;
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    /// Slice E guard: the shell-persistent nav swap fetches pages fresh
+    /// and stores nothing — and the deliberate SECURITY.md finding stays
+    /// enforced: every sensitive page still answers
+    /// `Cache-Control: private, no-store`, so no browser or shared cache
+    /// may keep a student's grades/schedule/history.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn sensitive_pages_keep_the_no_store_header(pool: PgPool) {
+        let fixture = seed_registration_fixture(&pool, 1).await;
+        let username = credential_student(&pool, &fixture).await;
+        let app = ui_app!(&pool, fixture.registrar.institution_id);
+        let cookie = login(&app, &username, PASSWORD).await;
+
+        for path in ["/ui/grades", "/ui/history", "/ui/schedule", "/ui/dashboard"] {
+            let response = actix_test::call_service(
+                &app,
+                actix_test::TestRequest::get()
+                    .uri(path)
+                    .cookie(cookie.clone())
+                    .to_request(),
+            )
+            .await;
+            assert_eq!(response.status(), StatusCode::OK, "{path}");
+            assert_eq!(
+                response
+                    .headers()
+                    .get("cache-control")
+                    .expect("cache-control present")
+                    .to_str()
+                    .unwrap(),
+                "private, no-store",
+                "{path} must never be cacheable"
+            );
+        }
     }
 
     /// D.2: nav visibility equals authorization. For every role: the

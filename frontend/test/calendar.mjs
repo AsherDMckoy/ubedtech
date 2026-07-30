@@ -56,3 +56,7 @@ assert(!tables[0].hidden && target.hidden, "blur returns to the current month");
 assert(document.querySelectorAll(".cal-hot").length === 0, "highlights clear on blur");
 
 console.log("ok   calendar jump (focus in/out, span highlight, restore)");
+
+// The bundle's always-on polling interval keeps the jsdom event loop
+// alive; every assertion above has already run.
+process.exit(0);
