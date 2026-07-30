@@ -18,12 +18,16 @@
          silently miss everything past this page (ADR-15). #}
       {# Sticky search (fix 4): the search region stays put while results
          scroll under it. #}
+      {# Live search (slice B): the GET form is the floor (server-filtered
+         reload, ADR-15); the enhancement debounces input and swaps in the
+         same server-filtered fragment — never a client-side filter over
+         one loaded page. #}
       <div class="search-sticky">
-        <form role="search" method="get" action="/ui/catalog">
+        <form role="search" method="get" action="/ui/catalog" data-live-search>
           {% call ui::search("q", "q", "Search sections", "Search CMPS, calculus, Alvarez…", q) %}{% endcall %}
         </form>
         <p class="meta">
-          <span>Showing {{ rows.len() }} sections{% if !q.is_empty() %} matching “{{ q }}”{% endif %}</span>
+          <span data-search-count>Showing {{ rows.len() }} sections{% if !q.is_empty() %} matching “{{ q }}”{% endif %}</span>
           <span class="meta-hint">Search covers the full catalog · registering waits for the server</span>
         </p>
       </div>
@@ -32,40 +36,7 @@
          "what am I in?" — supporting context, so it stacks below the list
          on narrow screens. #}
       <div class="cat-layout">
-        <div class="cat-main">
-          <div class="card card-flush table-wrap">
-            <table>
-              <caption>Available sections for {{ term.name }}</caption>
-              <thead>
-                <tr>
-                  <th scope="col">Course</th>
-                  <th scope="col">Seats</th>
-                  <th scope="col"><span class="sr-only">Actions</span></th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for row in rows %}
-                  {% include "components/section_row.html" %}
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-
-          {% if rows.is_empty() %}
-            <p class="c-empty">No open sections match.</p>
-          {% endif %}
-
-          <p class="foot">Registering reserves your seat only when the server confirms it — you'll never see “Enrolled” before it's real.</p>
-
-          <nav aria-label="Catalog pages" class="pager">
-            {% if page > 0 %}
-              <a href="/ui/catalog?q={{ q }}&amp;page={{ page - 1 }}">Previous</a>
-            {% endif %}
-            {% if rows.len() == 20 %}
-              <a href="/ui/catalog?q={{ q }}&amp;page={{ page + 1 }}">Next</a>
-            {% endif %}
-          </nav>
-        </div>
+        {% include "components/catalog_results.html" %}
 
         {% if is_student %}
           <aside class="cat-aside card" aria-label="My registrations">

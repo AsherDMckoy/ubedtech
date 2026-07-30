@@ -386,6 +386,13 @@ main > .wrap {
   animation: enter-down var(--dur-base) var(--ease-enter);
 }
 
+/* Honest in-flight state for the live-search region: dimmed only while
+   the fragment request is actually outstanding (no spinner — the swap
+   lands in one round trip). */
+[data-search-results][aria-busy="true"] {
+  opacity: 0.55;
+}
+
 /* ---------- buttons: default, primary, disabled, in-progress. The
    in-progress state is driven by the submit-once enhancement
    (form[aria-busy], data-busy-label); with JS off the plain submit

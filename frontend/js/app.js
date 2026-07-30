@@ -318,6 +318,48 @@ addEventListener(
   true,
 );
 
+// Catalog live search (read path, FRONTEND.md §4): debounce typing, then
+// fetch the SERVER-filtered results fragment and swap it in — same truth
+// as the GET form floor (ADR-15), sooner. The region dims via aria-busy
+// only while the request is actually in flight.
+let searchTimer = null;
+let searchAbort = null;
+
+addEventListener("input", (event) => {
+  const form = event.target.closest("[data-live-search]");
+  if (!form) return;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(async () => {
+    const region = document.querySelector("[data-search-results]");
+    if (!region) return;
+    const url = `${form.action}?${new URLSearchParams(new FormData(form))}`;
+    region.setAttribute("aria-busy", "true");
+    searchAbort?.abort();
+    searchAbort = new AbortController();
+    try {
+      const response = await fetch(url, {
+        headers: { "X-Fragment": "results" },
+        credentials: "same-origin",
+        signal: searchAbort.signal,
+      });
+      const html = (await response.text()).trim();
+      if (!response.ok || !html.startsWith("<div")) {
+        region.removeAttribute("aria-busy");
+        return;
+      }
+      region.outerHTML = html;
+      const fresh = document.querySelector("[data-search-results]");
+      const count = document.querySelector("[data-search-count]");
+      if (count && fresh?.dataset.count) count.textContent = fresh.dataset.count;
+      // Real URLs (FRONTEND.md §5): reloading or sharing keeps the query.
+      history.replaceState(null, "", url);
+    } catch {
+      // Aborted by newer input, or offline — the GET form still works.
+      document.querySelector("[data-search-results]")?.removeAttribute("aria-busy");
+    }
+  }, 275);
+});
+
 // Rail collapse/expand enhancement (ADR-16): flip the shell class
 // instantly, persist via the same POST the JS-off form would make.
 addEventListener(

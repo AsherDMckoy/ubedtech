@@ -1572,6 +1572,37 @@ mod ui {
         assert!(filtered.contains("No open sections match."));
     }
 
+    /// Live search (slice B): `X-Fragment: results` answers with the
+    /// results region alone — same server-filtered truth as the full GET,
+    /// carrying the count line for the sticky header. The JS-off floor is
+    /// the full page (previous test).
+    #[sqlx::test(migrations = "./migrations")]
+    async fn catalog_live_search_fragment_is_the_results_region_only(pool: PgPool) {
+        let fixture = seed_registration_fixture(&pool, 1).await;
+        let username = credential_student(&pool, &fixture).await;
+        let app = ui_app!(&pool, fixture.registrar.institution_id);
+        let cookie = login(&app, &username, PASSWORD).await;
+
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::get()
+                .uri("/ui/catalog?q=NO-SUCH-COURSE")
+                .cookie(cookie.clone())
+                .insert_header(("X-Fragment", "results"))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        assert!(
+            body.trim_start().starts_with("<div class=\"cat-main\""),
+            "fragment is the region, not a page"
+        );
+        assert!(!body.contains("<html"), "no shell in the fragment");
+        assert!(body.contains("data-count=\"Showing 0 sections"));
+        assert!(body.contains("No open sections match."));
+    }
+
     /// The enhanced write path: a register/drop POST with the `X-Fragment`
     /// header answers with the single re-rendered row in its COMMITTED
     /// state — the server outcome, never an optimistic "Enrolled". A denial

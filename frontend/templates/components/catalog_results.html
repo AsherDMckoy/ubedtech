@@ -1,0 +1,41 @@
+{#-
+  The catalog's swappable results region — included by the full page and
+  rendered alone for the live-search fragment (slice B). Requires `term`
+  (TermSummary), `rows`, `q`, `page`, and `csrf_token` in scope.
+  data-count carries the "Showing…" line so the enhancement can update
+  the sticky header without a second region.
+-#}
+<div class="cat-main" data-search-results data-count="Showing {{ rows.len() }} sections{% if !q.is_empty() %} matching “{{ q }}”{% endif %}">
+  <div class="card card-flush table-wrap">
+    <table>
+      <caption>Available sections for {{ term.name }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">Course</th>
+          <th scope="col">Seats</th>
+          <th scope="col"><span class="sr-only">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          {% include "components/section_row.html" %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if rows.is_empty() %}
+    <p class="c-empty">No open sections match.</p>
+  {% endif %}
+
+  <p class="foot">Registering reserves your seat only when the server confirms it — you'll never see “Enrolled” before it's real.</p>
+
+  <nav aria-label="Catalog pages" class="pager">
+    {% if page > 0 %}
+      <a href="/ui/catalog?q={{ q }}&amp;page={{ page - 1 }}">Previous</a>
+    {% endif %}
+    {% if rows.len() == 20 %}
+      <a href="/ui/catalog?q={{ q }}&amp;page={{ page + 1 }}">Next</a>
+    {% endif %}
+  </nav>
+</div>

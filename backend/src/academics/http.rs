@@ -135,6 +135,18 @@ async fn catalog(
     Ok(HttpResponse::Ok().json(sections))
 }
 
+/// The results region alone, for the live-search fragment swap — same
+/// template the full page includes, so the two can never disagree.
+#[derive(Template)]
+#[template(path = "components/catalog_results.html")]
+struct CatalogResults {
+    csrf_token: String,
+    term: TermSummary,
+    q: String,
+    page: u32,
+    rows: Vec<RegistrationRow>,
+}
+
 #[derive(Template)]
 #[template(path = "pages/catalog.html")]
 struct CatalogPage {
@@ -232,6 +244,7 @@ struct CatalogPageQuery {
 /// idempotency key.
 #[get("/ui/catalog")]
 async fn catalog_page(
+    request: actix_web::HttpRequest,
     actor: Actor,
     current: CurrentSession,
     service: web::Data<AcademicsService>,
@@ -240,7 +253,7 @@ async fn catalog_page(
 ) -> Result<HttpResponse, AppError> {
     let q = query.q.as_deref().unwrap_or("");
     let term = service.current_term(&actor).await?;
-    let rows = match &term {
+    let rows: Vec<RegistrationRow> = match &term {
         Some(term) => service
             .search_catalog(&actor, term.id, Some(q), query.page)
             .await?
@@ -249,6 +262,26 @@ async fn catalog_page(
             .collect(),
         None => Vec::new(),
     };
+
+    // Live-search enhancement (slice B): the same server-filtered truth,
+    // as just the results region — the banner/aside queries are skipped
+    // because that markup is not in the fragment.
+    if request.headers().get("X-Fragment").map(|v| v.as_bytes()) == Some(b"results") {
+        if let Some(term) = term {
+            let body = CatalogResults {
+                csrf_token: current.csrf_token.clone(),
+                term,
+                q: q.to_owned(),
+                page: query.page,
+                rows,
+            }
+            .render()?;
+            return Ok(HttpResponse::Ok()
+                .content_type("text/html; charset=utf-8")
+                .body(body));
+        }
+        return Err(AppError::Validation("no active term".into()));
+    }
 
     // Conditions that block EVERY registration are named up front, loudly,
     // instead of being discovered one rejected click at a time. Rows stay
