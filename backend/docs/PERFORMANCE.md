@@ -212,6 +212,36 @@ queue briefly at the pool instead of context-switching inside PostgreSQL.
 At realistic load (~200 req/s) neither setting is ever felt. Default
 stays 64; the knob already exists for a latency-sensitive deployment.
 
+## Remote-database topology measurement (2026-07-29, DO managed PG)
+
+Question tested: does moving PostgreSQL to its own machine (DigitalOcean
+managed PG 18.4, dedicated CPU, 8 GB, TLS required) raise class B by
+freeing the workstation of database CPU? Setup: same `ubedtech_bench`
+dataset (pg_dump | psql restore, 17.7 s, row counts verified, `VACUUM
+ANALYZE`), server + wrk local, **53 ms measured RTT** to the database.
+
+| Run | Throughput | p50 / p90 / p99 |
+|---|---|---|
+| t8/c64 | **194 req/s** | 324 / 336 / 394 ms |
+| t4/c16 | 74 req/s | 214 / 219 / 264 ms |
+
+**Answer: no — −96 % versus the same-host 5,038 req/s**, with both
+machines nearly idle. The ceiling is the wire, not a resource: one warm
+catalog request makes ~4–6 sequential database round trips (session
+idle-slide transaction BEGIN → guarded touch → ROLLBACK, session
+resolve, catalog query — confirmed by sqlx query logging), so request
+latency is ~4–6 × RTT ≈ 215–325 ms and closed-loop throughput is
+`concurrency ÷ that`. The 194 req/s measured matched the pre-run
+prediction (~197) within 2 %.
+
+Standing conclusion: **the application and PostgreSQL belong on the same
+host (or same-datacenter private network, sub-millisecond RTT) in any
+deployment.** Per-request round-trip count only matters multiplied by
+RTT; on loopback the same 6 round trips cost ~0.3 ms and are not worth
+collapsing. If a network hop between app and DB ever becomes mandatory,
+the first lever is cutting round trips (fold the touch into the resolve
+query), not tuning either machine.
+
 ## Query plans (Phase 8 inspection, hot enrollment + document paths)
 
 `EXPLAIN ANALYZE` on the load dataset (caveat: 200 sections / ~3.9k

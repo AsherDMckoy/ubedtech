@@ -2,6 +2,13 @@
 
 Status: Phase 2. Single binary, single PostgreSQL database.
 
+**Deployment topology: the binary and PostgreSQL run on the same host**
+(or, at minimum, a same-datacenter private network with sub-millisecond
+RTT). Measured, not assumed: a request makes ~4–6 sequential database
+round trips, so at 53 ms app↔DB RTT the catalog p50 went from 3.7 ms to
+324 ms and throughput fell 96 % with both machines idle
+(PERFORMANCE.md, remote-database topology measurement, 2026-07-29).
+
 ## Configuration
 
 All configuration is environment variables, parsed and validated at startup
