@@ -458,6 +458,132 @@ struct SchedulePage {
     empty: bool,
     weekend: bool,
     events: Vec<crate::institution::service::InstitutionEvent>,
+    grid: Option<MonthGrid>,
+    selected: Option<SelectedDay>,
+}
+
+/// One entry on a month-calendar day — only real, queryable things: a
+/// class meeting occurrence, a campus event, or a modeled deadline.
+/// There is no coursework/assignment data in this system (CURRENT_STATE
+/// scope decision), so nothing of the kind is invented here.
+#[derive(Clone)]
+pub struct DayItem {
+    pub time: Option<String>,
+    pub label: String,
+    /// "class" | "event" | "deadline" — carried as a word next to the
+    /// tint, never color alone.
+    pub kind: &'static str,
+}
+
+#[derive(Clone)]
+pub struct MonthDay {
+    pub day: u32,
+    pub iso: String,
+    pub today: bool,
+    pub selected: bool,
+    pub items: Vec<DayItem>,
+}
+
+/// One month as Monday-first week rows (None pads the edges) plus real
+/// prev/next links ("YYYY-MM").
+pub struct MonthGrid {
+    pub label: String,
+    /// "YYYY-MM" — this month, for the day links' month parameter.
+    pub month: String,
+    pub prev: String,
+    pub next: String,
+    pub weeks: Vec<Vec<Option<MonthDay>>>,
+}
+
+/// The server-rendered day detail for a clicked/tapped day cell — an
+/// inline list, not a new surface (JS-off: the cell is a real link).
+pub struct SelectedDay {
+    pub label: String,
+    pub items: Vec<DayItem>,
+}
+
+/// Everything scheduled on one real date: weekly meetings expanded onto
+/// the calendar (bounded by the term — the enrollment query already
+/// excludes dropped sections), events spanning the date, and the
+/// add/drop deadline.
+fn day_items(
+    date: chrono::NaiveDate,
+    term: &TermSummary,
+    meetings: &[crate::records::schedule::ScheduleMeeting],
+    events: &[crate::institution::service::InstitutionEvent],
+) -> Vec<DayItem> {
+    use chrono::Datelike;
+    let mut items = Vec::new();
+    if term.starts_on <= date && date <= term.ends_on {
+        for meeting in meetings {
+            if meeting.day_of_week == date.weekday().number_from_monday() as i16 {
+                items.push(DayItem {
+                    time: Some(meeting.starts_at.format("%H:%M").to_string()),
+                    label: format!("{} · {}", meeting.course_code, meeting.course_title),
+                    kind: "class",
+                });
+            }
+        }
+    }
+    for event in events {
+        if event.starts_on <= date && date <= event.ends_on {
+            items.push(DayItem {
+                time: None,
+                label: event.title.clone(),
+                kind: "event",
+            });
+        }
+    }
+    // ponytail: deadline day is the UTC date, same known lag as the
+    // dashboard mini-calendar's "today" marker.
+    if term.add_drop_closes_at.date_naive() == date {
+        items.push(DayItem {
+            time: None,
+            label: "Add/drop closes".to_owned(),
+            kind: "deadline",
+        });
+    }
+    items
+}
+
+fn month_grid(
+    first: chrono::NaiveDate,
+    today: chrono::NaiveDate,
+    selected: Option<chrono::NaiveDate>,
+    term: &TermSummary,
+    meetings: &[crate::records::schedule::ScheduleMeeting],
+    events: &[crate::institution::service::InstitutionEvent],
+) -> MonthGrid {
+    use chrono::Datelike;
+    let next = first
+        .checked_add_months(chrono::Months::new(1))
+        .expect("next month exists");
+    let prev = first
+        .checked_sub_months(chrono::Months::new(1))
+        .expect("previous month exists");
+    let count = (next - first).num_days() as u32;
+    let lead = first.weekday().num_days_from_monday() as usize;
+    let mut cells: Vec<Option<MonthDay>> = (0..lead).map(|_| None).collect();
+    for n in 1..=count {
+        let date = first.with_day(n).expect("n is within the month");
+        cells.push(Some(MonthDay {
+            day: n,
+            iso: date.format("%Y-%m-%d").to_string(),
+            today: date == today,
+            selected: selected == Some(date),
+            items: day_items(date, term, meetings, events),
+        }));
+    }
+    while !cells.len().is_multiple_of(7) {
+        cells.push(None);
+    }
+    MonthGrid {
+        label: first.format("%B %Y").to_string(),
+        month: first.format("%Y-%m").to_string(),
+        prev: prev.format("%Y-%m").to_string(),
+        next: next.format("%Y-%m").to_string(),
+        weeks: cells.chunks(7).map(<[_]>::to_vec).collect(),
+    }
 }
 
 /// One weekday's meetings, already time-sorted by the schedule query.
@@ -498,20 +624,69 @@ fn day_columns(meetings: Vec<crate::records::schedule::ScheduleMeeting>) -> (Vec
     (days, weekend)
 }
 
-/// The student's weekly schedule: a stacked day list on small screens, the
-/// same markup as grid columns on desktop (CSS only).
+#[derive(serde::Deserialize)]
+pub struct ScheduleView {
+    /// "YYYY-MM" — which month the calendar shows; default: this month.
+    month: Option<String>,
+    /// "YYYY-MM-DD" — a day whose detail list renders inline.
+    day: Option<String>,
+}
+
+/// The student's weekly schedule (grid at the top) plus the month
+/// calendar of real occurrences and the campus-events aside.
 #[get("/ui/schedule")]
 pub async fn schedule_page(
     actor: Actor,
     query_service: web::Data<ScheduleQuery>,
     academics: web::Data<AcademicsService>,
     institution: web::Data<crate::institution::InstitutionService>,
+    view: web::Query<ScheduleView>,
 ) -> Result<HttpResponse, AppError> {
+    use chrono::Datelike;
     let term = academics.current_term(&actor).await?;
     let meetings = match &term {
         Some(term) => query_service.for_student(&actor, term.id).await?,
         None => Vec::new(),
     };
+
+    let mut grid = None;
+    let mut selected = None;
+    if let Some(term) = &term {
+        let today = chrono::Utc::now().date_naive();
+        let first = view
+            .month
+            .as_deref()
+            .and_then(|month| {
+                chrono::NaiveDate::parse_from_str(&format!("{month}-01"), "%Y-%m-%d").ok()
+            })
+            .unwrap_or_else(|| today.with_day(1).expect("day 1 exists"));
+        let last = first
+            .checked_add_months(chrono::Months::new(1))
+            .expect("next month exists")
+            .pred_opt()
+            .expect("month has a last day");
+        let month_events = institution.events_between(&actor, first, last).await?;
+        let day = view
+            .day
+            .as_deref()
+            .and_then(|day| chrono::NaiveDate::parse_from_str(day, "%Y-%m-%d").ok())
+            .filter(|day| (first..=last).contains(day));
+        if let Some(day) = day {
+            selected = Some(SelectedDay {
+                label: day.format("%A, %B %-d").to_string(),
+                items: day_items(day, term, &meetings, &month_events),
+            });
+        }
+        grid = Some(month_grid(
+            first,
+            today,
+            day,
+            term,
+            &meetings,
+            &month_events,
+        ));
+    }
+
     let empty = meetings.is_empty();
     let (days, weekend) = day_columns(meetings);
     let page = SchedulePage {
@@ -520,6 +695,8 @@ pub async fn schedule_page(
         empty,
         weekend,
         events: institution.upcoming_events(&actor).await?,
+        grid,
+        selected,
     };
     Ok(html(StatusCode::OK, page.render()?))
 }
@@ -546,28 +723,47 @@ pub fn sample_schedule_html() -> Result<String, askama::Error> {
         meeting(3, "CMPS 2131", "Data structures", (9, 0), (10, 15)),
         meeting(2, "MATH 3201", "Linear algebra", (13, 0), (14, 15)),
     ];
+    let term = TermSummary {
+        id: Uuid::nil(),
+        code: "FA26".into(),
+        name: "Fall 2026".into(),
+        starts_on: now.date_naive(),
+        ends_on: (now + Duration::days(100)).date_naive(),
+        registration_opens_at: now - Duration::days(20),
+        add_drop_closes_at: now + Duration::days(14),
+        grade_entry_closes_at: None,
+    };
+    let events = vec![crate::institution::service::InstitutionEvent {
+        id: Uuid::nil(),
+        title: "Independence Day".into(),
+        event_type: "holiday".into(),
+        starts_on: (now + Duration::days(30)).date_naive(),
+        ends_on: (now + Duration::days(30)).date_naive(),
+    }];
+    use chrono::Datelike;
+    let today = now.date_naive();
+    let first = today.with_day(1).expect("day 1 exists");
+    let grid = Some(month_grid(
+        first,
+        today,
+        Some(today),
+        &term,
+        &meetings,
+        &events,
+    ));
+    let selected = Some(SelectedDay {
+        label: today.format("%A, %B %-d").to_string(),
+        items: day_items(today, &term, &meetings, &events),
+    });
     let (days, weekend) = day_columns(meetings);
     SchedulePage {
-        term: Some(TermSummary {
-            id: Uuid::nil(),
-            code: "FA26".into(),
-            name: "Fall 2026".into(),
-            starts_on: now.date_naive(),
-            ends_on: (now + Duration::days(100)).date_naive(),
-            registration_opens_at: now - Duration::days(20),
-            add_drop_closes_at: now + Duration::days(14),
-            grade_entry_closes_at: None,
-        }),
+        term: Some(term),
         days,
         empty: false,
         weekend,
-        events: vec![crate::institution::service::InstitutionEvent {
-            id: Uuid::nil(),
-            title: "Independence Day".into(),
-            event_type: "holiday".into(),
-            starts_on: (now + Duration::days(30)).date_naive(),
-            ends_on: (now + Duration::days(30)).date_naive(),
-        }],
+        events,
+        grid,
+        selected,
     }
     .render()
 }
@@ -875,4 +1071,114 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .service(history_page)
         .service(transcript_page)
         .service(proof_of_enrollment_page);
+}
+
+#[cfg(test)]
+mod month_grid_tests {
+    use super::*;
+    use chrono::NaiveDate;
+
+    fn term(starts: NaiveDate, ends: NaiveDate, closes: NaiveDate) -> TermSummary {
+        TermSummary {
+            id: Uuid::nil(),
+            code: "T".into(),
+            name: "Term".into(),
+            starts_on: starts,
+            ends_on: ends,
+            registration_opens_at: chrono::Utc::now(),
+            add_drop_closes_at: closes.and_hms_opt(12, 0, 0).unwrap().and_utc(),
+            grade_entry_closes_at: None,
+        }
+    }
+
+    fn monday_meeting() -> crate::records::schedule::ScheduleMeeting {
+        crate::records::schedule::ScheduleMeeting {
+            course_code: "CMPS-2131".into(),
+            course_title: "Data structures".into(),
+            section_code: "01".into(),
+            day_of_week: 1,
+            starts_at: chrono::NaiveTime::from_hms_opt(9, 0, 0).unwrap(),
+            ends_at: chrono::NaiveTime::from_hms_opt(10, 0, 0).unwrap(),
+            campus_code: None,
+            room_code: None,
+        }
+    }
+
+    fn date(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    /// The honest-data core: a weekly meeting lands ONLY on matching
+    /// weekdays inside the term window — nothing before the term starts,
+    /// nothing after it ends, nothing invented.
+    #[test]
+    fn meeting_occurrences_stay_inside_the_term_and_weekday() {
+        // September 2026: Mondays are the 7th, 14th, 21st, 28th.
+        // Term runs Sep 10 – Sep 22 → only the 14th and 21st qualify.
+        let term = term(date(2026, 9, 10), date(2026, 9, 22), date(2026, 9, 15));
+        let meetings = [monday_meeting()];
+        let grid = month_grid(
+            date(2026, 9, 1),
+            date(2026, 9, 14),
+            None,
+            &term,
+            &meetings,
+            &[],
+        );
+        let class_days: Vec<u32> = grid
+            .weeks
+            .iter()
+            .flatten()
+            .flatten()
+            .filter(|day| day.items.iter().any(|item| item.kind == "class"))
+            .map(|day| day.day)
+            .collect();
+        assert_eq!(class_days, vec![14, 21], "only in-term Mondays");
+        let today_marked: Vec<u32> = grid
+            .weeks
+            .iter()
+            .flatten()
+            .flatten()
+            .filter(|day| day.today)
+            .map(|day| day.day)
+            .collect();
+        assert_eq!(today_marked, vec![14]);
+    }
+
+    /// Events span their full date range and the add/drop deadline lands
+    /// on its (UTC) date, each carrying its kind word.
+    #[test]
+    fn events_and_the_deadline_mark_their_days() {
+        let term = term(date(2026, 9, 1), date(2026, 12, 15), date(2026, 9, 18));
+        let events = [crate::institution::service::InstitutionEvent {
+            id: Uuid::nil(),
+            title: "Orientation".into(),
+            event_type: "academic".into(),
+            starts_on: date(2026, 9, 2),
+            ends_on: date(2026, 9, 3),
+        }];
+        let grid = month_grid(
+            date(2026, 9, 1),
+            date(2026, 9, 1),
+            None,
+            &term,
+            &[],
+            &events,
+        );
+        let kinds = |day_number: u32| -> Vec<&'static str> {
+            grid.weeks
+                .iter()
+                .flatten()
+                .flatten()
+                .find(|day| day.day == day_number)
+                .map(|day| day.items.iter().map(|item| item.kind).collect())
+                .unwrap_or_default()
+        };
+        assert_eq!(kinds(2), vec!["event"]);
+        assert_eq!(kinds(3), vec!["event"]);
+        assert_eq!(kinds(4), Vec::<&str>::new());
+        assert_eq!(kinds(18), vec!["deadline"]);
+        assert_eq!(grid.prev, "2026-08");
+        assert_eq!(grid.next, "2026-10");
+    }
 }

@@ -212,6 +212,36 @@ addEventListener("popstate", (event) => {
   if (event.state?.swap) swapMain(location.href, false);
 });
 
+// Schedule month navigation (slice F): month prev/next and day cells are
+// real links; the enhancement swaps just the calendar region and keeps
+// the URL real via replaceState (a month flip is a view change within
+// the page, not a new history entry).
+addEventListener("click", async (event) => {
+  const link = event.target.closest("a[data-cal-nav]");
+  if (!link || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+    return;
+  }
+  const region = document.getElementById("month-cal");
+  if (!region) return;
+  event.preventDefault();
+  region.setAttribute("aria-busy", "true");
+  try {
+    const response = await fetch(link.href, { credentials: "same-origin" });
+    const text = await response.text();
+    const doc = new DOMParser().parseFromString(text, "text/html");
+    const fresh = doc.getElementById("month-cal");
+    if (!response.ok || !fresh) {
+      window.location.assign(link.href);
+      return;
+    }
+    region.replaceWith(fresh);
+    history.replaceState(history.state, "", link.href);
+    fresh.querySelector("#day-detail")?.focus();
+  } catch {
+    window.location.assign(link.href);
+  }
+});
+
 // Honest status polling (documents): rows carrying data-poll re-fetch
 // their server-rendered fragment and swap it in — the status shown is
 // always the real backend row, never a predicted one. Terminal rows render

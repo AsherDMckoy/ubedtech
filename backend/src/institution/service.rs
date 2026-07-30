@@ -181,6 +181,31 @@ impl InstitutionService {
         .fetch_all(&self.pool)
         .await?)
     }
+
+    /// Events overlapping a date range — the schedule month calendar
+    /// (past months included, unlike the upcoming strip).
+    pub async fn events_between(
+        &self,
+        actor: &Actor,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<InstitutionEvent>, AppError> {
+        Ok(sqlx::query_as::<_, InstitutionEvent>(
+            r#"
+            SELECT id, title, event_type, starts_on, ends_on
+            FROM institution_event
+            WHERE institution_id = $1
+              AND starts_on <= $3
+              AND ends_on >= $2
+            ORDER BY starts_on, title
+            "#,
+        )
+        .bind(actor.institution_id)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&self.pool)
+        .await?)
+    }
 }
 
 #[derive(Debug, Serialize, sqlx::FromRow)]

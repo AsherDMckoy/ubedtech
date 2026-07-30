@@ -386,10 +386,127 @@ main > .wrap {
   animation: enter-down var(--dur-base) var(--ease-enter);
 }
 
+/* ---------- schedule month calendar (slice F): same visual language as
+   the dashboard mini-calendar — today = brand fill, occupied day = the
+   acting-color tint; the count number keeps it from being color-alone. */
+.sched-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: var(--space-4);
+  align-items: start;
+  margin-top: var(--space-4);
+}
+
+.sched-main {
+  display: grid;
+  gap: var(--space-4);
+}
+
+@media (max-width: 960px) {
+  .sched-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.month-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.month-head h2 {
+  margin: 0;
+}
+
+.month-table {
+  width: 100%;
+  table-layout: fixed;
+  text-align: center;
+}
+
+.month-table th {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+  padding: var(--space-1);
+}
+
+.month-table td {
+  padding: 2px;
+}
+
+.month-table tbody tr:hover {
+  background: transparent;
+}
+
+.month-day {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 38px;
+  height: 38px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.month-day.has-items {
+  background: var(--action-wash);
+  box-shadow: inset 0 0 0 1.5px var(--action);
+  color: var(--text-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.month-day.is-today {
+  background: var(--brand);
+  color: #fff;
+  font-weight: 600;
+}
+
+.month-day.is-selected {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.month-count {
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: var(--radius-pill);
+  background: var(--action);
+  color: #2b1a05;
+}
+
+.month-day.is-today .month-count {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+/* Day-detail kind tags: the word IS the signal; the tint assists. */
+.kind {
+  font-size: 11px;
+  text-transform: capitalize;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3, var(--surface-2));
+  color: var(--text-secondary);
+}
+
+.kind-deadline {
+  background: var(--action-wash);
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--action);
+}
+
 /* Honest in-flight state for the live-search region: dimmed only while
    the fragment request is actually outstanding (no spinner — the swap
    lands in one round trip). */
-[data-search-results][aria-busy="true"] {
+[data-search-results][aria-busy="true"],
+#month-cal[aria-busy="true"] {
   opacity: 0.55;
 }
 
