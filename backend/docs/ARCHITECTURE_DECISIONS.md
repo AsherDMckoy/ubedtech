@@ -290,3 +290,35 @@ repository, and CLAUDE.md §6 requires docs to be committed with code.
 - **Proof:** the existing `/ui/catalog?q=…` UI tests exercise the
   server-filtered path (`enrollment::tests` catalog cases); with the
   attribute gone, the form submits identically with and without JS.
+
+## ADR-16: collapsible icon rail — the fourth animated surface
+
+- **Original (FRONTEND.md §2):** exactly three animated surfaces (menu,
+  dialog, mobile nav sheet). Desktop nav was a static 200 px text rail.
+- **Replacement:** the desktop rail is expanded by default (icons +
+  labels, 240 px) and collapsible to a 48 px icon rail via a toggle
+  button; a collapsed rail also expands over the content on
+  `:hover`/`:focus-within` as a preview (the grid column stays 48 px,
+  so `main` never reflows). The width/label-fade transition uses
+  `--dur-base` and the house enter easing — no new motion values.
+- **Why it earns the exception:** this is persistent app-shell
+  structural chrome used on every signed-in page — the same category as
+  the sanctioned mobile nav sheet, for desktop — not a per-screen
+  decoration. Collapsed it returns ~190 px of width to scanning tables.
+- **Persistence:** `ub_rail` cookie via `POST /ui/rail`, the exact
+  theme-toggle mechanism (ADR-14): server stamps `.rail-collapsed` on
+  the shell at render time, no inline script, no flash; JS-off works by
+  defaulting to expanded server-side and PRG-reloading on toggle.
+- **Consequences:** collapsed labels stay in the DOM and accessibility
+  tree at `opacity: 0`; the rail footer (theme, sign out) additionally
+  gets `pointer-events: none` collapsed so nothing invisible is
+  clickable — tabbing into the rail expands it first. The requested
+  Alpine hover controller was skipped: the CSP Alpine build cannot
+  evaluate inline `x-data`/`@mouseenter` expressions, and CSS covers
+  pointer + keyboard with zero state. `prefers-reduced-motion` (global
+  kill, base.css) reduces open/close to the instant state change, like
+  every other surface.
+- **Proof:** `rail_preference_cookie_round_trips` (POST sets the
+  cookie, the next render stamps the class, garbage values 400); the
+  axe suite covers every page with the new rail markup; `render-pages`
+  compiles the icon macro on every shell.

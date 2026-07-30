@@ -3,18 +3,26 @@
    these exists. Markup patterns and macros: frontend/templates/components/
    and docs/FRONTEND_DESIGN_SYSTEM.md.
 
-   Exactly three animated surfaces exist (FRONTEND.md §2):
+   Exactly four animated surfaces exist (FRONTEND.md §2 + ADR-16):
    #1 dropdown menu (details.menu), #2 dialog (native <dialog>),
-   #3 mobile navigation sheet (details.nav-sheet). No fourth without an
-   ADR. Enter animations only — closing is the instant state change. */
+   #3 mobile navigation sheet (details.nav-sheet), #4 the collapsed nav
+   rail expanding on hover/focus (ADR-16 — the one surface animated in
+   both directions). No fifth without an ADR. */
 
 /* ---------- app shell: persistent rail (desktop) / top bar + nav sheet
    (mobile). The shell is CSS-only; navigation works with JS off. */
 
 .shell {
   display: grid;
-  grid-template-columns: 200px 1fr;
+  grid-template-columns: var(--rail-w-open) 1fr;
   min-height: 100vh;
+  transition: grid-template-columns var(--dur-base) var(--ease-enter);
+}
+
+/* Stamped by the server from the ub_rail cookie (ADR-16) — JS-off users
+   simply always get the expanded default. */
+.shell.rail-collapsed {
+  grid-template-columns: var(--rail-w) 1fr;
 }
 
 .shell-bare {
@@ -120,13 +128,106 @@
   }
 }
 
+/* Animated surface #4 (ADR-16): the rail is expanded by default and
+   collapsible to a 48px icon rail (preference in the ub_rail cookie).
+   Collapsed, hovering or tabbing into it EXPANDS IT OVER the content
+   (the grid column stays 48px, so main never reflows mid-hover);
+   labels stay in the DOM and the accessibility tree at opacity 0. All
+   motion is --dur-base and dies under prefers-reduced-motion. */
 .rail {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  height: 100vh;
+  width: var(--rail-w-open);
+  overflow: hidden;
   background: var(--surface-1);
   border-right: 0.5px solid var(--border);
-  padding: var(--space-4) var(--space-3);
+  padding: var(--space-4) 6px;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  transition: width var(--dur-base) var(--ease-enter);
+}
+
+.rail-collapsed .rail {
+  width: var(--rail-w);
+}
+
+.rail-collapsed .rail:hover,
+.rail-collapsed .rail:focus-within {
+  width: var(--rail-w-open);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Labels, brand name, and footer fade with the width. pointer-events on
+   the footer: invisible sign-out/theme controls must not be clickable
+   in the collapsed state (they stay in the accessibility tree, and
+   tabbing to them expands the rail first via :focus-within). */
+.rail .navlink-label,
+.rail .brand-name,
+.rail .rail-foot {
+  transition: opacity var(--dur-base) var(--ease-enter);
+}
+
+.rail-collapsed .rail .navlink-label,
+.rail-collapsed .rail .brand-name,
+.rail-collapsed .rail .rail-foot {
+  opacity: 0;
+}
+
+.rail-collapsed .rail .rail-foot {
+  pointer-events: none;
+}
+
+.rail-collapsed .rail:hover .navlink-label,
+.rail-collapsed .rail:focus-within .navlink-label,
+.rail-collapsed .rail:hover .brand-name,
+.rail-collapsed .rail:focus-within .brand-name,
+.rail-collapsed .rail:hover .rail-foot,
+.rail-collapsed .rail:focus-within .rail-foot {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* The collapse/expand toggle: a real form POSTing the preference (the
+   theme-toggle mechanism); the script flips the class instantly and
+   persists in the background. */
+.rail-toggle {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.rail-toggle button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  border-radius: var(--radius);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.rail-toggle button:hover {
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+
+.rail-collapsed .rail .rail-toggle {
+  justify-content: center;
+}
+
+.rail .navlink,
+.rail .brand {
+  white-space: nowrap;
+}
+
+.navlink-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
 }
 
 .brand {
@@ -139,6 +240,12 @@
   letter-spacing: -0.01em;
   color: var(--text-accent);
   padding: var(--space-1) var(--space-2) var(--space-3);
+}
+
+/* Center the 26px mark in the 48px collapsed rail: 6px rail padding +
+   5px here = 11px = (48 − 26) / 2. */
+.rail .brand {
+  padding: var(--space-1) 5px var(--space-3);
 }
 
 .brand-mark {
@@ -165,6 +272,12 @@
   transition: background var(--dur-fast) var(--ease-enter);
 }
 
+/* In the rail: 6px rail padding + 6px here puts the 24px icon at 12px
+   from the edge — dead center of the 48px collapsed width. */
+.rail .navlink {
+  padding-inline: 6px;
+}
+
 .navlink:hover {
   background: var(--surface-2);
   color: var(--text-primary);
@@ -178,6 +291,10 @@
   border-left: 2px solid var(--action);
   padding-left: calc(var(--space-2) - 2px);
   cursor: default;
+}
+
+.rail .navlink[aria-current="page"] {
+  padding-left: 4px;
 }
 
 .rail-foot {

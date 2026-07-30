@@ -23,14 +23,65 @@
   {% endif %}
 {% endmacro %}
 
+{#- Rail collapse/expand toggle (ADR-16): a real form — the JS-off path
+    POSTs the preference cookie and PRG-reloads; the enhancement flips
+    the shell class instantly and persists via the same POST. -#}
+{% macro rail_toggle() %}
+  {% if !crate::shared::theme::csrf_token().is_empty() %}
+    <form class="rail-toggle" method="post" action="/ui/rail" data-rail-form>
+      <input type="hidden" name="csrf_token" value="{{ crate::shared::theme::csrf_token() }}">
+      {% if crate::shared::theme::rail_current() == "collapsed" %}
+        <button type="submit" name="rail" value="expanded" aria-label="Expand navigation" title="Expand navigation" aria-expanded="false">»</button>
+      {% else %}
+        <button type="submit" name="rail" value="collapsed" aria-label="Collapse navigation" title="Collapse navigation" aria-expanded="true">«</button>
+      {% endif %}
+    </form>
+  {% endif %}
+{% endmacro %}
+
+{#- Nav icon, keyed by the nav item's `key` so call sites never name an
+    icon. One consistent 24×24 stroke set; aria-hidden — the accessible
+    name is always the text label beside it. -#}
+{% macro nav_icon(key) %}
+  <svg class="navlink-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  {%- if key == "dashboard" || key == "overview" -%}
+    <rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>
+  {%- else if key == "catalog" || key == "courses" -%}
+    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+  {%- else if key == "registration" -%}
+    <circle cx="12" cy="12" r="9"/><path d="M12 8.5v7M8.5 12h7"/>
+  {%- else if key == "schedule" || key == "terms" || key == "calendar" -%}
+    <rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>
+  {%- else if key == "grades" -%}
+    <path d="M5 20v-6M12 20V5M19 20v-9"/>
+  {%- else if key == "history" -%}
+    <circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2.5"/>
+  {%- else if key == "documents" || key == "license" -%}
+    <path d="M13.5 3H7a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 7 21h10a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M13.5 3v5h5"/>
+  {%- else if key == "sections" -%}
+    <path d="M12 3.5 21 8.5l-9 5-9-5z"/><path d="m4 13.5 8 4.5 8-4.5"/>
+  {%- else if key == "students" || key == "accounts" -%}
+    <circle cx="12" cy="8" r="4"/><path d="M5 20.5c.7-3.5 3.5-5.5 7-5.5s6.3 2 7 5.5"/>
+  {%- else if key == "overrides" -%}
+    <circle cx="8" cy="16" r="4.5"/><path d="m11.2 12.8 8.3-8.3M16.5 7.5 19 10M14 10l1.8 1.8"/>
+  {%- else if key == "settings" -%}
+    <path d="M4 6.5h16M4 12h16M4 17.5h16"/><circle cx="9" cy="6.5" r="2.2"/><circle cx="15.5" cy="12" r="2.2"/><circle cx="7" cy="17.5" r="2.2"/>
+  {%- else -%}
+    <circle cx="12" cy="12" r="9"/>
+  {%- endif -%}
+  </svg>
+{% endmacro %}
+
 {#- One nav item. The ACTIVE item is a <span aria-current="page">, not a
     link: clicking where you already are must be a no-op, not a reload
-    (dashboard-upgraded reference, fix 1). -#}
+    (dashboard-upgraded reference, fix 1). The label rides in a span so
+    the collapsed rail can fade it (ADR-16) — it stays in the
+    accessibility tree either way. -#}
 {% macro nav_item(href, label, key, current) %}
   {%- if key == current -%}
-    <span class="navlink" aria-current="page">{{ label }}</span>
+    <span class="navlink" aria-current="page">{% call nav_icon(key) %}{% endcall %}<span class="navlink-label">{{ label }}</span></span>
   {%- else -%}
-    <a class="navlink" href="{{ href }}">{{ label }}</a>
+    <a class="navlink" href="{{ href }}">{% call nav_icon(key) %}{% endcall %}<span class="navlink-label">{{ label }}</span></a>
   {%- endif -%}
 {% endmacro %}
 
@@ -51,7 +102,7 @@
     rail block with this (same pattern as registrar_nav). -#}
 {% macro student_nav(current) %}
   <header class="topbar">
-    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span>University of Belize</span>
+    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">University of Belize</span></span>
     <details class="nav-sheet">
       <summary>Menu</summary>
       <nav class="sheet-panel" aria-label="Primary">
@@ -61,7 +112,8 @@
     </details>
   </header>
   <nav class="rail" aria-label="Primary">
-    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span>University of Belize</span>
+    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">University of Belize</span></span>
+    {% call rail_toggle() %}{% endcall %}
     {% call nav_links(current) %}{% endcall %}
     <div class="rail-foot">
       {% call theme_toggle() %}{% endcall %}
@@ -92,7 +144,7 @@
 
 {% macro admin_nav(current) %}
   <header class="topbar">
-    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span>Administration</span>
+    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">Administration</span></span>
     <details class="nav-sheet">
       <summary>Menu</summary>
       <nav class="sheet-panel" aria-label="Administration">
@@ -101,7 +153,8 @@
     </details>
   </header>
   <nav class="rail" aria-label="Administration">
-    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span>Administration</span>
+    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">Administration</span></span>
+    {% call rail_toggle() %}{% endcall %}
     {% call admin_nav_links(current) %}{% endcall %}
     <div class="rail-foot">
       {% call theme_toggle() %}{% endcall %}
@@ -117,7 +170,7 @@
 
 {% macro platform_nav(current) %}
   <header class="topbar">
-    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span>Platform</span>
+    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">Platform</span></span>
     <details class="nav-sheet">
       <summary>Menu</summary>
       <nav class="sheet-panel" aria-label="Platform">
@@ -126,7 +179,8 @@
     </details>
   </header>
   <nav class="rail" aria-label="Platform">
-    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span>Platform</span>
+    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">Platform</span></span>
+    {% call rail_toggle() %}{% endcall %}
     {% call platform_nav_links(current) %}{% endcall %}
     <div class="rail-foot">
       {% call theme_toggle() %}{% endcall %}
@@ -137,7 +191,7 @@
 
 {% macro registrar_nav(current) %}
   <header class="topbar">
-    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span>Registrar</span>
+    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">Registrar</span></span>
     <details class="nav-sheet">
       <summary>Menu</summary>
       <nav class="sheet-panel" aria-label="Registrar">
@@ -146,7 +200,8 @@
     </details>
   </header>
   <nav class="rail" aria-label="Registrar">
-    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span>Registrar</span>
+    <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">Registrar</span></span>
+    {% call rail_toggle() %}{% endcall %}
     {% call registrar_nav_links(current) %}{% endcall %}
     <div class="rail-foot">
       {% call theme_toggle() %}{% endcall %}

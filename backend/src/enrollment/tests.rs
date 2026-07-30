@@ -2281,6 +2281,66 @@ mod ui {
         assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
     }
 
+    /// ADR-16: the rail preference is the same server-stamped cookie
+    /// mechanism as the theme — expanded by default (the JS-off floor),
+    /// `.rail-collapsed` stamped on the shell once chosen.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn rail_preference_cookie_round_trips(pool: PgPool) {
+        let fixture = seed_registration_fixture(&pool, 1).await;
+        let username = credential_student(&pool, &fixture).await;
+        let app = ui_app!(&pool, fixture.registrar.institution_id);
+        let cookie = login(&app, &username, PASSWORD).await;
+
+        // Default: expanded — no class, and the toggle offers "collapse".
+        let page = get_page(&app, &cookie, "/ui/registration").await;
+        assert!(!page.contains("rail-collapsed"), "expanded by default");
+        assert!(page.contains("data-rail-form"), "toggle renders signed in");
+        assert!(page.contains(r#"value="collapsed""#));
+        let csrf = extract_input(&page, "csrf_token");
+
+        // JS-off toggle: plain POST -> cookie -> redirect back.
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/ui/rail")
+                .cookie(cookie.clone())
+                .insert_header(("Referer", "http://localhost/ui/registration"))
+                .set_form(serde_json::json!({ "rail": "collapsed", "csrf_token": &csrf }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        let rail_cookie = response
+            .response()
+            .cookies()
+            .find(|cookie| cookie.name() == "ub_rail")
+            .expect("rail cookie set");
+        assert_eq!(rail_cookie.value(), "collapsed");
+
+        // Next render stamps the shell class; toggle now offers "expand".
+        let request = actix_test::TestRequest::get()
+            .uri("/ui/registration")
+            .cookie(cookie.clone())
+            .cookie(rail_cookie.into_owned())
+            .to_request();
+        let response = actix_test::call_service(&app, request).await;
+        let page = String::from_utf8(actix_test::read_body(response).await.to_vec()).unwrap();
+        assert!(page.contains("rail-collapsed"), "server stamps the choice");
+        assert!(page.contains(r#"value="expanded""#));
+
+        // Garbage values are refused, not stored.
+        let response = actix_test::call_service(
+            &app,
+            actix_test::TestRequest::post()
+                .uri("/ui/rail")
+                .cookie(cookie.clone())
+                .set_form(serde_json::json!({ "rail": "sideways", "csrf_token": &csrf }))
+                .to_request(),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
     /// Holds and academic standing over plain forms. The proof of honesty:
     /// a hold placed on the staff page denies the student's real
     /// registration with the named reason, and releasing it registers them

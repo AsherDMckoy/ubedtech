@@ -318,5 +318,29 @@ addEventListener(
   true,
 );
 
+// Rail collapse/expand enhancement (ADR-16): flip the shell class
+// instantly, persist via the same POST the JS-off form would make.
+addEventListener(
+  "submit",
+  (event) => {
+    const form = event.target.closest("[data-rail-form]");
+    if (!form) return;
+    event.preventDefault();
+    const collapsing = event.submitter?.value === "collapsed";
+    document.querySelector(".shell")?.classList.toggle("rail-collapsed", collapsing);
+    const button = form.querySelector("button[name=rail]");
+    button.value = collapsing ? "expanded" : "collapsed";
+    button.textContent = collapsing ? "»" : "«";
+    const label = collapsing ? "Expand navigation" : "Collapse navigation";
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    button.setAttribute("aria-expanded", String(!collapsing));
+    const body = new URLSearchParams(new FormData(form));
+    body.set("rail", collapsing ? "collapsed" : "expanded");
+    fetch(form.action, { method: "POST", body, credentials: "same-origin" }).catch(() => {});
+  },
+  true,
+);
+
 window.Alpine = Alpine;
 Alpine.start();

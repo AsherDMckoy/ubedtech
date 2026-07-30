@@ -107,6 +107,12 @@
   --ease-enter: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-exit: cubic-bezier(0.4, 0, 1, 1);
 
+  /* rail nav (ADR-16, animated surface #4): expanded by default,
+     collapsible to an icon rail; motion uses --dur-base/--ease-enter
+     like every other surface. */
+  --rail-w: 48px;
+  --rail-w-open: 240px;
+
   /* type — the display face carries headings and the one key figure;
      the sans carries everything else. Both self-hosted (no third-party
      runtime requests; ADR-14). */

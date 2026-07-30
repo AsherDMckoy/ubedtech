@@ -23,9 +23,11 @@ use crate::identity_access::sessions::CurrentSession;
 use crate::shared::error::AppError;
 
 pub const THEME_COOKIE: &str = "ub_theme";
+pub const RAIL_COOKIE: &str = "ub_rail";
 
 tokio::task_local! {
     static THEME: &'static str;
+    static RAIL: &'static str;
     static CSRF: Option<String>;
 }
 
@@ -38,18 +40,30 @@ fn cookie_theme(req: &ServiceRequest) -> &'static str {
     }
 }
 
-/// Innermost middleware: scope the theme choice and the session's CSRF
-/// token for the duration of the request, so base.html can render both.
+fn cookie_rail(req: &ServiceRequest) -> &'static str {
+    match req.cookie(RAIL_COOKIE).as_ref().map(Cookie::value) {
+        Some("collapsed") => "collapsed",
+        // absent or garbage: expanded — the JS-off default (ADR-16)
+        _ => "expanded",
+    }
+}
+
+/// Innermost middleware: scope the UI preferences (theme, rail state) and
+/// the session's CSRF token for the duration of the request, so base.html
+/// can render all three.
 pub async fn theme_middleware(
     req: ServiceRequest,
     next: Next<impl MessageBody>,
 ) -> Result<ServiceResponse<impl MessageBody>, actix_web::Error> {
     let theme = cookie_theme(&req);
+    let rail = cookie_rail(&req);
     let csrf = req
         .extensions()
         .get::<CurrentSession>()
         .map(|session| session.csrf_token.clone());
-    THEME.scope(theme, CSRF.scope(csrf, next.call(req))).await
+    THEME
+        .scope(theme, RAIL.scope(rail, CSRF.scope(csrf, next.call(req))))
+        .await
 }
 
 /// ` data-theme=dark` / ` data-theme=light` for `<html>`, empty for
@@ -66,6 +80,20 @@ pub fn html_attr() -> &'static str {
 /// The current choice, for `aria-pressed` on the toggle buttons.
 pub fn current() -> &'static str {
     THEME.try_with(|theme| *theme).unwrap_or("system")
+}
+
+/// ` rail-collapsed` for the shell class when the actor collapsed the
+/// rail; empty (expanded) otherwise — including JS-off first visits.
+pub fn rail_class() -> &'static str {
+    match RAIL.try_with(|rail| *rail) {
+        Ok("collapsed") => " rail-collapsed",
+        _ => "",
+    }
+}
+
+/// The current rail state, for the toggle button's direction.
+pub fn rail_current() -> &'static str {
+    RAIL.try_with(|rail| *rail).unwrap_or("expanded")
 }
 
 /// CSRF token for the toggle form; empty when signed out (pages without a
@@ -85,6 +113,42 @@ struct ThemeForm {
     _csrf_token: String,
 }
 
+#[derive(Deserialize)]
+struct RailForm {
+    rail: String,
+    #[serde(rename = "csrf_token")]
+    _csrf_token: String,
+}
+
+/// Set a year-long preference cookie and PRG back to the page the toggle
+/// was on. Referer is only a UX nicety (same-origin paths only; anything
+/// else falls back home).
+fn preference_response(
+    request: &HttpRequest,
+    policy: &SessionCookiePolicy,
+    name: &'static str,
+    value: String,
+) -> HttpResponse {
+    let mut cookie = Cookie::new(name, value);
+    cookie.set_path("/");
+    cookie.set_same_site(actix_web::cookie::SameSite::Lax);
+    cookie.set_secure(policy.secure);
+    cookie.set_max_age(actix_web::cookie::time::Duration::days(365));
+
+    let back = request
+        .headers()
+        .get(actix_web::http::header::REFERER)
+        .and_then(|referer| referer.to_str().ok())
+        .and_then(|referer| referer.split_once("//")?.1.split_once('/'))
+        .map(|(_, path)| format!("/{path}"))
+        .unwrap_or_else(|| "/ui/dashboard".to_owned());
+
+    HttpResponse::SeeOther()
+        .cookie(cookie)
+        .insert_header(("Location", back))
+        .finish()
+}
+
 /// JS-off path: plain form POST, sets the cookie, redirects back to the
 /// page the toggle was on. The enhancement script does the same POST via
 /// fetch after flipping data-theme locally.
@@ -97,29 +161,23 @@ async fn set_theme(
         theme @ ("light" | "dark" | "system") => theme.to_owned(),
         _ => return Err(AppError::Validation("unknown theme".into())),
     };
+    Ok(preference_response(&request, &policy, THEME_COOKIE, value))
+}
 
-    let mut cookie = Cookie::new(THEME_COOKIE, value);
-    cookie.set_path("/");
-    cookie.set_same_site(actix_web::cookie::SameSite::Lax);
-    cookie.set_secure(policy.secure);
-    cookie.set_max_age(actix_web::cookie::time::Duration::days(365));
-
-    // Referer is only a UX nicety here (where to land after the JS-off
-    // POST); same-origin paths only, anything else falls back home.
-    let back = request
-        .headers()
-        .get(actix_web::http::header::REFERER)
-        .and_then(|referer| referer.to_str().ok())
-        .and_then(|referer| referer.split_once("//")?.1.split_once('/'))
-        .map(|(_, path)| format!("/{path}"))
-        .unwrap_or_else(|| "/ui/dashboard".to_owned());
-
-    Ok(HttpResponse::SeeOther()
-        .cookie(cookie)
-        .insert_header(("Location", back))
-        .finish())
+/// Rail collapse/expand preference (ADR-16), same shape as the theme.
+async fn set_rail(
+    request: HttpRequest,
+    policy: web::Data<SessionCookiePolicy>,
+    form: web::Form<RailForm>,
+) -> Result<HttpResponse, AppError> {
+    let value = match form.rail.as_str() {
+        rail @ ("expanded" | "collapsed") => rail.to_owned(),
+        _ => return Err(AppError::Validation("unknown rail state".into())),
+    };
+    Ok(preference_response(&request, &policy, RAIL_COOKIE, value))
 }
 
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/ui/theme", web::post().to(set_theme));
+    cfg.route("/ui/rail", web::post().to(set_rail));
 }

@@ -11,10 +11,10 @@
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
 
-  <div class="shell {% block shell_class %}{% endblock %}">
+  <div class="shell {% block shell_class %}{% endblock %}{{ crate::shared::theme::rail_class() }}">
     {% block rail %}
     <header class="topbar">
-      <span class="brand">University of Belize</span>
+      <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">University of Belize</span></span>
       <details class="nav-sheet">
         <summary>Menu</summary>
         <nav class="sheet-panel" aria-label="Primary">
@@ -24,7 +24,8 @@
       </details>
     </header>
     <nav class="rail" aria-label="Primary">
-      <span class="brand">University of Belize</span>
+      <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">University of Belize</span></span>
+      {% call ui::rail_toggle() %}{% endcall %}
       {% call ui::nav_links("") %}{% endcall %}
       <div class="rail-foot">
         {% call ui::theme_toggle() %}{% endcall %}
