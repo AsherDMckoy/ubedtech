@@ -305,7 +305,7 @@
 }
 
 main {
-  padding: var(--space-5);
+  padding: var(--space-4) var(--space-5) var(--space-5);
   min-width: 0;
 }
 
@@ -1155,20 +1155,20 @@ tr.just-changed {
   grid-template-areas:
     "main deadline"
     "main rail";
-  gap: var(--space-5);
+  gap: var(--space-4);
   align-items: start;
 }
 
 .dash-main {
   grid-area: main;
   display: grid;
-  gap: var(--space-5);
+  gap: var(--space-4);
 }
 
 .dash-rail {
   grid-area: rail;
   display: grid;
-  gap: var(--space-5);
+  gap: var(--space-4);
 }
 
 @media (max-width: 960px) {
@@ -1627,12 +1627,18 @@ main > .wrap-wide {
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-3);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-3);
 }
 
 .head .sub {
   margin: 2px 0 0;
   font-size: 13px;
+}
+
+/* Inside .head the h1's own bottom margin is dead space — the .sub line
+   sits directly under it and .head already carries the gap below. */
+.head h1 {
+  margin-bottom: 0;
 }
 
 .tiles {
