@@ -1,2 +1,2 @@
-# edtech
+# ubedtech
 Test repo for ubedtech
