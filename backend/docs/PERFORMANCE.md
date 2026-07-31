@@ -329,9 +329,10 @@ Re-measured class B, same box, `ubedtech_load` dataset, fresh
 cutting per-request PostgreSQL CPU shrank the runnable-backend herd, so
 the tail queueing went with it. The Rust server itself stayed ~1 core
 mid-run: it was never the bottleneck (24 Actix workers configured); class
-B remains PostgreSQL-CPU-bound, now on a 3.7×-cheaper query. Next lever
-if ever needed, unchanged: fold the session idle-touch into the resolve
-query, then database cores.
+B remains PostgreSQL-CPU-bound, now on a 3.7×-cheaper query. (A lever
+"fold the session idle-touch into the resolve query" was recorded here;
+the 2026-07-30 statement census below struck it — the touch already
+fires at most once per 60 s, not per request.)
 
 **Where the remaining ceiling is** (pgbench, same box, 24 clients,
 prepared statements, `ubedtech_load`): the rewritten catalog query alone
@@ -339,10 +340,44 @@ prepared statements, `ubedtech_load`): the rewritten catalog query alone
 a bare `SELECT 1` runs at 604 k tps. So the PostgreSQL-side ceiling for
 this workload is ~23 k/s, the app currently delivers 59 % of it, and
 per-statement protocol overhead is a non-factor (69 k stmts/s consumed
-of a 604 k ceiling). The 13.8 k → 23 k gap is the session resolve + the
-idle-touch transaction (~3 extra statements/request) plus the app's own
-CPU share of the same cores. Levers, in order: fold the touch into the
-resolve (closes part of the gap), then hardware. Squeezing the query
+of a 604 k ceiling). The 13.8 k → 23 k gap is the session resolve query
+plus the app's own CPU share of the same cores. Squeezing the query
 below ~1 ms means denormalizing or materializing — unearned at any
 plausible UB load. Server-side PG config remains audited-to-zero (100 %
 buffer hit, JIT/work_mem/parallelism non-factors at this data size).
+
+## Statement census + pool 96 A/B (2026-07-30)
+
+**The "fold the idle-touch into resolve" lever is moot — struck.**
+Measured via `pg_stat_database` transaction counters on a dedicated
+cluster: 100 authenticated catalog requests cost **221 transactions ≈
+2.2/request** — one session resolve, one catalog query, the remainder
+being worker/readiness polling. The idle-touch fires at most once per
+60 s per session (the stampede fix put the staleness guard in the
+statement itself), so there is no per-request touch to fold; the
+"4–6 round trips" description in the remote-topology section predates
+that fix. The only statement left to merge would be session-resolve
+into the catalog query — a cross-feature coupling to save ~0.15 ms;
+rejected. App-side statement diet is done.
+
+**Pool default 64 → 96** (requested). A/B on a dedicated throwaway
+PG 18.4 cluster (port 5433, stock config, same box, restored
+`ubedtech_load`; the system PostgreSQL was unusable for benchmarking —
+an unrelated app held 96 of its 100 connection slots, which is also
+why the new default is annotated in `config.rs`/`.env.example`:
+**96 connections needs `max_connections` headroom a stock shared PG
+does not have**). 20 s runs, fresh session, warm:
+
+| Pool | c64 | c128 |
+|---|---|---|
+| 96 | 16,978 req/s, p99 7.1 ms | 16,846 req/s, p99 11.6 ms |
+| 64 | 16,706 req/s, p99 6.4 ms | 16,618 req/s, p99 10.5 ms |
+
+A wash: +1.5 % throughput (within run-to-run noise), marginally worse
+p99 — consistent with the 2026-07-29 A/B (24 hardware threads are the
+binding resource; 64 already oversubscribes them 2.7×). The default is
+96 by request; nothing measured argues for it, and pool-exhaustion
+tails (the pool-15/20 runs above) argue mildly against going lower than
+~24 on this class of box. Cross-cluster caveat: these absolute numbers
+(~16.9 k) are not comparable to the 13.8 k system-PG run — different
+cluster, PG 18 vs 17, fresh statistics.
