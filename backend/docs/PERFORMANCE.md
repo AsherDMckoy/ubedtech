@@ -305,3 +305,30 @@ requests — planner choices at real scale may differ, index paths exist):
 - Catalog pagination is LIMIT/OFFSET over an ordered join — fine at the
   20-row page size and current scale; keyset pagination is the upgrade if
   a profile ever shows deep-offset pages in the wild.
+
+## Catalog LIMIT-first rewrite (2026-07-30)
+
+The rewrite recorded above as a parked lever (trigger was 1,000+ open
+sections) is now in: `search_catalog` filters/sorts/paginates over skinny
+`(code, section_code, id)` rows in a subquery, then joins capacity, the
+meeting LATERAL, and the student's enrollment onto only the 20 winners
+instead of every open section in the term. Warm `EXPLAIN ANALYZE` on the
+`ubedtech_load` dataset: **0.79 ms vs 2.94 ms** for the old shape (3.7×).
+All 159 tests green (catalog scoping/ordering/fragment tests unchanged).
+
+Re-measured class B, same box, `ubedtech_load` dataset, fresh
+`dev.student` session, pool 64, warm + measured 30 s (baselines: the
+2026-07-25 stampede-fix re-measure on this dataset):
+
+| Concurrency | Throughput | p50 / p90 / p99 | Errors | Baseline |
+|---|---|---|---|---|
+| t8/c64 | **13,834 req/s** | 4.4 / 6.6 / 9.1 ms | 0 | 7,633 req/s, p99 423 ms |
+| t4/c16 | **10,411 req/s** | 1.5 / 1.9 / 2.5 ms | 0 | 6,438 req/s, p99 3.9 ms |
+
++81 % throughput at saturation and the c64 p99 collapsed 423 ms → 9 ms —
+cutting per-request PostgreSQL CPU shrank the runnable-backend herd, so
+the tail queueing went with it. The Rust server itself stayed ~1 core
+mid-run: it was never the bottleneck (24 Actix workers configured); class
+B remains PostgreSQL-CPU-bound, now on a 3.7×-cheaper query. Next lever
+if ever needed, unchanged: fold the session idle-touch into the resolve
+query, then database cores.

@@ -826,6 +826,11 @@ impl AcademicsService {
             .filter(|q| !q.is_empty())
             .map(|q| format!("%{}%", q.replace('%', "\\%").replace('_', "\\_")));
 
+        // Filter/sort/paginate over skinny (code, section_code, id) rows
+        // first; the meeting LATERAL, capacity, and enrollment joins then run
+        // only for the one page instead of every open section in the term
+        // (measured: the per-row LATERAL over the full term dominated the
+        // query cost — docs/PERFORMANCE.md, pool/plan audits).
         let sections = sqlx::query_as::<_, CatalogSection>(
             r#"
             SELECT
@@ -838,7 +843,18 @@ impl AcademicsService {
                 cap.enrolled_count,
                 COALESCE(m.summary, '') AS meetings,
                 my_e.id AS enrolled_enrollment_id
-            FROM section s
+            FROM (
+                SELECT s.id
+                FROM section s
+                JOIN course c ON c.id = s.course_id
+                WHERE s.institution_id = $1
+                  AND s.term_id = $2
+                  AND s.status = 'open'
+                  AND ($3::text IS NULL OR c.code ILIKE $3 OR c.title ILIKE $3)
+                ORDER BY c.code, s.section_code
+                LIMIT $4 OFFSET $5
+            ) page
+            JOIN section s ON s.id = page.id
             JOIN course c ON c.id = s.course_id
             JOIN section_capacity cap ON cap.section_id = s.id
             LEFT JOIN LATERAL (
@@ -855,12 +871,7 @@ impl AcademicsService {
                    ON my_e.section_id = s.id
                   AND my_e.student_id = $6
                   AND my_e.status = 'enrolled'
-            WHERE s.institution_id = $1
-              AND s.term_id = $2
-              AND s.status = 'open'
-              AND ($3::text IS NULL OR c.code ILIKE $3 OR c.title ILIKE $3)
             ORDER BY c.code, s.section_code
-            LIMIT $4 OFFSET $5
             "#,
         )
         .bind(actor.institution_id)
