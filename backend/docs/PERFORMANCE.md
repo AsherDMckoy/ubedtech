@@ -381,3 +381,23 @@ tails (the pool-15/20 runs above) argue mildly against going lower than
 ~24 on this class of box. Cross-cluster caveat: these absolute numbers
 (~16.9 k) are not comparable to the 13.8 k system-PG run — different
 cluster, PG 18 vs 17, fresh statistics.
+
+## Full three-class re-run (2026-07-30, system PG reclaimed, pool 96)
+
+The connection-squatting app was dropped, so the standard suite ran on
+the system PostgreSQL again (`ubedtech_load`, release binary at HEAD:
+LIMIT-first catalog + pool-96 default; quiet box, warm, fresh session,
+30 s runs, transfer rates now recorded):
+
+| Class | Config | Throughput | Transfer | p50 / p90 / p99 | Errors |
+|---|---|---|---|---|---|
+| A `/health/live` | t8/c64 | 606,304 req/s | 309 MB/s | 79 µs / 171 µs / 755 µs | 0 |
+| B catalog | t8/c64 | 13,645 req/s | 71.6 MB/s | 4.4 / 7.2 / 10.4 ms | 0 |
+| C `POST /ui/documents` | t4/c16 | 95.8 req/s | 54 KB/s | 158 / 183 / 433 ms | 0 |
+
+Class C durability verified: 2,880 rows for 2,877 counted responses
+(the excess are commits whose responses crossed the run cutoff). B
+matches the post-rewrite 13.8 k within 1.4 % — pool 96 is a no-op on
+the system cluster too, confirming the dedicated-cluster A/B. A and C
+match their standing records. Baseline for the current binary, all
+three classes, one table.
