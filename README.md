@@ -15,6 +15,9 @@ cargo build --release
 cargo test --all-targets --all-features -- --test-threads=4
 ```
 
+`cargo test` needs `DATABASE_URL` too (see below): the database tests use
+`#[sqlx::test]`, which creates a throwaway database per test from that URL.
+
 Frontend assets (only when `frontend/styles/` or `frontend/js/` change;
 Node ≥ 26):
 
@@ -27,26 +30,67 @@ npm test        # accessibility harness (axe) over rendered critical pages
 
 ## Run locally
 
+**1. PostgreSQL.** Either a local install:
+
 ```sh
-createdb ubedtech
-cd backend
-cp .env.example .env       # set DATABASE_URL, APP_DOCUMENT_STORAGE_PATH
-cargo run                  # migrations run at startup
+createdb ubedtechdb        # must match the database name in DATABASE_URL
 ```
 
-Startup refuses to serve without a valid institution license row — seed
-first (below).
+or Docker (creates the database for you, persists across restarts):
+
+```sh
+docker run --name ubedtech-pg \
+  -e POSTGRES_PASSWORD=ubedtech \
+  -e POSTGRES_DB=ubedtechdb \
+  -v ubedtech-pgdata:/var/lib/postgresql/data \
+  -p 5432:5432 -d postgres:17
+```
+
+**2. Configure.**
+
+```sh
+cd backend
+cp .env.example .env
+```
+
+Set `DATABASE_URL` in `.env` to match step 1:
+
+- local install (peer auth as your OS user): `postgresql://localhost:5432/ubedtechdb`
+- Docker above: `postgresql://postgres:ubedtech@localhost:5432/ubedtechdb`
+
+**3. Migrate.**
+
+```sh
+cargo run
+```
+
+Migrations apply automatically at startup. On an empty database the
+server then **exits** with `valid institution license required before
+startup` — that is expected: the schema now exists but no institution/
+license row does yet. The seed provides both.
+
+**4. Seed** (from `backend/`, same URL as `DATABASE_URL` — `.env` is
+read by the server, not your shell):
+
+```sh
+psql postgresql://localhost:5432/ubedtechdb -f src/dev/seed.sql
+# Docker: docker exec -i ubedtech-pg psql -U postgres -d ubedtechdb < src/dev/seed.sql
+```
+
+**5. Run.**
+
+```sh
+cargo run
+```
+
+Open <http://localhost:8080/ui/login>. Demo accounts and passwords are
+listed in the header of `src/dev/seed.sql` (development only).
 
 ## Demo seed
 
-```sh
-psql "$DATABASE_URL" -f backend/src/dev/seed.sql
-```
-
-Seeds the University of Belize institution, an active license, a
-development term, and demo accounts/data for every critical screen
-(see the header of `seed.sql` for the account list and passwords —
-development only, never production). Idempotent; re-run freely.
+`seed.sql` (step 4 above) seeds the University of Belize institution, an
+active license, a development term, and demo accounts/data for every
+critical screen. Idempotent; re-run freely.
 
 For a realistic large dataset on top of that (UI evaluation at true
 scale):
