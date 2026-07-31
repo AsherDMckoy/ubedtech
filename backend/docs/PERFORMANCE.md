@@ -452,6 +452,21 @@ equals request count exactly. Registration-day capacity on this
 workstation: ~118 registrations/second sustained; server-grade storage
 moves this an order of magnitude like all of class C.
 
+**Pessimization scan (same day): none found — case closed by
+measurement.** A full register through the whole stack (session, CSRF,
+seven policy checks, seat UPDATE, enrollment INSERT, audit INSERT, one
+commit, fragment render) measures **57–63 ms** on a quiet box; a bare
+`INSERT; COMMIT` in psql measures 60–94 ms. The application adds
+nothing measurable over the raw durable transaction. (The 136 ms/op
+seen at c16 is fsync-group queue position, not per-op cost.) Structure
+confirmed by reading: one transaction, one fsync, ~12 indexed
+statements, override stamping skipped when empty, drop shares the
+register's lock order. Two micro-candidates seen and rejected — the
+pre-lock idempotency probe (~0.1 ms, load-bearing for retry storms)
+and the ensure+lock statement pair (~0.1 ms, keeps the lock-order
+story legible): each is ~0.2 % of an op whose cost is the drive.
+Faster registrations = faster storage, nothing else.
+
 One misconception put to rest for the record: the drive's 150–188 MB/s
 read spec cannot constrain this path. Class B performs **zero disk
 reads** — the buffer-hit ratio is a measured 100.00 % (the dataset
