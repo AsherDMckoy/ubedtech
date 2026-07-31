@@ -108,11 +108,12 @@ impl AppConfig {
             raw.parse::<SocketAddr>().map_err(|e| e.to_string())
         })?;
 
-        // 96 leaves only ~4 slots under PostgreSQL's default
-        // max_connections=100 — a deployment keeping that default must lower
-        // this or raise max_connections, or startup fails with PoolTimedOut.
+        // Keep headroom under PostgreSQL's default max_connections=100 —
+        // a pool near that limit starves psql/monitoring and fails startup
+        // with PoolTimedOut when anything else holds connections
+        // (measured 2026-07-30; 96 was also a throughput wash vs 64).
         let db_max_connections =
-            parse_or_default(&get, "APP_DB_MAX_CONNECTIONS", "96", parse_positive_u32)?;
+            parse_or_default(&get, "APP_DB_MAX_CONNECTIONS", "64", parse_positive_u32)?;
         let db_min_connections =
             parse_or_default(&get, "APP_DB_MIN_CONNECTIONS", "8", parse_positive_u32)?;
 
@@ -263,7 +264,7 @@ mod tests {
 
         assert_eq!(config.environment, Environment::Development);
         assert_eq!(config.bind_addr, "0.0.0.0:8080".parse().unwrap());
-        assert_eq!(config.db_max_connections, 96);
+        assert_eq!(config.db_max_connections, 64);
         assert_eq!(config.db_min_connections, 8);
         assert_eq!(config.db_acquire_timeout_secs, 5);
         assert_eq!(config.shutdown_timeout_secs, 30);

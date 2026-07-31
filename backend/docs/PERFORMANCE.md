@@ -401,3 +401,26 @@ matches the post-rewrite 13.8 k within 1.4 % — pool 96 is a no-op on
 the system cluster too, confirming the dedicated-cluster A/B. A and C
 match their standing records. Baseline for the current binary, all
 three classes, one table.
+
+## Definitive read-path configuration (2026-07-30)
+
+Pool default reverted 96 → 64: the 96 run was a measured wash and sat
+four connections under a stock `max_connections` (the same day's outage
+class). The definitive catalog optimization set is therefore:
+**LIMIT-first query shape + migration 0017's meeting index + pool 64.**
+Confirming run (system PG, quiet box, fresh session):
+
+| Concurrency | Throughput | Transfer | p50 / p90 / p99 | Errors |
+|---|---|---|---|---|
+| t8/c64 | **13,951 req/s** | 73.2 MB/s | 4.4 / 6.5 / 8.9 ms | 0 |
+| t4/c16 | **10,456 req/s** | 54.8 MB/s | 1.5 / 1.9 / 2.5 ms | 0 |
+
+One misconception put to rest for the record: the drive's 150–188 MB/s
+read spec cannot constrain this path. Class B performs **zero disk
+reads** — the buffer-hit ratio is a measured 100.00 % (the dataset
+lives in RAM) — and the 73 MB/s "Transfer" figure is loopback HTTP
+response bytes, not storage I/O. The disk governs class C's fsync
+ceiling (~68 ms/commit) and nothing on the read path. Remaining
+catalog levers are hardware only: database cores (PostgreSQL-CPU-bound
+at 59 % of the 23.3 k pgbench ceiling; the rest is the mandatory
+session-resolve query and the app's own CPU share of the same cores).
