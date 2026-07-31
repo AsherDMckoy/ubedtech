@@ -239,6 +239,22 @@ queue briefly at the pool instead of context-switching inside PostgreSQL.
 At realistic load (~200 req/s) neither setting is ever felt. Default
 stays 64; the knob already exists for a latency-sensitive deployment.
 
+**Follow-up, pool 15 (2026-07-30):** same class-B endpoint but on the
+`ubedtech_load` dataset (200 uniform sections, `dev.student`, term
+`…0005`, fresh session — not directly comparable to the `ubedtech_bench`
+rows above; that dataset's t8/c64 baseline at pool 64 is 7,633 req/s):
+
+| `APP_DB_MAX_CONNECTIONS` | Throughput | p50 / p90 / p99 | Latency stdev |
+|---|---|---|---|
+| 15 | 2,940 req/s | 21.7 / 23.2 / 24.6 ms | 1.2 ms |
+
+Same shape as the 20-pool run, further along the curve: throughput drops
+harder (−61 % on this dataset) and the distribution becomes near-flat —
+64 in-flight requests queue on 15 connections, so latency is dominated by
+orderly pool-acquire wait (p99 within 3 ms of p50, zero errors). Confirms
+the standing conclusion: small pool = predictable tail, big pool = peak
+throughput; default remains 64.
+
 ## Remote-database topology measurement (2026-07-29, DO managed PG)
 
 Question tested: does moving PostgreSQL to its own machine (DigitalOcean
