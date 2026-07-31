@@ -332,3 +332,17 @@ mid-run: it was never the bottleneck (24 Actix workers configured); class
 B remains PostgreSQL-CPU-bound, now on a 3.7×-cheaper query. Next lever
 if ever needed, unchanged: fold the session idle-touch into the resolve
 query, then database cores.
+
+**Where the remaining ceiling is** (pgbench, same box, 24 clients,
+prepared statements, `ubedtech_load`): the rewritten catalog query alone
+— no app, no session statements — runs at **23,261 tps, 1.03 ms avg**;
+a bare `SELECT 1` runs at 604 k tps. So the PostgreSQL-side ceiling for
+this workload is ~23 k/s, the app currently delivers 59 % of it, and
+per-statement protocol overhead is a non-factor (69 k stmts/s consumed
+of a 604 k ceiling). The 13.8 k → 23 k gap is the session resolve + the
+idle-touch transaction (~3 extra statements/request) plus the app's own
+CPU share of the same cores. Levers, in order: fold the touch into the
+resolve (closes part of the gap), then hardware. Squeezing the query
+below ~1 ms means denormalizing or materializing — unearned at any
+plausible UB load. Server-side PG config remains audited-to-zero (100 %
+buffer hit, JIT/work_mem/parallelism non-factors at this data size).
