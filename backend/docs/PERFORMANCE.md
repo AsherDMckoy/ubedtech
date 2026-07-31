@@ -467,6 +467,30 @@ and the ensure+lock statement pair (~0.1 ms, keeps the lock-order
 story legible): each is ~0.2 % of an op whose cost is the drive.
 Faster registrations = faster storage, nothing else.
 
+## Moka session-cache re-measure on the rewritten catalog (2026-07-30)
+
+Requested for the record: the `exp/moka-session-cache` implementation
+cherry-picked onto current master (clean; identity suite 44/44 green
+with the cache active), class B on `ubedtech_load`, same protocol as
+the definitive runs:
+
+| Config | Baseline (no cache) | Moka | Delta |
+|---|---|---|---|
+| t8/c64 | 13,951 req/s, p50 4.4 ms | **16,862 req/s**, p50 3.6 ms | **+20.9 %** |
+| t4/c16 | 10,456 req/s, p50 1.5 ms | **12,797 req/s**, p50 1.2 ms | **+22.4 %** |
+
+As predicted when the rewrite landed: the session lookup's fixed cost
+is a larger share of a 3.7×-cheaper request, so the cache's relative
+win grew from +8 % to +21 %. **The verdict does not change — the cache
+stays out.** The disqualifiers were never about the size of the win:
+revocation still fails open when any future path forgets to
+invalidate, the multi-instance divergence (5.005 s of dead-session
+service) is structural, and ADR-13's adopt trigger (>1 instance AND
+session resolution a measured bottleneck) remains unmet at ~200 req/s
+realistic load. A bigger bribe does not make the trade sound. The
+measurement branch was deleted; reproduce with
+`git cherry-pick ba8abde` onto master.
+
 One misconception put to rest for the record: the drive's 150–188 MB/s
 read spec cannot constrain this path. Class B performs **zero disk
 reads** — the buffer-hit ratio is a measured 100.00 % (the dataset
