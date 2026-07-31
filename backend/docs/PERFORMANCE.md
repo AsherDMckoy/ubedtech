@@ -424,6 +424,34 @@ requests — the pool-64 acquire queue admits work in orderly FIFO
 instead of collapsing. Overload shape: a flat, predictable queue, not
 a cliff.
 
+## Registration write path measured (2026-07-30, `load/register_drop.lua`)
+
+New class-C-family benchmark: real committed registrations through
+`POST /ui/registration/add`/`drop` (fragment mode), each op one durable
+transaction — seat update, enrollment row, audit row. Setup that the
+measurement forced us to get right, in order: the load-term window had
+to be opened (writes are honestly refused outside it); one student ×
+16 connections measures the service's per-student serialization, not
+the write path (24 req/s, 53 % denials — correct behavior, wrong
+experiment); students must be paired with sections that fit their real
+seeded schedules ("schedule conflict detected" denials otherwise); and
+16 students × 4 shared sections measures seat-row contention (69 %
+honest 409s, convoy latency, zero oversell). The clean protocol:
+16 distinct `ubedtech_bench` students, own sessions, 13 distinct
+conflict-free sections, register→drop alternation.
+
+| Config | Committed ops/s | p50 / p90 / p99 | Verification |
+|---|---|---|---|
+| t16/c16, 16 students | **117.8/s** | 108 / 233 / 442 ms | 3,536 requests = 3,536 audit events; 1,768 adds + 1,768 drops; **0 denials, 0 timeouts** |
+| t4/c4, 4 students | 24.5/s | 134 / 287 / 666 ms | 3 non-2xx in ~737 |
+
+Same fsync-bound class as document requests (95.8/s): ~7 ops/s per
+concurrent student, ~136 ms per committed registration on this
+storage. Every response was the real committed outcome — audit count
+equals request count exactly. Registration-day capacity on this
+workstation: ~118 registrations/second sustained; server-grade storage
+moves this an order of magnitude like all of class C.
+
 One misconception put to rest for the record: the drive's 150–188 MB/s
 read spec cannot constrain this path. Class B performs **zero disk
 reads** — the buffer-hit ratio is a measured 100.00 % (the dataset

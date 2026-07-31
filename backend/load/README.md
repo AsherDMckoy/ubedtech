@@ -35,3 +35,23 @@ must match the request count. (First run of this suite didn't — wrk seeds
 every thread's RNG with `os.time()`, so all threads generated the same
 idempotency keys and the server correctly deduplicated them; documents.lua
 now seeds per thread. Good accident: idempotency held under load.)
+
+## Registration writes (`register_drop.lua`)
+
+Each thread alternates register → drop on its own section — every
+request a committed enrollment transaction. Requirements the script
+cannot check for you (each was discovered as a wall of honest 409s):
+run with `-t N -c N` (state is per thread-VM); use N DISTINCT students
+(the service serializes per student); pair each student with a section
+that has seat headroom and does not conflict with their existing
+schedule; the term's registration window must be open. Pass one
+cookie/csrf/section per thread:
+
+```sh
+COOKIES="ub_session=a,ub_session=b,..." CSRFS="t1,t2,..." SECTIONS="s1,s2,..." \
+  wrk -t16 -c16 -d30s --latency -s load/register_drop.lua http://127.0.0.1:8087
+```
+
+Verify: `audit_event` count delta must equal the request count (adds +
+drops), and the enrollment delta the add half. 2026-07-30 measured
+117.8 committed ops/s at t16/c16 — numbers in docs/PERFORMANCE.md.
