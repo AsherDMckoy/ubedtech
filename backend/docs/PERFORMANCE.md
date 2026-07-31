@@ -414,6 +414,15 @@ Confirming run (system PG, quiet box, fresh session):
 |---|---|---|---|---|
 | t8/c64 | **13,951 req/s** | 73.2 MB/s | 4.4 / 6.5 / 8.9 ms | 0 |
 | t4/c16 | **10,456 req/s** | 54.8 MB/s | 1.5 / 1.9 / 2.5 ms | 0 |
+| t8/c1000 | **13,795 req/s** | 72.4 MB/s | 72.0 / 74.4 / 77.5 ms | 0 |
+
+The c1000 row is the overload-behavior proof: 15× the saturating
+concurrency loses no throughput (−1 %, noise) and degrades latency to
+exactly the closed-loop prediction (1000 ÷ 13.8 k ≈ 72 ms), with a
+5.5 ms p50→p99 spread and zero errors or timeouts across 415 k
+requests — the pool-64 acquire queue admits work in orderly FIFO
+instead of collapsing. Overload shape: a flat, predictable queue, not
+a cliff.
 
 One misconception put to rest for the record: the drive's 150–188 MB/s
 read spec cannot constrain this path. Class B performs **zero disk
