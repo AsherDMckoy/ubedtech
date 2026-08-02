@@ -298,14 +298,23 @@ durations and curves only from tokens, nothing animates on page load,
 and `prefers-reduced-motion: reduce` disables every animation and
 transition globally.
 
-**Amended 2026-08-01 (ADR-17, implementation pending):** the constitution
-now sanctions a five-class motion vocabulary — chrome, bounded entrance
-choreography, micro-interactions, post-confirmation celebrations, and
-count-up-over-rendered-value — plus a `--dur-slow ≈ 350ms` token and a
-CSS budget renegotiation to 48 KiB. This inventory describes the
-pre-polish system until that pass lands; when it does, update the tokens
-section, this section, and the budget row together. Motion outside the
-vocabulary still requires an ADR (FRONTEND.md §2).
+**Amended 2026-08-01 (ADR-17):** the constitution sanctions a five-class
+motion vocabulary — chrome, bounded entrance choreography,
+micro-interactions, post-confirmation celebrations, and
+count-up-over-rendered-value. Motion outside the vocabulary still
+requires an ADR (FRONTEND.md §2).
+
+**Polish pass, first installment (2026-08-02):** CSS budget spent up to
+48 KiB (test updated in the same commit). Landed: Phosphor icon set;
+sign-in photo rotation (ADR-18 — the only ambient-motion surface);
+schedule revamp (wide layout, equal-height weekly cards, campus-event
+bar markers replacing the gold cell fill + count chip, class-hover gold
+date highlighting — jsdom-pinned); catalog in-row detail expansion
+(CSS-only, JS-off floor) and the shared **course dialog**
+(`components/course_dialog.html`, filled from `data-cd-*` attributes by
+the bundled enhancement); My courses rename + remaining-courses card
+(A38). Still open from the vocabulary: entrance choreography,
+post-confirmation celebration, count-up tiles.
 
 ## JavaScript policy
 
