@@ -316,6 +316,24 @@ the bundled enhancement); My courses rename + remaining-courses card
 (A38). Still open from the vocabulary: entrance choreography,
 post-confirmation celebration, count-up tiles.
 
+**Polish pass, second installment (2026-08-02):** sign-in photo rotation
+retired (ADR-18 amendment) — the front door is the pure-CSS gradient
+again. Measure widened (`--measure` 1080→1320, `.wrap-wide` 1200→1560).
+New chrome: the **persistent header account menu** (`ui::user_menu()`,
+rendered once in `base.html` — avatar top-right on the title line;
+identity from `shared::theme::user_menu()`, one query in the chrome
+middleware; theme switcher and sign-out moved here from the rail foot
+and mobile sheet). The **rail brand is the collapse toggle** (UB mark
+button + expanded-only [X]; the caret-double glyph is gone). Both month
+calendars always render six week rows (no height jumps). The schedule
+page is a **timeline** (`.tl` — days across, 15-minute slot rows down,
+hour lines from one repeating gradient, CSP-safe generated placement
+classes `.tl-cN/.tl-rN/.tl-sN`; overlapping same-day meetings split the
+column) with the month calendar and day detail as a right-column aside.
+Table headers over right-aligned columns carry the cell's alignment
+class (`th.num` / `th.c-seats`). Fire-and-forget chrome forms (theme,
+rail) suppress the submit-once busy state — jsdom-pinned.
+
 ## JavaScript policy
 
 `frontend/js/app.js` bundles Alpine's CSP build (CSP stays
