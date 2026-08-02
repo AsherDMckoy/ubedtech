@@ -11,43 +11,61 @@ progressive enhancement. No React/Vue/Angular, no large component library.
 
 ---
 
-## 1. The one governing principle
+## 1. The one governing principle (amended by ADR-17)
 
-**Motion explains, never decorates. Structure earns its space, never fills it.**
+**Motion explains and delights — but never lies, never blocks, never busts a
+budget. Structure earns its space; polish is a job structure can do.**
 
 Every animation and every pixel of layout answers to one test:
 
-- Animation: *does removing it lose information or orientation?* If no → cut it.
-- Layout region: *does this region do a job for this user on this task?* If no →
-  cut it. "Doesn't waste space" does not mean cramped — it means every region
-  present is pulling weight. Whitespace around a single critical alert is doing
-  a job (drawing the eye); whitespace as filler is not.
+- Animation: *does it orient the user, or make the product feel finished?*
+  Either is a valid job. What it may never do: delay reading data the server
+  already sent, precede server truth (§3), survive `prefers-reduced-motion`,
+  or exceed the motion vocabulary in §2.
+- Layout region: *does this region do a job for this user on this task?*
+  On first-impression surfaces (sign-in, dashboard, empty states), "selling
+  the product" is a legitimate job — gradient, elevation, and CSS/SVG art may
+  hold a region. On scanning screens it is not; density still wins there (§6).
 
-This mirrors the backend rule "never add infrastructure to compensate for a bad
-query." Here: never add motion or chrome to compensate for a weak layout.
+This still mirrors the backend rule "never add infrastructure to compensate
+for a bad query": polish decorates a layout that already works — it is never
+a bandage over a weak one.
 
-## 2. Motion rules (hard)
+## 2. Motion rules (hard — vocabulary form, ADR-17)
 
-- **Never animate content in on page load.** A student waiting for their own
-  schedule to fade in is being made to wait to read data that was already in the
-  HTML. Server-rendered content appears instantly, at rest.
-- **Motion only touches things the user just triggered**, and only elements
-  already on screen or entering because of that action: a menu opening, a dialog
-  appearing, a row transitioning to a confirmed state, a drawer sliding in.
-- **Exactly three animated surfaces exist. No fourth without an ADR:**
-  1. Dropdown menus (primary nav, row action menus).
-  2. Dialog / drawer (document requests, destructive confirmations).
-  3. Mobile navigation sheet.
-- **Durations come from tokens, never ad hoc:** `--dur-fast ≈ 120ms` for
-  hover / focus / menu; `--dur-base ≈ 180ms` for dialog / drawer / sheet.
-  Nothing on a critical interaction path exceeds ~200ms. One enter easing curve,
-  one exit curve, both from tokens.
-- **`prefers-reduced-motion: reduce` disables every transform/opacity transition**
-  and keeps the instant state change. The app must be fully usable, and feel
-  finished, with zero motion. Motion is enhancement, never load-bearing. This is
-  a WCAG 2.2 AA requirement, not a nicety.
-- No spinners for work that finishes in <200ms — show the result. A spinner is
-  only honest when the wait is real (server round trip, document generation).
+The per-surface cap is replaced by a **closed vocabulary of five motion
+classes**. Anything outside the vocabulary still needs an ADR.
+
+1. **Structural chrome** (the original three surfaces + icon rail, ADR-16):
+   menus, dialog/drawer, mobile sheet, rail collapse — `--dur-base`.
+2. **Entrance choreography** (page load, one-time): card/tile/row groups may
+   stagger in with transform+opacity. Hard limits: ≤ 6 stagger steps,
+   ~40 ms apart, whole choreography at rest ≤ 400 ms, initial offset small
+   (≤ 8 px). The data is in the HTML from byte one — the entrance is paint
+   decoration on content that is already there, never a skeleton standing in
+   for content the server already sent, and never on dense scanning tables.
+3. **Micro-interactions**: hover lift on cards/buttons (small translateY +
+   shadow-token step), pressed states, focus transitions — `--dur-fast`.
+4. **State celebration**: *after* the server confirms a truthful operation,
+   the confirmed row/badge may flourish (checkmark draw, badge pop,
+   `--dur-slow`). Celebration decorates the truth; it never precedes it (§3).
+5. **Count-up numbers on metric tiles**: sanctioned only as enhancement —
+   the real final value is server-rendered in the HTML, the count-up plays
+   over it. Reduced motion (or JS off) shows the value instantly.
+
+Cross-cutting hard rules, unchanged in force:
+
+- **Durations and easing come from tokens, never ad hoc:** `--dur-fast ≈
+  120ms`, `--dur-base ≈ 180ms`, and (new) `--dur-slow ≈ 350ms` for entrance
+  and celebration only. Nothing on a critical interaction path exceeds
+  ~200ms — entrances and celebrations run beside interaction, never in
+  front of it (a mid-entrance element is already clickable).
+- **`prefers-reduced-motion: reduce` disables every class above** and keeps
+  the instant state change. The app must be fully usable, and feel finished,
+  with zero motion. WCAG 2.2 AA, not a nicety.
+- No spinners for work that finishes in <200ms — show the result. A spinner
+  is only honest when the wait is real (server round trip, document
+  generation).
 
 ## 3. Optimistic UI is forbidden on truthful operations
 
@@ -100,8 +118,12 @@ Same design system, different density by who's working and what they're doing:
   not wait on JS.
 - No JS required to render navigation or basic page structure.
 - Small compressed CSS/JS payloads; fingerprinted immutable production assets
-  with long cache lifetimes.
-- No large images on critical workflow pages.
+  with long cache lifetimes. The polish pass may raise the tested CSS budget
+  (32 → 48 KiB uncompressed) in the same commit that spends it — budgets are
+  renegotiated in the open, never silently exceeded.
+- Eye candy is paid for in CSS and inline SVG — gradients, shadows,
+  transforms, vector art. Never raster hero images on workflow pages, never a
+  new dependency, never an animation library.
 - No N+1 browser requests for data that could arrive in the initial page or one
   fragment response.
 - No layout shift from late-loading chrome — reserve space for anything that
@@ -142,9 +164,15 @@ no "please", no "!". Empty states name the space and invite an action.
 
 ## 11. What is explicitly rejected
 
-Content-load animations. Count-up numbers. Decorative spinners. Hero images on
-workflow pages. Full-page refreshes where a fragment swap fits. Optimistic
-success on truthful operations (§3). A fourth animated surface (§2). Bespoke
-one-off components duplicating a primitive (§9). Motion that survives
-`prefers-reduced-motion: reduce`. Dense layouts on single-decision screens and
-airy layouts on scanning screens (§6).
+Optimistic success on truthful operations (§3). Motion that survives
+`prefers-reduced-motion: reduce`. Motion outside the §2 vocabulary without an
+ADR. Skeleton screens standing in for content the server already rendered.
+Decorative spinners. Raster hero images on workflow pages (CSS/SVG art is the
+sanctioned medium). Animation libraries and any new frontend dependency.
+Parallax, scroll-jacking, autoplay media. Full-page refreshes where a
+fragment swap fits. Bespoke one-off components duplicating a primitive (§9).
+Dense layouts on single-decision screens and airy layouts on scanning
+screens (§6).
+
+*Moved from rejected to sanctioned-with-rules by ADR-17:* entrance
+choreography (§2.2), count-up numbers (§2.5), state celebrations (§2.4).

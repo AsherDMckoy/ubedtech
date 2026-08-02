@@ -281,11 +281,20 @@ box-shadow).
 
 ## Motion policy (enforced shape)
 
-Three animated surfaces (menu, dialog, mobile sheet), enter-only
-keyframes `enter-down`/`enter-up`, durations and curves only from tokens,
-nothing animates on page load, and `prefers-reduced-motion: reduce`
-disables every animation and transition globally. A fourth animated
-surface requires an ADR (FRONTEND.md §2).
+As built today: animated structural chrome only (menu, dialog, mobile
+sheet, icon rail), enter-only keyframes `enter-down`/`enter-up`,
+durations and curves only from tokens, nothing animates on page load,
+and `prefers-reduced-motion: reduce` disables every animation and
+transition globally.
+
+**Amended 2026-08-01 (ADR-17, implementation pending):** the constitution
+now sanctions a five-class motion vocabulary — chrome, bounded entrance
+choreography, micro-interactions, post-confirmation celebrations, and
+count-up-over-rendered-value — plus a `--dur-slow ≈ 350ms` token and a
+CSS budget renegotiation to 48 KiB. This inventory describes the
+pre-polish system until that pass lands; when it does, update the tokens
+section, this section, and the budget row together. Motion outside the
+vocabulary still requires an ADR (FRONTEND.md §2).
 
 ## JavaScript policy
 

@@ -322,3 +322,38 @@ repository, and CLAUDE.md §6 requires docs to be committed with code.
   cookie, the next render stamps the class, garbage values 400); the
   axe suite covers every page with the new rail markup; `render-pages`
   compiles the icon macro on every shell.
+
+## ADR-17: expressive-polish amendment — motion vocabulary replaces the surface cap
+
+- **Original (FRONTEND.md §1/§2/§11):** "motion explains, never decorates";
+  a hard cap of enumerated animated surfaces; content-load animations,
+  count-up numbers, and celebratory motion on the rejected list.
+- **Replacement (2026-08-01, demo-readiness):** §2 becomes a closed
+  vocabulary of five motion classes — structural chrome, bounded entrance
+  choreography (≤ 6 steps, ≤ 400 ms, transform/opacity only, never on
+  scanning tables), micro-interactions, post-confirmation state
+  celebrations, and count-up-over-server-rendered-value. New token
+  `--dur-slow ≈ 350ms` for entrance/celebration only. §1's governing
+  principle now names "feel finished / sell the product" as a legitimate
+  job on first-impression surfaces.
+- **Why:** the product must sell as SaaS at demo, not only function. The
+  earned-motion stance produced a correct, austere UI; the owner's
+  requirement is beauty. Amending the constitution (rather than per-screen
+  exceptions) keeps polish coherent — one vocabulary, tokens only, instead
+  of ADR-16-style one-off exceptions accumulating per surface.
+- **What did NOT move:** truthful UI (§3 — celebration follows the server's
+  answer, never precedes it), the global `prefers-reduced-motion` kill,
+  JS-off functionality, WCAG AA, density rules (§6), copy voice, no new
+  dependencies, no animation libraries, no raster hero images. Eye candy is
+  CSS gradients/shadows/transforms and inline SVG.
+- **Consequences:** the tested CSS budget may rise 32 → 48 KiB uncompressed
+  in the commit that implements the pass (`asset_sizes_stay_inside_the_
+  budget` updated in the same commit — renegotiated in the open). Entrance
+  choreography must not delay interactivity: elements are clickable
+  mid-entrance, and first meaningful content is server HTML at byte one.
+- **Proof:** the existing gates are the proof harness and all stay in
+  force — global reduced-motion kill (base.css, manual checklist item 5),
+  `assert_page_a11y` on every UI flow, axe over `render-pages`, the asset
+  budget test, `templates_carry_no_images_or_csp_violations` (raster art
+  stays impossible). Implementation lands in a following session; this ADR
+  amends the constitution first so screens follow the doc, not the reverse.
