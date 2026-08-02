@@ -91,7 +91,10 @@ console.log("ok   calendar jump (focus in/out, span highlight, restore)");
   const layers = [...doc.querySelectorAll(".auth-photo")];
   assert(layers.length === 2, "two crossfade layers");
   next.dispatchEvent(new signin.window.MouseEvent("click", { bubbles: true }));
-  assert(layers[1].style.backgroundImage.includes("auth-02"), "next shows the second photo");
+  assert(
+    layers[1].style.backgroundImage.includes("/assets/auth-02"),
+    `next must use an absolute /assets/ URL (relative resolves against /ui/login and 404s), got: ${layers[1].style.backgroundImage}`,
+  );
   assert(layers[1].classList.contains("show") && !layers[0].classList.contains("show"), "layers swapped roles");
   prev.dispatchEvent(new signin.window.MouseEvent("click", { bubbles: true }));
   assert(layers[0].style.backgroundImage.includes("auth-01"), "prev returns to the first photo");

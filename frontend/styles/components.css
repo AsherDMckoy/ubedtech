@@ -2260,6 +2260,9 @@ th[aria-sort="descending"] .sortbtn::after {
   background: transparent;
   width: 30px;
   height: 26px;
+  /* Beat the global button padding (0 14px): at 30px border-box it left
+     a 2px content box that crushed the icon to a dot. */
+  padding: 0;
   border-radius: var(--radius-pill);
   cursor: pointer;
   color: var(--text-muted);

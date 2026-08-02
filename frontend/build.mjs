@@ -27,6 +27,10 @@ await build({
   entryNames: "[name]-[hash]",
   assetNames: "[name]-[hash]",
   loader: { ".woff2": "file", ".jpg": "file" },
+  // Emitted asset URLs must be absolute: the JS photo manifest is used
+  // from /ui/login, where a relative "./auth-….jpg" resolves against the
+  // page URL and 404s. The backend serves all of dist under /assets/.
+  publicPath: "/assets",
   logLevel: "info",
 });
 
