@@ -206,8 +206,14 @@
   background: none;
   color: var(--text-muted);
   border-radius: var(--radius);
-  font-size: 15px;
-  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* One caret glyph both ways: mirrored when the rail is collapsed. */
+.rail-toggle button[aria-expanded="false"] svg {
+  transform: scaleX(-1);
 }
 
 .rail-toggle button:hover {
@@ -630,6 +636,7 @@ textarea {
   transform: translateY(-50%);
   color: var(--text-muted);
   pointer-events: none;
+  display: flex;
 }
 
 .searchbox input {

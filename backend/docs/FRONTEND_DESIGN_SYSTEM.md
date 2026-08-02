@@ -75,7 +75,18 @@ via the same POST. Proof:
 
 Leaf components are Askama macros (`{% import "components/ui.html" as ui
 %}`); composites that wrap arbitrary content are markup patterns — copy
-them from the gallery. All are reduced-motion aware (global kill switch in
+them from the gallery.
+
+**Icon set (2026-08-01): Phosphor Icons, regular weight** (MIT,
+`@phosphor-icons/core` devDependency in `frontend/`). Icons are inlined
+as SVG paths in the templates at authoring time — zero runtime icon
+payload, nothing for the CSP to except. `ui::nav_icon(key)` is the one
+home for nav glyphs; the theme toggle, rail caret (one glyph, CSS-
+mirrored via `aria-expanded`), and search glyph are inline at their
+single call sites. To add an icon, copy the `d` attribute from
+`frontend/node_modules/@phosphor-icons/core/assets/regular/<name>.svg`
+into a `viewBox="0 0 256 256" fill="currentColor"` svg. Never mix in a
+second icon family. All are reduced-motion aware (global kill switch in
 `base.css`) and focus-visible ringed (one global rule, the only permitted
 box-shadow).
 
@@ -196,7 +207,7 @@ box-shadow).
   URL. Expansion bounds pinned by `records::http::month_grid_tests`.
 - **Icon rail** (`.rail` + `shared/nav.rs`, 2026-07-29, ADR-16): the
   fourth animated surface — expanded by default, collapsible to a 48 px
-  icon rail (24 px stroke icons keyed by nav `key` in `ui::nav_icon`),
+  icon rail (24 px icons keyed by nav `key` in `ui::nav_icon`),
   preference in the `ub_rail` cookie via `POST /ui/rail` (theme
   mechanism), `--dur-base` motion, reduced-motion → instant. Collapsed,
   hover/`:focus-within` expands it OVER the content. Nav items are

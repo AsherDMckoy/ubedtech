@@ -465,7 +465,6 @@ addEventListener(
     document.querySelector(".shell")?.classList.toggle("rail-collapsed", collapsing);
     const button = form.querySelector("button[name=rail]");
     button.value = collapsing ? "expanded" : "collapsed";
-    button.textContent = collapsing ? "»" : "«";
     const label = collapsing ? "Expand navigation" : "Collapse navigation";
     button.setAttribute("aria-label", label);
     button.title = label;
