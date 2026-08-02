@@ -1,0 +1,23 @@
+{#-
+  Course-detail dialog (the dialog primitive, animated surface #2) — ONE
+  per page, shared by every catalog row and registered-course item.
+  Openers carry data-course-open plus data-cd-* attributes; the bundled
+  enhancement copies each attribute into its [data-cd-slot] and calls
+  showModal(). JS-off floor: the same facts render in the row itself and
+  its hover/focus expansion — the dialog is presentation, not the only
+  path to the information.
+-#}
+<dialog id="course-dialog" aria-labelledby="course-dialog-title">
+  <p class="cd-faculty" data-cd-slot="faculty"></p>
+  <h2 id="course-dialog-title" data-cd-slot="title"></h2>
+  <p class="cd-desc" data-cd-slot="description"></p>
+  <dl class="cd-grid">
+    <dt>Credits</dt><dd data-cd-slot="credits"></dd>
+    <dt>Meets</dt><dd data-cd-slot="meetings"></dd>
+    <dt>Instructor</dt><dd data-cd-slot="instructors"></dd>
+    <dt>Prerequisites</dt><dd data-cd-slot="prerequisites"></dd>
+  </dl>
+  <div class="dialog-actions">
+    <button type="button" data-dialog-close>Close</button>
+  </div>
+</dialog>

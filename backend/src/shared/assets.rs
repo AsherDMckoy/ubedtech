@@ -337,9 +337,12 @@ mod tests {
     /// CSP build (~61 KiB minified, ADR-12) and catches a second one.
     #[test]
     fn asset_sizes_stay_inside_the_budget() {
+        // 32 → 48 KiB with the ADR-17 polish pass (course dialog/expansion,
+        // photo rotation, motion vocabulary) — renegotiated in the open, in
+        // the commit that spent it, per FRONTEND.md §7.
         assert!(
-            dist().css.len() <= 32 * 1024,
-            "app css bundle is {} bytes; budget is 32 KiB uncompressed",
+            dist().css.len() <= 48 * 1024,
+            "app css bundle is {} bytes; budget is 48 KiB uncompressed",
             dist().css.len()
         );
         // Two latin variable font files (ADR-14); each immutable-cached,

@@ -1004,6 +1004,9 @@ pub fn sample_proof_html() -> Result<String, askama::Error> {
             credit_hours: 3.0,
             meetings: "Mon/Wed 09:00-10:15".into(),
             instructors: "d.thompson".into(),
+            prerequisites: String::new(),
+            description: Some("Representative description for the axe harness.".into()),
+            faculty: Some("Faculty of Science & Technology".into()),
         }],
         generated_on: generated_on(),
     }

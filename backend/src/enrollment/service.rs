@@ -871,7 +871,10 @@ impl EnrollmentService {
                 s.section_code,
                 c.credit_hours::float8 AS credit_hours,
                 COALESCE(m.summary, '') AS meetings,
-                COALESCE(i.names, '') AS instructors
+                COALESCE(i.names, '') AS instructors,
+                COALESCE(p.codes, '') AS prerequisites,
+                c.description,
+                c.faculty
             FROM enrollment e
             JOIN section s ON s.id = e.section_id
             JOIN course c ON c.id = s.course_id
@@ -893,6 +896,12 @@ impl EnrollmentService {
                 JOIN user_account ua ON ua.id = ia.instructor_user_id
                 WHERE ia.section_id = s.id
             ) i ON true
+            LEFT JOIN LATERAL (
+                SELECT string_agg(pc.code, ', ' ORDER BY pc.code) AS codes
+                FROM course_prerequisite cp
+                JOIN course pc ON pc.id = cp.prerequisite_course_id
+                WHERE cp.course_id = c.id
+            ) p ON true
             WHERE e.student_id = $1
               AND e.institution_id = $2
               AND e.status = 'enrolled'

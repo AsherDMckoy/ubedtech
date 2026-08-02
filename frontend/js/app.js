@@ -244,6 +244,22 @@ addEventListener("click", async (event) => {
   }
 });
 
+// Course-detail dialog: an opener carries data-cd-* attributes with the
+// server-rendered facts; clicking copies each into its [data-cd-slot]
+// and opens the one shared dialog. Presentation only — the same facts
+// live in the row and its expansion, so nothing depends on this.
+addEventListener("click", (event) => {
+  const opener = event.target.closest("[data-course-open]");
+  if (!opener) return;
+  const dialog = document.getElementById("course-dialog");
+  if (!dialog) return;
+  for (const slot of dialog.querySelectorAll("[data-cd-slot]")) {
+    const name = slot.dataset.cdSlot;
+    slot.textContent = opener.dataset["cd" + name[0].toUpperCase() + name.slice(1)] || "";
+  }
+  dialog.showModal();
+});
+
 // Schedule class-date highlight: weekly rows carry data-dates (that
 // class's remaining meeting dates); hovering or focusing one lights the
 // matching month cells gold — same read-path pattern as the dashboard

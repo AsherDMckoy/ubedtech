@@ -175,6 +175,9 @@ pub fn sample_dashboard_html() -> Result<String, askama::Error> {
             credit_hours: 3.0,
             meetings: "Mon/Wed 09:00-10:15 · FSB 214".into(),
             instructors: "d.thompson".into(),
+            prerequisites: String::new(),
+            description: Some("Representative description for the axe harness.".into()),
+            faculty: Some("Faculty of Science & Technology".into()),
         }],
         gpa_terms: vec![
             crate::records::TermGpa {
@@ -498,6 +501,9 @@ pub fn sample_registration_html() -> Result<String, askama::Error> {
                 credit_hours: 3.0,
                 meetings: "Mon/Wed 09:00-10:15 · FSB 214".into(),
                 instructors: "d.thompson".into(),
+                prerequisites: String::new(),
+                description: Some("Representative description for the axe harness.".into()),
+                faculty: Some("Faculty of Science & Technology".into()),
             },
             EnrolledSection {
                 enrollment_id: Uuid::nil(),
@@ -507,6 +513,9 @@ pub fn sample_registration_html() -> Result<String, askama::Error> {
                 credit_hours: 4.0,
                 meetings: "Tue/Thu 13:00-14:15".into(),
                 instructors: String::new(),
+                prerequisites: String::new(),
+                description: Some("Representative description for the axe harness.".into()),
+                faculty: Some("Faculty of Science & Technology".into()),
             },
         ],
         notice: Some("You are registered."),

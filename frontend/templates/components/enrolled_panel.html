@@ -17,11 +17,21 @@
     {% for enrolled in enrollments %}
       <li>
         <div class="enrolled-main">
-          <p class="c-course">{{ enrolled.course_code }} · {{ enrolled.course_title }}</p>
-          <p class="c-detail">Sec {{ enrolled.section_code }} · {{ enrolled.credit_hours }} cr{% if !enrolled.meetings.is_empty() %} · {{ enrolled.meetings }}{% endif %}</p>
-          {% if !enrolled.instructors.is_empty() %}
-            <p class="c-detail">Instructor: {{ enrolled.instructors }}</p>
-          {% endif %}
+          {#- Three distinct lines (section + time / credits / instructor);
+              the course name opens the shared course dialog. -#}
+          <button type="button" class="c-open" data-course-open
+                  data-cd-title="{{ enrolled.course_code }} · {{ enrolled.course_title }}"
+                  data-cd-credits="{{ enrolled.credit_hours }} credits"
+                  data-cd-meetings="{% if enrolled.meetings.is_empty() %}Not yet scheduled{% else %}{{ enrolled.meetings }}{% endif %}"
+                  data-cd-instructors="{% if enrolled.instructors.is_empty() %}TBA{% else %}{{ enrolled.instructors }}{% endif %}"
+                  data-cd-prerequisites="{% if enrolled.prerequisites.is_empty() %}None{% else %}{{ enrolled.prerequisites }}{% endif %}"
+                  data-cd-description="{% if let Some(description) = enrolled.description %}{{ description }}{% else %}No description on file yet.{% endif %}"
+                  data-cd-faculty="{% if let Some(faculty) = enrolled.faculty %}{{ faculty }}{% endif %}">
+            <span class="c-course">{{ enrolled.course_code }} · {{ enrolled.course_title }}</span>
+          </button>
+          <p class="c-detail">Sec {{ enrolled.section_code }}{% if !enrolled.meetings.is_empty() %} · {{ enrolled.meetings }}{% endif %}</p>
+          <p class="c-detail">{{ enrolled.credit_hours }} credits</p>
+          <p class="c-detail">Instructor: {% if enrolled.instructors.is_empty() %}TBA{% else %}{{ enrolled.instructors }}{% endif %}</p>
         </div>
         <form method="post" action="/ui/registration/drop"
               data-confirm-dialog="drop-dialog"

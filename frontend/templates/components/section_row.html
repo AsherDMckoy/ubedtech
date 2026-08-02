@@ -9,8 +9,28 @@
 -#}
 <tr data-search="{{ row.search_key() }}"{% if row.is_enrolled() %} class="is-enrolled"{% endif %}>
   <td>
-    <p class="c-course">{{ row.section.course_code }} · {{ row.section.course_title }}</p>
+    {#- The course name opens the shared course dialog; the same facts
+        also expand in place on row hover/focus (works with JS off). -#}
+    <button type="button" class="c-open" data-course-open
+            data-cd-title="{{ row.section.course_code }} · {{ row.section.course_title }}"
+            data-cd-credits="{{ row.section.credit_hours }} credits"
+            data-cd-meetings="{% if row.section.meetings.is_empty() %}Not yet scheduled{% else %}{{ row.section.meetings }}{% endif %}"
+            data-cd-instructors="{% if row.section.instructors.is_empty() %}TBA{% else %}{{ row.section.instructors }}{% endif %}"
+            data-cd-prerequisites="{% if row.section.prerequisites.is_empty() %}None{% else %}{{ row.section.prerequisites }}{% endif %}"
+            data-cd-description="{% if let Some(description) = row.section.description %}{{ description }}{% else %}No description on file yet.{% endif %}"
+            data-cd-faculty="{% if let Some(faculty) = row.section.faculty %}{{ faculty }}{% endif %}">
+      <span class="c-course">{{ row.section.course_code }} · {{ row.section.course_title }}</span>
+    </button>
     <p class="c-detail">Sec {{ row.section.section_code }}{% if !row.section.meetings.is_empty() %} · {{ row.section.meetings }}{% endif %} · {{ row.section.credit_hours }} cr</p>
+    <div class="c-more">
+      <div>
+        <p class="c-detail">Instructor: {% if row.section.instructors.is_empty() %}TBA{% else %}{{ row.section.instructors }}{% endif %}</p>
+        <p class="c-detail">Prerequisites: {% if row.section.prerequisites.is_empty() %}None{% else %}{{ row.section.prerequisites }}{% endif %}</p>
+        {% if let Some(faculty) = row.section.faculty %}
+          <p class="c-detail">{{ faculty }}</p>
+        {% endif %}
+      </div>
+    </div>
     {% if let Some(reason) = row.denial %}
       <p class="reason"><span aria-hidden="true">🔒</span>{{ reason }}</p>
     {% endif %}

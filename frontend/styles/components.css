@@ -1050,10 +1050,84 @@ details.menu[open] > .menu-panel {
   margin: 0;
 }
 
+/* The course name as an unstyled button — it opens the course dialog.
+   Gold underline cue on hover/focus; inherits the row's typography. */
+.c-open {
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.c-open:hover .c-course,
+.c-open:focus-visible .c-course {
+  color: var(--text-accent);
+  text-decoration: underline;
+  text-decoration-color: var(--action);
+  text-underline-offset: 3px;
+}
+
+/* In-row detail expansion: collapsed to zero rows, expands on row
+   hover/focus (CSS only — works with JS off, honest under reduced
+   motion as an instant state change). */
+.c-more {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-base) var(--ease-enter);
+}
+
+.c-more > div {
+  overflow: hidden;
+  min-height: 0;
+}
+
+tr:hover .c-more,
+tr:focus-within .c-more {
+  grid-template-rows: 1fr;
+}
+
 .c-detail {
   font-size: 12px;
   color: var(--text-secondary);
   margin: var(--space-1) 0 0;
+}
+
+/* Course-dialog content: faculty eyebrow, description, facts grid. */
+.cd-faculty {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-accent);
+  margin: 0 0 var(--space-1);
+}
+
+.cd-faculty:empty {
+  display: none;
+}
+
+.cd-desc {
+  color: var(--text-secondary);
+  margin: var(--space-2) 0 var(--space-3);
+  max-width: 46ch;
+}
+
+.cd-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-4);
+  margin: 0 0 var(--space-3);
+  font-size: 13px;
+}
+
+.cd-grid dt {
+  color: var(--text-muted);
+}
+
+.cd-grid dd {
+  margin: 0;
 }
 
 .reason {

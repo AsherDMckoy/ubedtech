@@ -153,9 +153,15 @@ pub struct CatalogSection {
     pub section_code: String,
     pub capacity: i32,
     pub enrolled_count: i32,
-    /// e.g. "1 09:00-10:15, 3 09:00-10:15" (ISO day numbers), empty when
-    /// meetings are not yet scheduled.
+    /// e.g. "Mon 09:00-10:15 · Rm 214 (Belmopan)", empty when meetings
+    /// are not yet scheduled.
     pub meetings: String,
+    /// Comma-joined instructor usernames; empty = not yet assigned (TBA).
+    pub instructors: String,
+    /// Comma-joined prerequisite course codes; empty = none.
+    pub prerequisites: String,
+    pub description: Option<String>,
+    pub faculty: Option<String>,
     /// The viewing student's active enrollment in this section, if any — the
     /// registration screen renders that row in its "enrolled" state and
     /// offers Drop. `None` for a non-student actor or an unenrolled section.
@@ -838,10 +844,14 @@ impl AcademicsService {
                 c.code AS course_code,
                 c.title AS course_title,
                 c.credit_hours::float8 AS credit_hours,
+                c.description,
+                c.faculty,
                 s.section_code,
                 cap.capacity,
                 cap.enrolled_count,
                 COALESCE(m.summary, '') AS meetings,
+                COALESCE(i.names, '') AS instructors,
+                COALESCE(p.codes, '') AS prerequisites,
                 my_e.id AS enrolled_enrollment_id
             FROM (
                 SELECT s.id
@@ -859,14 +869,28 @@ impl AcademicsService {
             JOIN section_capacity cap ON cap.section_id = s.id
             LEFT JOIN LATERAL (
                 SELECT string_agg(
-                           (ARRAY['Mon','Tue','Wed','Thu','Fri','Sat','Sun'])[day_of_week]
-                           || ' ' || to_char(starts_at, 'HH24:MI')
-                           || '-' || to_char(ends_at, 'HH24:MI'),
-                           ', ' ORDER BY day_of_week, starts_at
+                           (ARRAY['Mon','Tue','Wed','Thu','Fri','Sat','Sun'])[sm.day_of_week]
+                           || ' ' || to_char(sm.starts_at, 'HH24:MI')
+                           || '-' || to_char(sm.ends_at, 'HH24:MI')
+                           || COALESCE(' · Rm ' || r.room_code || ' (' || r.campus_code || ')', ''),
+                           ', ' ORDER BY sm.day_of_week, sm.starts_at
                        ) AS summary
-                FROM section_meeting
-                WHERE section_id = s.id
+                FROM section_meeting sm
+                LEFT JOIN room r ON r.id = sm.room_id
+                WHERE sm.section_id = s.id
             ) m ON true
+            LEFT JOIN LATERAL (
+                SELECT string_agg(ua.username, ', ' ORDER BY ua.username) AS names
+                FROM instructor_assignment ia
+                JOIN user_account ua ON ua.id = ia.instructor_user_id
+                WHERE ia.section_id = s.id
+            ) i ON true
+            LEFT JOIN LATERAL (
+                SELECT string_agg(pc.code, ', ' ORDER BY pc.code) AS codes
+                FROM course_prerequisite cp
+                JOIN course pc ON pc.id = cp.prerequisite_course_id
+                WHERE cp.course_id = c.id
+            ) p ON true
             LEFT JOIN enrollment my_e
                    ON my_e.section_id = s.id
                   AND my_e.student_id = $6
@@ -901,24 +925,42 @@ impl AcademicsService {
                 c.code AS course_code,
                 c.title AS course_title,
                 c.credit_hours::float8 AS credit_hours,
+                c.description,
+                c.faculty,
                 s.section_code,
                 cap.capacity,
                 cap.enrolled_count,
                 COALESCE(m.summary, '') AS meetings,
+                COALESCE(i.names, '') AS instructors,
+                COALESCE(p.codes, '') AS prerequisites,
                 my_e.id AS enrolled_enrollment_id
             FROM section s
             JOIN course c ON c.id = s.course_id
             JOIN section_capacity cap ON cap.section_id = s.id
             LEFT JOIN LATERAL (
                 SELECT string_agg(
-                           (ARRAY['Mon','Tue','Wed','Thu','Fri','Sat','Sun'])[day_of_week]
-                           || ' ' || to_char(starts_at, 'HH24:MI')
-                           || '-' || to_char(ends_at, 'HH24:MI'),
-                           ', ' ORDER BY day_of_week, starts_at
+                           (ARRAY['Mon','Tue','Wed','Thu','Fri','Sat','Sun'])[sm.day_of_week]
+                           || ' ' || to_char(sm.starts_at, 'HH24:MI')
+                           || '-' || to_char(sm.ends_at, 'HH24:MI')
+                           || COALESCE(' · Rm ' || r.room_code || ' (' || r.campus_code || ')', ''),
+                           ', ' ORDER BY sm.day_of_week, sm.starts_at
                        ) AS summary
-                FROM section_meeting
-                WHERE section_id = s.id
+                FROM section_meeting sm
+                LEFT JOIN room r ON r.id = sm.room_id
+                WHERE sm.section_id = s.id
             ) m ON true
+            LEFT JOIN LATERAL (
+                SELECT string_agg(ua.username, ', ' ORDER BY ua.username) AS names
+                FROM instructor_assignment ia
+                JOIN user_account ua ON ua.id = ia.instructor_user_id
+                WHERE ia.section_id = s.id
+            ) i ON true
+            LEFT JOIN LATERAL (
+                SELECT string_agg(pc.code, ', ' ORDER BY pc.code) AS codes
+                FROM course_prerequisite cp
+                JOIN course pc ON pc.id = cp.prerequisite_course_id
+                WHERE cp.course_id = c.id
+            ) p ON true
             LEFT JOIN enrollment my_e
                    ON my_e.section_id = s.id
                   AND my_e.student_id = $3

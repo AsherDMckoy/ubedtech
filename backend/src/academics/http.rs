@@ -336,10 +336,14 @@ pub fn sample_catalog_html() -> Result<String, askama::Error> {
             course_code: code.to_owned(),
             course_title: title.to_owned(),
             credit_hours: 3.0,
+            description: Some("Representative course description for the axe harness.".to_owned()),
+            faculty: Some("Faculty of Science & Technology".to_owned()),
             section_code: sec.to_owned(),
             capacity,
             enrolled_count: enrolled,
-            meetings: "Mon/Wed 09:00-10:15".to_owned(),
+            meetings: "Mon/Wed 09:00-10:15 · Rm 214 (Belmopan)".to_owned(),
+            instructors: "v.alvarez".to_owned(),
+            prerequisites: "CMPS-1121".to_owned(),
             enrolled_enrollment_id: mine,
         }
     };
@@ -391,6 +395,9 @@ pub fn sample_catalog_html() -> Result<String, askama::Error> {
             credit_hours: 3.0,
             meetings: "Mon/Wed 09:00-10:15 · FSB 214".into(),
             instructors: "d.thompson".into(),
+            prerequisites: String::new(),
+            description: Some("Representative description for the axe harness.".into()),
+            faculty: Some("Faculty of Science & Technology".into()),
         }],
         is_student: true,
     }

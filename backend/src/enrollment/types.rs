@@ -80,6 +80,10 @@ pub struct EnrolledSection {
     pub meetings: String,
     /// Comma-joined usernames; empty when no instructor is assigned yet.
     pub instructors: String,
+    /// Comma-joined prerequisite course codes; empty = none.
+    pub prerequisites: String,
+    pub description: Option<String>,
+    pub faculty: Option<String>,
 }
 
 /// Total credit hours across a set of enrollments — the one key number on

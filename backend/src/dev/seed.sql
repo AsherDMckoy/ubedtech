@@ -383,3 +383,22 @@ INSERT INTO grade_record (id, institution_id, enrollment_id, grade_code, grade_p
 ON CONFLICT (id) DO NOTHING;
 
 COMMIT;
+
+-- Course details (0018): description + faculty for the catalog modal.
+UPDATE course SET faculty = 'Faculty of Science & Technology',
+    description = CASE code
+        WHEN 'CMPS-1121' THEN 'First programming course: values, control flow, functions, and small programs, taught in Python. No prior experience assumed.'
+        WHEN 'CMPS-2131' THEN 'Arrays, lists, stacks, queues, trees, hash tables, and graphs, with the algorithms that use them and the cost model to reason about both.'
+        WHEN 'CMPS-2515' THEN 'Building and deploying server-rendered web applications: HTTP, forms, sessions, databases, and the security failures that follow from getting them wrong.'
+        WHEN 'CMPS-3141' THEN 'Team construction of a real system: requirements, design, testing, code review, and delivery, with weekly builds that must keep working.'
+        WHEN 'MATH-1151' THEN 'Functions, equations, and inequalities as preparation for calculus; emphasis on fluency over memorization.'
+        WHEN 'MATH-2110' THEN 'Integration techniques, sequences and series, and an introduction to differential equations. Continues MATH-1151.'
+        WHEN 'MATH-3201' THEN 'Vector spaces, linear maps, matrices, determinants, and eigenvalues, with applications to systems of equations and geometry.'
+        WHEN 'PHYS-2101' THEN 'Newtonian mechanics with calculus: kinematics, dynamics, energy, momentum, and rotation, with a weekly laboratory.'
+        ELSE description
+    END
+WHERE code LIKE 'CMPS-%' OR code LIKE 'MATH-%' OR code LIKE 'PHYS-%';
+
+UPDATE course SET faculty = 'Faculty of Education & Arts',
+    description = 'Academic writing: argument, structure, evidence, and revision across several graded essays.'
+WHERE code = 'ENGL-1101';
