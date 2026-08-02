@@ -15,9 +15,10 @@ pub struct Dist {
     css: String,
     js_href: String,
     js: String,
-    /// Fingerprinted binary assets the bundles reference (the two vendored
-    /// font files) — served immutable like everything else in dist.
-    fonts: Vec<(String, Vec<u8>)>,
+    /// Fingerprinted binary assets the bundles reference (vendored fonts,
+    /// sign-in photos) — (href, bytes, content type), served immutable
+    /// like everything else in dist.
+    files: Vec<(String, Vec<u8>, &'static str)>,
 }
 
 /// The dist directory: `APP_FRONTEND_DIST` if set, else `frontend/dist`
@@ -43,17 +44,22 @@ pub fn dist() -> &'static Dist {
                  at the built assets."
             )
         });
-        let mut fonts = Vec::new();
+        let mut files = Vec::new();
         for entry in entries {
             let path = entry.expect("dist directory entry").path();
             let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            let content_type = match name {
+                _ if name.ends_with(".woff2") => Some("font/woff2"),
+                _ if name.ends_with(".jpg") => Some("image/jpeg"),
+                _ => None,
+            };
+            if let Some(content_type) = content_type {
+                let bytes = std::fs::read(&path)
+                    .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
+                files.push((format!("/assets/{name}"), bytes, content_type));
+                continue;
+            }
             let slot = match name {
-                _ if name.ends_with(".woff2") => {
-                    let bytes = std::fs::read(&path)
-                        .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
-                    fonts.push((format!("/assets/{name}"), bytes));
-                    continue;
-                }
                 _ if name.starts_with("app-") && name.ends_with(".css") => &mut css,
                 _ if name.starts_with("app-") && name.ends_with(".js") => &mut js,
                 _ => continue,
@@ -67,7 +73,7 @@ pub fn dist() -> &'static Dist {
                 .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
             *slot = Some((format!("/assets/{name}"), content));
         }
-        fonts.sort();
+        files.sort();
         let (css_href, css) =
             css.unwrap_or_else(|| panic!("no app-*.css bundle in {dir}; run `npm run build`"));
         let (js_href, js) =
@@ -77,7 +83,7 @@ pub fn dist() -> &'static Dist {
             css,
             js_href,
             js,
-            fonts,
+            files,
         }
     })
 }
@@ -129,11 +135,11 @@ async fn js() -> HttpResponse {
         .body(dist().js.as_str())
 }
 
-async fn font(request: actix_web::HttpRequest) -> HttpResponse {
+async fn file(request: actix_web::HttpRequest) -> HttpResponse {
     let wanted = request.path();
-    match dist().fonts.iter().find(|(href, _)| href == wanted) {
-        Some((_, bytes)) => HttpResponse::Ok()
-            .content_type("font/woff2")
+    match dist().files.iter().find(|(href, _, _)| href == wanted) {
+        Some((_, bytes, content_type)) => HttpResponse::Ok()
+            .content_type(*content_type)
             .insert_header(IMMUTABLE)
             .body(bytes.as_slice()),
         None => HttpResponse::NotFound().finish(),
@@ -143,8 +149,8 @@ async fn font(request: actix_web::HttpRequest) -> HttpResponse {
 pub fn routes(cfg: &mut web::ServiceConfig) {
     cfg.route(css_href(), web::get().to(css));
     cfg.route(js_href(), web::get().to(js));
-    for (href, _) in &dist().fonts {
-        cfg.route(href, web::get().to(font));
+    for (href, _, _) in &dist().files {
+        cfg.route(href, web::get().to(file));
     }
 }
 
@@ -252,9 +258,9 @@ mod tests {
             assert_eq!(served, body.as_bytes());
         }
 
-        // The vendored fonts serve the same way: fingerprinted, immutable,
-        // correct MIME, byte-identical.
-        for (href, bytes) in &dist().fonts {
+        // The binary assets (fonts, sign-in photos) serve the same way:
+        // fingerprinted, immutable, correct MIME, byte-identical.
+        for (href, bytes, content_type) in &dist().files {
             let response = actix_test::call_service(
                 &app,
                 actix_test::TestRequest::get().uri(href).to_request(),
@@ -267,7 +273,8 @@ mod tests {
             );
             assert_eq!(
                 response.headers().get(header::CONTENT_TYPE).unwrap(),
-                "font/woff2"
+                *content_type,
+                "{href}"
             );
             let served = actix_test::read_body(response).await;
             assert_eq!(&served[..], bytes.as_slice());
@@ -346,12 +353,23 @@ mod tests {
             dist().css.len()
         );
         // Two latin variable font files (ADR-14); each immutable-cached,
-        // font-display swap, so they never block first paint.
-        assert_eq!(dist().fonts.len(), 2, "expected the two vendored fonts");
-        for (href, bytes) in &dist().fonts {
+        // font-display swap, so they never block first paint. Photos
+        // (ADR-18) are decorative, fetched only when shown, and capped
+        // per file so no single navigation is a megabyte.
+        let fonts: Vec<_> = dist()
+            .files
+            .iter()
+            .filter(|(_, _, content_type)| *content_type == "font/woff2")
+            .collect();
+        assert_eq!(fonts.len(), 2, "expected the two vendored fonts");
+        for (href, bytes, content_type) in &dist().files {
+            let budget = match *content_type {
+                "font/woff2" => 72 * 1024,
+                _ => 384 * 1024,
+            };
             assert!(
-                bytes.len() <= 72 * 1024,
-                "{href} is {} bytes; font budget is 72 KiB per file",
+                bytes.len() <= budget,
+                "{href} is {} bytes; budget is {budget} bytes per file",
                 bytes.len()
             );
         }

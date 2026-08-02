@@ -94,27 +94,45 @@
   background-size: cover;
   background-position: center;
   opacity: 0;
-  animation: auth-cycle 36s linear infinite;
+  transition: opacity var(--dur-base) var(--ease-enter);
 }
 
-/* Reduced motion kills the animation (global rule); the first photo's
-   base opacity keeps the column a finished static composition. */
-.auth-photo-1 { opacity: 1; background-image: url("../images/auth-01.jpg"); }
-.auth-photo-2 { animation-delay: 6s;  background-image: url("../images/auth-02.jpg"); }
-.auth-photo-3 { animation-delay: 12s; background-image: url("../images/auth-03.jpg"); }
-.auth-photo-4 { animation-delay: 18s; background-image: url("../images/auth-04.jpg"); }
-.auth-photo-5 { animation-delay: 24s; background-image: url("../images/auth-05.jpg"); }
-.auth-photo-6 { animation-delay: 30s; background-image: url("../images/auth-06.jpg"); }
-
-/* Six slots × 6s: fade in over 1s, hold ~5s, fade out as the next slot
-   fades in (16.7% of 36s per slot; 2.8% ≈ 1s of crossfade). */
-@keyframes auth-cycle {
-  0% { opacity: 0; }
-  2.8% { opacity: 1; }
-  16.7% { opacity: 1; }
-  19.5% { opacity: 0; }
-  100% { opacity: 0; }
+.auth-photo.show {
+  opacity: 1;
 }
+
+/* JS-off/static fallback: the first photo is baked into CSS; the arrow
+   enhancement pages the full generated set (photos.gen.js) through the
+   two layers. */
+.auth-photo-1 {
+  background-image: url("../images/auth-01.jpg");
+}
+
+/* Photo pager arrows — unhidden by the enhancement, above the overlay. */
+.auth-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 1;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: rgba(42, 26, 74, 0.55);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-enter);
+}
+
+.auth-nav:hover {
+  background: rgba(42, 26, 74, 0.85);
+}
+
+.auth-nav-prev { left: var(--space-4); }
+.auth-nav-next { right: var(--space-4); }
 
 /* The brand overlay rides above the photos, below the tagline — the
    same gradient recipe, translucent, keeping text AA-readable on any

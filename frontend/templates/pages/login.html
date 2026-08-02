@@ -32,13 +32,19 @@
         </form>
       </div>
     </section>
-    <aside class="auth-visual">
-      <div class="auth-photo auth-photo-1" aria-hidden="true"></div>
-      <div class="auth-photo auth-photo-2" aria-hidden="true"></div>
-      <div class="auth-photo auth-photo-3" aria-hidden="true"></div>
-      <div class="auth-photo auth-photo-4" aria-hidden="true"></div>
-      <div class="auth-photo auth-photo-5" aria-hidden="true"></div>
-      <div class="auth-photo auth-photo-6" aria-hidden="true"></div>
+    <aside class="auth-visual" data-photo-nav>
+      {#- Two ping-pong layers: the first carries a CSS background as the
+          JS-off/static fallback; the enhancement pages the full photo
+          set through them (arrows unhide with JS). Photos fetch only
+          when shown. -#}
+      <div class="auth-photo auth-photo-1 show" aria-hidden="true"></div>
+      <div class="auth-photo" aria-hidden="true"></div>
+      <button type="button" class="auth-nav auth-nav-prev" data-photo-prev aria-label="Previous photo" hidden>
+        <svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M165.66,202.34a8,8,0,0,1-11.32,11.32l-80-80a8,8,0,0,1,0-11.32l80-80a8,8,0,0,1,11.32,11.32L91.31,128Z"/></svg>
+      </button>
+      <button type="button" class="auth-nav auth-nav-next" data-photo-next aria-label="Next photo" hidden>
+        <svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z"/></svg>
+      </button>
       <div class="auth-tagline">
         <p class="auth-inst">University of Belize</p>
         <p class="auth-line">Registration, records, and results — in one place.</p>

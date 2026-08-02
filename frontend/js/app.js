@@ -4,6 +4,34 @@
 // components register themselves with Alpine.data() here as later sessions
 // add them.
 import Alpine from "@alpinejs/csp";
+import authPhotos from "./photos.gen.js";
+
+// Sign-in photo pager (ADR-18): pages the full placeholder set through
+// the two crossfade layers. CSSOM background swaps (not style
+// attributes), so the CSP stays clean; a photo is fetched only when
+// shown. JS off: the arrows stay hidden and CSS shows the first photo.
+{
+  const visual = document.querySelector("[data-photo-nav]");
+  if (visual && authPhotos.length > 1) {
+    const layers = visual.querySelectorAll(".auth-photo");
+    let front = layers[0];
+    let back = layers[1];
+    let index = 0;
+    const show = (next) => {
+      index = (next + authPhotos.length) % authPhotos.length;
+      back.style.backgroundImage = `url("${authPhotos[index]}")`;
+      back.classList.add("show");
+      front.classList.remove("show");
+      [front, back] = [back, front];
+    };
+    for (const button of visual.querySelectorAll("[data-photo-prev], [data-photo-next]")) {
+      button.hidden = false;
+      button.addEventListener("click", () => {
+        show(index + ("photoNext" in button.dataset ? 1 : -1));
+      });
+    }
+  }
+}
 
 // Honest in-progress state: disable a form's buttons and swap any button
 // carrying data-busy-label to that label ("Checking…", "Submitting…"). The
