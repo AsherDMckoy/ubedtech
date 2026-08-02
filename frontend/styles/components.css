@@ -169,34 +169,23 @@
   box-shadow: var(--shadow-lg);
 }
 
-/* Labels, brand name, and footer fade with the width. pointer-events on
-   the footer: invisible sign-out/theme controls must not be clickable
-   in the collapsed state (they stay in the accessibility tree, and
-   tabbing to them expands the rail first via :focus-within). */
+/* Labels and the brand name fade with the width; they stay in the
+   accessibility tree either way. */
 .rail .navlink-label,
-.rail .brand-name,
-.rail .rail-foot {
+.rail .brand-name {
   transition: opacity var(--dur-base) var(--ease-enter);
 }
 
 .rail-collapsed .rail .navlink-label,
-.rail-collapsed .rail .brand-name,
-.rail-collapsed .rail .rail-foot {
+.rail-collapsed .rail .brand-name {
   opacity: 0;
-}
-
-.rail-collapsed .rail .rail-foot {
-  pointer-events: none;
 }
 
 .rail-collapsed .rail:hover .navlink-label,
 .rail-collapsed .rail:focus-within .navlink-label,
 .rail-collapsed .rail:hover .brand-name,
-.rail-collapsed .rail:focus-within .brand-name,
-.rail-collapsed .rail:hover .rail-foot,
-.rail-collapsed .rail:focus-within .rail-foot {
+.rail-collapsed .rail:focus-within .brand-name {
   opacity: 1;
-  pointer-events: auto;
 }
 
 /* The rail brand row IS the collapse control: the UB mark (a real submit
@@ -325,14 +314,8 @@ button.brand-mark:hover {
   padding-left: 4px;
 }
 
-.rail-foot {
-  margin-top: auto;
-  padding: var(--space-2);
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
 main {
+  position: relative;
   padding: var(--space-4) var(--space-5) var(--space-5);
   min-width: 0;
 }
@@ -919,6 +902,107 @@ details.menu[open] > .menu-panel {
 .menu-panel a.cur {
   color: var(--text-accent);
   font-weight: 500;
+}
+
+/* ---------- persistent header: the account menu rides the page title's
+   line, top right of every signed-in page (base.html renders it once).
+   Reuses animated surface #1. Selectors carry the details prefix to win
+   the tie against the generic details.menu rules above. */
+
+details.user-menu {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-5);
+  z-index: 20;
+}
+
+details.user-menu > summary {
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+}
+
+details.user-menu > summary::after {
+  content: none;
+}
+
+.avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-pill);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, var(--purple-600), var(--purple-800));
+  box-shadow: var(--shadow-sm);
+  transition: filter var(--dur-fast) var(--ease-enter);
+}
+
+details.user-menu > summary:hover .avatar {
+  filter: brightness(1.15);
+}
+
+details.user-menu > .menu-panel {
+  min-width: 260px;
+  padding: var(--space-3);
+  gap: var(--space-2);
+}
+
+.user-card {
+  padding-bottom: var(--space-2);
+  border-bottom: 0.5px solid var(--border);
+}
+
+.user-name {
+  font-weight: 600;
+  font-size: 15px;
+  margin: 0;
+}
+
+.user-mail {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.user-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px var(--space-3);
+  margin: 0;
+  font-size: 13px;
+}
+
+.user-facts > div {
+  display: contents;
+}
+
+.user-facts dt {
+  color: var(--text-muted);
+}
+
+.user-facts dd {
+  margin: 0;
+  text-align: right;
+}
+
+/* The theme segmented control keeps its own compact geometry inside the
+   panel (the panel's generic button rules would stretch it). */
+.user-menu .theme {
+  margin: 0;
+  align-self: start;
+}
+
+.user-menu .theme button {
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  justify-content: center;
 }
 
 /* ---------- status badge (colors come from shared::assets::badge_class —
@@ -1839,6 +1923,7 @@ details.drawer[open] > .drawer-panel {
   .rail,
   .topbar,
   .skip-link,
+  .user-menu,
   .no-print {
     display: none !important;
   }

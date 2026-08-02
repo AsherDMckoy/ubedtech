@@ -152,6 +152,22 @@ INSERT INTO user_account (id, institution_id, username, email, status) VALUES
     ('00000000-0000-0000-0000-00000000001a', '00000000-0000-0000-0000-000000000001', 'demo.roster2',    'demo.roster2@example.test',    'active')
 ON CONFLICT (id) DO NOTHING;
 
+-- Names for the header account menu (idempotent overwrite: names are
+-- display data, the UPDATE is safe to re-run).
+UPDATE user_account SET full_name = names.full_name
+FROM (VALUES
+    ('demo.student',    'Dana Castillo'),
+    ('demo.held',       'Marlon Usher'),
+    ('demo.instructor', 'Alba Flores'),
+    ('demo.registrar',  'Renee Garbutt'),
+    ('demo.admin',      'Iris Novelo'),
+    ('demo.platform',   'Platform Operations'),
+    ('demo.roster1',    'Kian Palacio'),
+    ('demo.roster2',    'Tricia Coye')
+) AS names(username, full_name)
+WHERE user_account.username = names.username
+  AND user_account.institution_id = '00000000-0000-0000-0000-000000000001';
+
 -- Argon2id hash of 'ub-demo-password' (same parameters as the app).
 INSERT INTO password_credential (user_id, password_hash)
 SELECT u.id, '$argon2id$v=19$m=19456,t=2,p=1$99CTbaIfZJFqiVMnv0u5gQ$lqucWyopzupwC/t4+Gf/2F5LI30AyNOoRiOCnWAGOgE'

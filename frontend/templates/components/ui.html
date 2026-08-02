@@ -105,9 +105,44 @@
   {% endfor %}
 {% endmacro %}
 
+{#- Persistent header account menu (top right of every signed-in page,
+    on the page title's line): who is signed in, the theme switcher, and
+    sign out. Animated surface #1 (details.menu) — works with JS off. -#}
+{% macro user_menu() %}
+  {% if let Some(user) = crate::shared::theme::user_menu() %}
+    <details class="menu user-menu">
+      <summary aria-label="Account: {{ user.name() }}">
+        <span class="avatar" aria-hidden="true">{{ user.initials() }}</span>
+      </summary>
+      <div class="menu-panel">
+        <div class="user-card">
+          <p class="user-name">{{ user.name() }}</p>
+          <p class="user-mail">{{ user.email }}</p>
+          <dl class="user-facts">
+            {% if let Some(number) = user.student_number %}
+              <div><dt>Student ID</dt><dd>{{ number }}</dd></div>
+            {% endif %}
+            {% if let Some(program) = user.program_code %}
+              <div><dt>Programme</dt><dd>{{ program }}</dd></div>
+            {% endif %}
+            {% if let Some(standing) = user.standing() %}
+              <div><dt>Standing</dt><dd>{{ standing }}</dd></div>
+            {% endif %}
+            {% if user.student_number.is_none() %}
+              <div><dt>Role</dt><dd>{{ crate::shared::theme::role_labels().join(", ") }}</dd></div>
+            {% endif %}
+          </dl>
+        </div>
+        {% call theme_toggle() %}{% endcall %}
+        <a href="/ui/signout" data-dialog-open="signout-dialog">Sign out</a>
+      </div>
+    </details>
+  {% endif %}
+{% endmacro %}
+
 {#- The app shell chrome every signed-in page uses: mobile topbar +
-    sheet, desktop rail with collapse toggle, theme toggle and sign out
-    in the rail foot. -#}
+    sheet, desktop rail with collapse toggle; identity, theme, and sign
+    out live in the header account menu. -#}
 {% macro primary_nav(current) %}
   <header class="topbar">
     <span class="brand"><span class="brand-mark" aria-hidden="true">UB</span><span class="brand-name">University of Belize</span></span>
@@ -115,17 +150,12 @@
       <summary>Menu</summary>
       <nav class="sheet-panel" aria-label="Primary">
         {% call nav_items(current) %}{% endcall %}
-        {% call theme_toggle() %}{% endcall %}
       </nav>
     </details>
   </header>
   <nav class="rail" aria-label="Primary">
     {% call rail_brand() %}{% endcall %}
     {% call nav_items(current) %}{% endcall %}
-    <div class="rail-foot">
-      {% call theme_toggle() %}{% endcall %}
-      <a href="/ui/signout" data-dialog-open="signout-dialog">Sign out</a>
-    </div>
   </nav>
   {#- Sign-out confirmation (animated surface #2, slice C). Enhancement
       only: with JS off the link above goes to the full confirmation page

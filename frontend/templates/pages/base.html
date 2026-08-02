@@ -17,6 +17,7 @@
     {% endblock %}
 
     <main id="main">
+      {% call ui::user_menu() %}{% endcall %}
       {% block content %}{% endblock %}
     </main>
   </div>

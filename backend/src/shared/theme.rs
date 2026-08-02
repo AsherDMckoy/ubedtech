@@ -33,6 +33,81 @@ tokio::task_local! {
     static RAIL: &'static str;
     static CSRF: Option<String>;
     static NAV_ROLES: HashSet<Role>;
+    static USER_MENU: Option<UserMenu>;
+}
+
+/// Identity shown by the persistent header's account menu — the fields
+/// the system actually models (there is no faculty or class-level on
+/// people; docs/IMPLEMENTATION_PLAN.md assumption A39). Fetched once per
+/// signed-in `/ui/` page render, one indexed LEFT-JOIN query.
+#[derive(Clone, sqlx::FromRow)]
+pub struct UserMenu {
+    pub full_name: String,
+    pub username: String,
+    pub email: String,
+    pub student_number: Option<String>,
+    pub program_code: Option<String>,
+    pub academic_status: Option<String>,
+}
+
+impl UserMenu {
+    /// Display name: the full name when set, the username until then.
+    pub fn name(&self) -> &str {
+        if self.full_name.is_empty() {
+            &self.username
+        } else {
+            &self.full_name
+        }
+    }
+
+    /// Up to two initials for the avatar chip ("Dana Castillo" → "DC",
+    /// "demo.student" → "DS").
+    pub fn initials(&self) -> String {
+        self.name()
+            .split([' ', '.', '-'])
+            .filter(|part| !part.is_empty())
+            .take(2)
+            .filter_map(|part| part.chars().next())
+            .flat_map(char::to_uppercase)
+            .collect()
+    }
+
+    /// "good_standing" → "Good standing".
+    pub fn standing(&self) -> Option<String> {
+        self.academic_status.as_ref().map(|status| {
+            let mut label = status.replace('_', " ");
+            if let Some(first) = label.get_mut(0..1) {
+                first.make_ascii_uppercase();
+            }
+            label
+        })
+    }
+}
+
+/// The signed-in identity for the header menu; None when signed out or
+/// outside a request.
+pub fn user_menu() -> Option<UserMenu> {
+    USER_MENU.try_with(Clone::clone).ok().flatten()
+}
+
+/// Human labels for the actor's roles, stable order — the menu's answer
+/// for non-student accounts.
+pub fn role_labels() -> Vec<&'static str> {
+    const ORDER: [(Role, &str); 7] = [
+        (Role::Student, "Student"),
+        (Role::Instructor, "Instructor"),
+        (Role::Registrar, "Registrar"),
+        (Role::RecordsOfficer, "Records officer"),
+        (Role::DocumentOfficer, "Document officer"),
+        (Role::InstitutionAdmin, "Institution admin"),
+        (Role::PlatformLicensingAdmin, "Platform licensing"),
+    ];
+    let roles = nav_roles();
+    ORDER
+        .into_iter()
+        .filter(|(role, _)| roles.contains(role))
+        .map(|(_, label)| label)
+        .collect()
 }
 
 fn cookie_theme(req: &ServiceRequest) -> &'static str {
@@ -65,20 +140,57 @@ pub async fn theme_middleware(
         .extensions()
         .get::<CurrentSession>()
         .map(|session| session.csrf_token.clone());
-    let roles = req
-        .extensions()
-        .get::<Actor>()
+    let actor = req.extensions().get::<Actor>().cloned();
+    let roles = actor
+        .as_ref()
         .map(|actor| actor.roles.clone())
         .unwrap_or_default();
+    // Header identity: UI pages only (assets/health/API skip the query).
+    // Chrome is decorative — a failed lookup logs and renders no menu
+    // rather than failing the page.
+    let menu = match actor {
+        Some(actor) if req.path().starts_with("/ui/") => {
+            match req.app_data::<web::Data<sqlx::PgPool>>() {
+                Some(pool) => fetch_user_menu(pool, actor.user_id)
+                    .await
+                    .unwrap_or_else(|error| {
+                        tracing::warn!(%error, "header identity lookup failed");
+                        None
+                    }),
+                None => None,
+            }
+        }
+        _ => None,
+    };
     THEME
         .scope(
             theme,
             RAIL.scope(
                 rail,
-                CSRF.scope(csrf, NAV_ROLES.scope(roles, next.call(req))),
+                CSRF.scope(
+                    csrf,
+                    NAV_ROLES.scope(roles, USER_MENU.scope(menu, next.call(req))),
+                ),
             ),
         )
         .await
+}
+
+async fn fetch_user_menu(
+    pool: &sqlx::PgPool,
+    user_id: uuid::Uuid,
+) -> Result<Option<UserMenu>, sqlx::Error> {
+    sqlx::query_as::<_, UserMenu>(
+        "SELECT ua.full_name, ua.username, ua.email, \
+                sp.student_number, sp.program_code, sp.academic_status \
+           FROM user_account ua \
+           LEFT JOIN student_profile sp \
+             ON sp.user_id = ua.id AND sp.institution_id = ua.institution_id \
+          WHERE ua.id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
 }
 
 /// The actor's roles, for `shared::nav::items()`; empty when signed out
@@ -101,8 +213,16 @@ pub fn sample_nav_scope<R>(f: impl FnOnce() -> R) -> R {
         Role::InstitutionAdmin,
         Role::PlatformLicensingAdmin,
     ]);
+    let sample_user = UserMenu {
+        full_name: "Dana Castillo".into(),
+        username: "demo.student".into(),
+        email: "demo.student@example.test".into(),
+        student_number: Some("2023-1187".into()),
+        program_code: Some("BSC-CS".into()),
+        academic_status: Some("good_standing".into()),
+    };
     CSRF.sync_scope(Some("sample-fixture-token".into()), || {
-        NAV_ROLES.sync_scope(all, f)
+        NAV_ROLES.sync_scope(all, || USER_MENU.sync_scope(Some(sample_user), f))
     })
 }
 
