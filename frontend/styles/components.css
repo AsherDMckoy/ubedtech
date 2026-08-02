@@ -448,10 +448,10 @@ main > .wrap {
 }
 
 .month-day {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 3px;
   min-width: 38px;
   height: 38px;
   border-radius: var(--radius);
@@ -460,11 +460,37 @@ main > .wrap {
 }
 
 .month-day.has-items {
-  background: var(--action-wash);
-  box-shadow: inset 0 0 0 1.5px var(--action);
   color: var(--text-primary);
   font-weight: 600;
   text-decoration: none;
+  transition: background var(--dur-fast) var(--ease-enter);
+}
+
+.month-day.has-items:hover {
+  background: var(--bg-accent);
+}
+
+/* Campus events (and the deadline) mark their day with a thin rounded
+   bar, floated slightly off the cell bottom — classes are a given and
+   carry no marker (the aria-label still announces the count). */
+.month-day.has-event::after {
+  content: "";
+  position: absolute;
+  bottom: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 16px;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--action);
+}
+
+/* Hovering/focusing a class in the weekly grid lights that class's
+   remaining meeting dates — gold marks the thing being acted on. */
+.month-day.is-class-hover {
+  background: var(--action-wash);
+  box-shadow: inset 0 0 0 1.5px var(--action);
+  color: var(--text-primary);
 }
 
 .month-day.is-today {
@@ -473,23 +499,13 @@ main > .wrap {
   font-weight: 600;
 }
 
+.month-day.is-today.has-event::after {
+  background: rgba(255, 255, 255, 0.85);
+}
+
 .month-day.is-selected {
   outline: 2px solid var(--brand);
   outline-offset: 1px;
-}
-
-.month-count {
-  font-size: 11px;
-  line-height: 1;
-  padding: 2px 5px;
-  border-radius: var(--radius-pill);
-  background: var(--action);
-  color: #2b1a05;
-}
-
-.month-day.is-today .month-count {
-  background: rgba(255, 255, 255, 0.25);
-  color: #fff;
 }
 
 /* Day-detail kind tags: the word IS the signal; the tint assists. */
@@ -1191,6 +1207,17 @@ tr.just-changed {
   font-size: 14px;
 }
 
+/* Rows that light the calendar get a matching gold cue. */
+.day-list > li[data-dates] {
+  border-radius: var(--radius);
+  transition: background var(--dur-fast) var(--ease-enter);
+}
+
+.day-list > li[data-dates]:hover,
+.day-list > li[data-dates]:focus-visible {
+  background: var(--action-wash);
+}
+
 .day-list > li:first-child {
   border-top: none;
 }
@@ -1218,10 +1245,10 @@ tr.just-changed {
 }
 
 @media (min-width: 861px) {
+  /* Cards stretch: the fullest day dictates every card's height. */
   .week {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
-    align-items: start;
   }
 
   /* Weekend meetings exist → seven columns. */

@@ -57,6 +57,26 @@ assert(document.querySelectorAll(".cal-hot").length === 0, "highlights clear on 
 
 console.log("ok   calendar jump (focus in/out, span highlight, restore)");
 
-// The bundle's always-on polling interval keeps the jsdom event loop
+// Schedule-page class-date highlight: hovering/focusing a weekly class
+// row lights that class's remaining meeting dates on the month calendar.
+{
+  const schedHtml = readFileSync("test/pages/schedule.html", "utf8");
+  const sched = new JSDOM(schedHtml, { runScripts: "outside-only", url: "http://localhost/ui/schedule" });
+  sched.window.eval(script);
+  const doc = sched.window.document;
+  const row = doc.querySelector("[data-dates]");
+  assert(row, "schedule sample has a class row carrying data-dates");
+  assert(row.tabIndex === 0, "class rows are keyboard focusable");
+  row.dispatchEvent(new sched.window.FocusEvent("focusin", { bubbles: true }));
+  const lit = [...doc.querySelectorAll(".month-day.is-class-hover")];
+  const dates = row.dataset.dates.split(",");
+  assert(lit.length >= 1, "focusing a class row lights its dates on the month grid");
+  assert(lit.every((cell) => dates.includes(cell.dataset.date)), "only that class's dates light up");
+  row.dispatchEvent(new sched.window.FocusEvent("focusout", { bubbles: true }));
+  assert(doc.querySelectorAll(".is-class-hover").length === 0, "highlight clears on blur");
+  console.log("ok   schedule class-date highlight (focus in/out, clear)");
+}
+
+// The bundles' always-on polling intervals keep the jsdom event loop
 // alive; every assertion above has already run.
 process.exit(0);

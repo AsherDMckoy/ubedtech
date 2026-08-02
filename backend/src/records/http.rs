@@ -484,6 +484,15 @@ pub struct MonthDay {
     pub items: Vec<DayItem>,
 }
 
+impl MonthDay {
+    /// Campus events (and the add/drop deadline) earn the cell's bar
+    /// marker; class meetings don't — classes are a given, the weekly
+    /// grid and hover highlight carry them.
+    pub fn has_event(&self) -> bool {
+        self.items.iter().any(|item| item.kind != "class")
+    }
+}
+
 /// One month as Monday-first week rows (None pads the edges) plus real
 /// prev/next links ("YYYY-MM").
 pub struct MonthGrid {
@@ -590,6 +599,10 @@ fn month_grid(
 struct DayColumn {
     name: &'static str,
     meetings: Vec<crate::records::schedule::ScheduleMeeting>,
+    /// Comma-joined ISO dates this weekday still occurs, today through
+    /// term end — the month-calendar hover highlight (every meeting in a
+    /// column shares its weekday, so one list serves the whole column).
+    dates: String,
 }
 
 const DAY_NAMES: [&str; 7] = [
@@ -604,13 +617,34 @@ const DAY_NAMES: [&str; 7] = [
 
 /// Group meetings into Monday-first day columns. Weekend columns render
 /// only when a weekend meeting exists.
-fn day_columns(meetings: Vec<crate::records::schedule::ScheduleMeeting>) -> (Vec<DayColumn>, bool) {
+fn day_columns(
+    meetings: Vec<crate::records::schedule::ScheduleMeeting>,
+    term: Option<&TermSummary>,
+) -> (Vec<DayColumn>, bool) {
+    use chrono::Datelike;
     let weekend = meetings.iter().any(|meeting| meeting.day_of_week > 5);
+    let today = chrono::Utc::now().date_naive();
+    let remaining = |weekday: u32| -> String {
+        let Some(term) = term else {
+            return String::new();
+        };
+        let mut date = today.max(term.starts_on);
+        let mut out = Vec::new();
+        while date <= term.ends_on {
+            if date.weekday().number_from_monday() == weekday {
+                out.push(date.format("%Y-%m-%d").to_string());
+            }
+            date = date.succ_opt().expect("date within term range");
+        }
+        out.join(",")
+    };
     let mut days: Vec<DayColumn> = DAY_NAMES[..if weekend { 7 } else { 5 }]
         .iter()
-        .map(|name| DayColumn {
+        .enumerate()
+        .map(|(index, name)| DayColumn {
             name,
             meetings: Vec::new(),
+            dates: remaining(index as u32 + 1),
         })
         .collect();
     for meeting in meetings {
@@ -688,7 +722,7 @@ pub async fn schedule_page(
     }
 
     let empty = meetings.is_empty();
-    let (days, weekend) = day_columns(meetings);
+    let (days, weekend) = day_columns(meetings, term.as_ref());
     let page = SchedulePage {
         term,
         days,
@@ -755,7 +789,7 @@ pub fn sample_schedule_html() -> Result<String, askama::Error> {
         label: today.format("%A, %B %-d").to_string(),
         items: day_items(today, &term, &meetings, &events),
     });
-    let (days, weekend) = day_columns(meetings);
+    let (days, weekend) = day_columns(meetings, Some(&term));
     SchedulePage {
         term: Some(term),
         days,

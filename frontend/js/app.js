@@ -236,11 +236,32 @@ addEventListener("click", async (event) => {
     }
     region.replaceWith(fresh);
     history.replaceState(history.state, "", link.href);
-    fresh.querySelector("#day-detail")?.focus();
+    // Move focus for screen readers without yanking the viewport — a day
+    // click is a view change within the page, not a navigation.
+    fresh.querySelector("#day-detail")?.focus({ preventScroll: true });
   } catch {
     window.location.assign(link.href);
   }
 });
+
+// Schedule class-date highlight: weekly rows carry data-dates (that
+// class's remaining meeting dates); hovering or focusing one lights the
+// matching month cells gold — same read-path pattern as the dashboard
+// mini-calendar jump, zero round trips.
+{
+  const light = (element, on) => {
+    for (const iso of (element.dataset.dates || "").split(",")) {
+      for (const cell of document.querySelectorAll(`.month-day[data-date="${iso}"]`)) {
+        cell.classList.toggle("is-class-hover", on);
+      }
+    }
+  };
+  const from = (event) => event.target.closest?.("[data-dates]");
+  addEventListener("mouseover", (event) => { const el = from(event); if (el) light(el, true); });
+  addEventListener("mouseout", (event) => { const el = from(event); if (el) light(el, false); });
+  addEventListener("focusin", (event) => { const el = from(event); if (el) light(el, true); });
+  addEventListener("focusout", (event) => { const el = from(event); if (el) light(el, false); });
+}
 
 // Honest status polling (documents): rows carrying data-poll re-fetch
 // their server-rendered fragment and swap it in — the status shown is

@@ -4,7 +4,7 @@
 {% block rail %}{% call ui::primary_nav("schedule") %}{% endcall %}{% endblock %}
 
 {% block content %}
-  <div class="wrap">
+  <div class="wrap-wide">
     <h1>Your schedule</h1>
     {% if let Some(term) = term %}
       <p class="sub">{{ term.name }}</p>
@@ -26,7 +26,9 @@
             {% else %}
               <ul class="day-list">
                 {% for meeting in day.meetings %}
-                  <li>
+                  {#- Hover/focus lights this class's remaining meeting
+                      dates gold on the month calendar below. -#}
+                  <li{% if !day.dates.is_empty() %} tabindex="0" data-dates="{{ day.dates }}"{% endif %}>
                     <span class="day-time">{{ meeting.starts_at.format("%H:%M") }}–{{ meeting.ends_at.format("%H:%M") }}</span>
                     <span class="day-course">{{ meeting.course_code }} · {{ meeting.course_title }}</span>
                     <span class="day-room">
@@ -77,14 +79,17 @@
                         {% for cell in week %}
                           <td>
                             {% if let Some(day) = cell %}
+                              {#- Only campus events (and the deadline) earn
+                                  the bar marker — classes are a given; the
+                                  weekly grid + hover highlight carry them. -#}
                               {% if day.items.is_empty() %}
-                                <span class="month-day{% if day.today %} is-today{% endif %}"{% if day.today %} aria-current="date"{% endif %}>{{ day.day }}</span>
+                                <span class="month-day{% if day.today %} is-today{% endif %}" data-date="{{ day.iso }}"{% if day.today %} aria-current="date"{% endif %}>{{ day.day }}</span>
                               {% else %}
-                                <a class="month-day has-items{% if day.today %} is-today{% endif %}{% if day.selected %} is-selected{% endif %}"
-                                   href="/ui/schedule?month={{ grid.month }}&amp;day={{ day.iso }}" data-cal-nav
+                                <a class="month-day has-items{% if day.has_event() %} has-event{% endif %}{% if day.today %} is-today{% endif %}{% if day.selected %} is-selected{% endif %}"
+                                   href="/ui/schedule?month={{ grid.month }}&amp;day={{ day.iso }}" data-cal-nav data-date="{{ day.iso }}"
                                    {% if day.today %}aria-current="date"{% endif %}
                                    aria-label="{{ day.day }} — {{ day.items.len() }} scheduled">
-                                  {{ day.day }}<span class="month-count" aria-hidden="true">{{ day.items.len() }}</span>
+                                  {{ day.day }}
                                 </a>
                               {% endif %}
                             {% endif %}
@@ -100,6 +105,9 @@
             {% if let Some(selected) = selected %}
               <section class="card" id="day-detail" aria-labelledby="day-h" tabindex="-1">
                 <h2 id="day-h">{{ selected.label }}</h2>
+                {% if !selected.items.is_empty() %}
+                  <p class="sub">{{ selected.items.len() }} scheduled</p>
+                {% endif %}
                 {% if selected.items.is_empty() %}
                   <p class="day-empty">Nothing scheduled.</p>
                 {% else %}
@@ -119,11 +127,11 @@
         </div>
 
         <aside class="sched-aside" aria-label="Campus events">
-          <h2>Campus events</h2>
-          {% if events.is_empty() %}
-            {% call ui::empty_state("No upcoming events on the calendar.", "", "") %}{% endcall %}
-          {% else %}
-            <div class="card">
+          <section class="card">
+            <h2>Campus events</h2>
+            {% if events.is_empty() %}
+              {% call ui::empty_state("No upcoming events on the calendar.", "", "") %}{% endcall %}
+            {% else %}
               <ul class="strip">
                 {% for event in events %}
                   <li>
@@ -132,8 +140,8 @@
                   </li>
                 {% endfor %}
               </ul>
-            </div>
-          {% endif %}
+            {% endif %}
+          </section>
         </aside>
       </div>
     {% else %}
