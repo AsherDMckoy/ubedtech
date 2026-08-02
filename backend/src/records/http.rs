@@ -455,6 +455,7 @@ pub async fn publish_form(
 struct SchedulePage {
     term: Option<TermSummary>,
     days: Vec<DayColumn>,
+    hours: Vec<HourMark>,
     empty: bool,
     weekend: bool,
     events: Vec<crate::institution::service::InstitutionEvent>,
@@ -597,14 +598,37 @@ fn month_grid(
     }
 }
 
-/// One weekday's meetings, already time-sorted by the schedule query.
+/// One weekday's meetings, already time-sorted by the schedule query,
+/// placed onto the timeline grid.
 struct DayColumn {
     name: &'static str,
-    meetings: Vec<crate::records::schedule::ScheduleMeeting>,
+    /// 1-based grid column (the time gutter is column 0 in CSS terms).
+    col: usize,
+    meetings: Vec<TlMeeting>,
     /// Comma-joined ISO dates this weekday still occurs, today through
     /// term end — the month-calendar hover highlight (every meeting in a
     /// column shares its weekday, so one list serves the whole column).
     dates: String,
+}
+
+/// A meeting as a positioned timeline card: `row`/`span` are 15-minute
+/// slots below the day-header row (row 2 = the window's first slot);
+/// overlapping same-day meetings split the column in half.
+struct TlMeeting {
+    time: String,
+    course_code: String,
+    course_title: String,
+    detail: String,
+    row: usize,
+    span: usize,
+    half: bool,
+    right: bool,
+}
+
+/// An hour label in the timeline's time gutter (spans 4 slot rows).
+struct HourMark {
+    label: String,
+    row: usize,
 }
 
 const DAY_NAMES: [&str; 7] = [
@@ -617,13 +641,15 @@ const DAY_NAMES: [&str; 7] = [
     "Sunday",
 ];
 
-/// Group meetings into Monday-first day columns. Weekend columns render
-/// only when a weekend meeting exists.
+/// Group meetings into Monday-first timeline columns (days = X axis,
+/// 15-minute slots = Y axis). Weekend columns render only when a weekend
+/// meeting exists. Returns the columns, the weekend flag, and the hour
+/// marks for the time gutter.
 fn day_columns(
     meetings: Vec<crate::records::schedule::ScheduleMeeting>,
     term: Option<&TermSummary>,
-) -> (Vec<DayColumn>, bool) {
-    use chrono::Datelike;
+) -> (Vec<DayColumn>, bool, Vec<HourMark>) {
+    use chrono::{Datelike, Timelike};
     let weekend = meetings.iter().any(|meeting| meeting.day_of_week > 5);
     let today = chrono::Utc::now().date_naive();
     let remaining = |weekday: u32| -> String {
@@ -640,24 +666,79 @@ fn day_columns(
         }
         out.join(",")
     };
+
+    // The visible window: earliest meeting floored to the hour through
+    // latest meeting ceiled to the hour; a calm 08:00–17:00 default keeps
+    // an empty schedule's shape.
+    let minutes = |t: chrono::NaiveTime| (t.hour() * 60 + t.minute()) as usize;
+    let start_hour = meetings
+        .iter()
+        .map(|m| minutes(m.starts_at) / 60)
+        .min()
+        .unwrap_or(8);
+    let end_hour = meetings
+        .iter()
+        .map(|m| minutes(m.ends_at).div_ceil(60))
+        .max()
+        .unwrap_or(17)
+        .max(start_hour + 1);
+    let window_start = start_hour * 60;
+    // Row 1 is the day-header row; slots start at row 2.
+    let row_of = |m: usize| 2 + (m.saturating_sub(window_start)) / 15;
+
     let mut days: Vec<DayColumn> = DAY_NAMES[..if weekend { 7 } else { 5 }]
         .iter()
         .enumerate()
         .map(|(index, name)| DayColumn {
             name,
+            col: index + 1,
             meetings: Vec::new(),
             dates: remaining(index as u32 + 1),
         })
         .collect();
+    let mut prev_end: Vec<Option<usize>> = vec![None; days.len()];
     for meeting in meetings {
         // ISO day 1-7; an out-of-range row is broken data — clamp rather
         // than panic on a student's schedule.
         let index = usize::from(meeting.day_of_week.clamp(1, 7) as u16) - 1;
-        if let Some(day) = days.get_mut(index) {
-            day.meetings.push(meeting);
+        let Some(day) = days.get_mut(index) else {
+            continue;
+        };
+        let (from, to) = (minutes(meeting.starts_at), minutes(meeting.ends_at));
+        // ponytail: overlaps split the column in half — good for a pair,
+        // a triple-booked slot stacks; render columns per cluster if a
+        // real roster ever needs it.
+        let overlaps = prev_end[index].is_some_and(|end| from < end);
+        if overlaps && let Some(prev) = day.meetings.last_mut() {
+            prev.half = true;
         }
+        prev_end[index] = Some(to.max(prev_end[index].unwrap_or(0)));
+        let mut detail = format!("Sec {}", meeting.section_code);
+        if let Some(room) = &meeting.room_code {
+            detail.push_str(&format!(" · Rm {room}"));
+        }
+        day.meetings.push(TlMeeting {
+            time: format!(
+                "{}–{}",
+                meeting.starts_at.format("%H:%M"),
+                meeting.ends_at.format("%H:%M")
+            ),
+            course_code: meeting.course_code,
+            course_title: meeting.course_title,
+            detail,
+            row: row_of(from),
+            span: to.saturating_sub(from).div_ceil(15).clamp(1, 32),
+            half: overlaps,
+            right: overlaps,
+        });
     }
-    (days, weekend)
+    let hours = (start_hour..end_hour)
+        .map(|hour| HourMark {
+            label: format!("{hour:02}:00"),
+            row: 2 + (hour - start_hour) * 4,
+        })
+        .collect();
+    (days, weekend, hours)
 }
 
 #[derive(serde::Deserialize)]
@@ -724,10 +805,11 @@ pub async fn schedule_page(
     }
 
     let empty = meetings.is_empty();
-    let (days, weekend) = day_columns(meetings, term.as_ref());
+    let (days, weekend, hours) = day_columns(meetings, term.as_ref());
     let page = SchedulePage {
         term,
         days,
+        hours,
         empty,
         weekend,
         events: institution.upcoming_events(&actor).await?,
@@ -791,10 +873,11 @@ pub fn sample_schedule_html() -> Result<String, askama::Error> {
         label: today.format("%A, %B %-d").to_string(),
         items: day_items(today, &term, &meetings, &events),
     });
-    let (days, weekend) = day_columns(meetings, Some(&term));
+    let (days, weekend, hours) = day_columns(meetings, Some(&term));
     SchedulePage {
         term: Some(term),
         days,
+        hours,
         empty: false,
         weekend,
         events,

@@ -4,7 +4,7 @@
 {% block rail %}{% call ui::primary_nav("schedule") %}{% endcall %}{% endblock %}
 
 {% block content %}
-  <div class="wrap-wide">
+  <div class="wrap">
     <h1>Your schedule</h1>
     {% if let Some(term) = term %}
       <p class="sub">{{ term.name }}</p>
@@ -13,120 +13,125 @@
         {% call ui::empty_state("No classes on your schedule this term.", "/ui/catalog", "Browse the catalog") %}{% endcall %}
       {% endif %}
 
-      {# The week grid always renders — an empty week is still the week
-         (each day says "No classes"), so the page keeps its shape before
-         the first registration. One structure, two renderings: stacked
-         day list on small screens, grid columns on desktop (CSS only). #}
-      <div class="week{% if weekend %} week-7{% endif %}">
-        {% for day in days %}
-          <section class="day" aria-label="{{ day.name }}">
-            <h2>{{ day.name }}</h2>
-            {% if day.meetings.is_empty() %}
-              <p class="day-empty">No classes</p>
-            {% else %}
-              <ul class="day-list">
-                {% for meeting in day.meetings %}
-                  {#- Hover/focus lights this class's remaining meeting
-                      dates gold on the month calendar below. -#}
-                  <li{% if !day.dates.is_empty() %} tabindex="0" data-dates="{{ day.dates }}"{% endif %}>
-                    <span class="day-time">{{ meeting.starts_at.format("%H:%M") }}–{{ meeting.ends_at.format("%H:%M") }}</span>
-                    <span class="day-course">{{ meeting.course_code }} · {{ meeting.course_title }}</span>
-                    <span class="day-room">
-                      Sec {{ meeting.section_code }}{% if let Some(room) = meeting.room_code %} · Rm {{ room }}{% endif %}
-                    </span>
-                  </li>
-                {% endfor %}
-              </ul>
-            {% endif %}
-          </section>
-        {% endfor %}
-      </div>
-
-      {# Month calendar (slice F): only real, queryable occurrences —
-         weekly meetings expanded onto in-term dates, campus events, and
-         the add/drop deadline. Day cells with items are real links
-         (?day=…) whose detail renders inline below the grid; month
-         prev/next are real links. The enhancement swaps just this
-         region. The events aside mirrors the dashboard's zone pattern. #}
       <div class="sched-layout">
-        <div id="month-cal" class="sched-main">
-          {% if let Some(grid) = grid %}
-            <section class="card" aria-labelledby="month-h">
-              <div class="month-head">
-                <h2 id="month-h">{{ grid.label }}</h2>
-                <nav aria-label="Calendar months" class="pager">
-                  <a href="/ui/schedule?month={{ grid.prev }}" data-cal-nav>Previous</a>
-                  <a href="/ui/schedule?month={{ grid.next }}" data-cal-nav>Next</a>
-                </nav>
-              </div>
-              <div class="table-wrap">
-                <table class="month-table">
-                  <caption class="sr-only">{{ grid.label }} — days with classes, events, or deadlines link to their detail</caption>
-                  <thead>
-                    <tr>
-                      <th scope="col"><span aria-hidden="true">M</span><span class="sr-only">Monday</span></th>
-                      <th scope="col"><span aria-hidden="true">T</span><span class="sr-only">Tuesday</span></th>
-                      <th scope="col"><span aria-hidden="true">W</span><span class="sr-only">Wednesday</span></th>
-                      <th scope="col"><span aria-hidden="true">T</span><span class="sr-only">Thursday</span></th>
-                      <th scope="col"><span aria-hidden="true">F</span><span class="sr-only">Friday</span></th>
-                      <th scope="col"><span aria-hidden="true">S</span><span class="sr-only">Saturday</span></th>
-                      <th scope="col"><span aria-hidden="true">S</span><span class="sr-only">Sunday</span></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% for week in grid.weeks %}
-                      <tr>
-                        {% for cell in week %}
-                          <td>
-                            {% if let Some(day) = cell %}
-                              {#- Only campus events (and the deadline) earn
-                                  the bar marker — classes are a given; the
-                                  weekly grid + hover highlight carry them. -#}
-                              {% if day.items.is_empty() %}
-                                <span class="month-day{% if day.today %} is-today{% endif %}" data-date="{{ day.iso }}"{% if day.today %} aria-current="date"{% endif %}>{{ day.day }}</span>
-                              {% else %}
-                                <a class="month-day has-items{% if day.has_event() %} has-event{% endif %}{% if day.today %} is-today{% endif %}{% if day.selected %} is-selected{% endif %}"
-                                   href="/ui/schedule?month={{ grid.month }}&amp;day={{ day.iso }}" data-cal-nav data-date="{{ day.iso }}"
-                                   {% if day.today %}aria-current="date"{% endif %}
-                                   aria-label="{{ day.day }} — {{ day.items.len() }} scheduled">
-                                  {{ day.day }}
-                                </a>
-                              {% endif %}
-                            {% endif %}
-                          </td>
-                        {% endfor %}
-                      </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            </section>
-
-            {% if let Some(selected) = selected %}
-              <section class="card" id="day-detail" aria-labelledby="day-h" tabindex="-1">
-                <h2 id="day-h">{{ selected.label }}</h2>
-                {% if !selected.items.is_empty() %}
-                  <p class="sub">{{ selected.items.len() }} scheduled</p>
-                {% endif %}
-                {% if selected.items.is_empty() %}
-                  <p class="day-empty">Nothing scheduled.</p>
+        {# The week as a timeline: days across, time down (15-minute slot
+           rows). The DOM stays semantic — one section per day with its
+           list of meetings; display:contents lifts them onto the shared
+           grid. An empty week still renders the window (08:00–17:00), so
+           the page keeps its shape before the first registration. #}
+        <section class="card tl-card" aria-label="Weekly timetable">
+          <div class="tl{% if weekend %} tl-7{% endif %}">
+            {% for hour in hours %}
+              <span class="tl-hour tl-r{{ hour.row }}" aria-hidden="true">{{ hour.label }}</span>
+            {% endfor %}
+            {% for day in days %}
+              <section class="tl-day" aria-label="{{ day.name }}">
+                <h2 class="tl-day-h tl-c{{ day.col }}">{{ day.name }}</h2>
+                {% if day.meetings.is_empty() %}
+                  <p class="sr-only">No classes</p>
                 {% else %}
-                  <ul class="day-list">
-                    {% for item in selected.items %}
-                      <li>
-                        {% if let Some(time) = item.time %}<span class="day-time">{{ time }}</span>{% endif %}
-                        <span class="day-course">{{ item.label }}</span>
-                        <span class="kind kind-{{ item.kind }}">{{ item.kind }}</span>
+                  <ul class="tl-list">
+                    {% for m in day.meetings %}
+                      {#- Hover/focus lights this class's remaining meeting
+                          dates gold on the month calendar aside. -#}
+                      <li class="tl-item tl-c{{ day.col }} tl-r{{ m.row }} tl-s{{ m.span }}{% if m.half %} tl-half{% endif %}{% if m.right %} tl-right{% endif %}"{% if !day.dates.is_empty() %} tabindex="0" data-dates="{{ day.dates }}"{% endif %}>
+                        <span class="tl-time">{{ m.time }}</span>
+                        <span class="tl-course">{{ m.course_code }}</span>
+                        <span class="tl-title">{{ m.course_title }}</span>
+                        <span class="tl-room">{{ m.detail }}</span>
                       </li>
                     {% endfor %}
                   </ul>
                 {% endif %}
               </section>
-            {% endif %}
-          {% endif %}
-        </div>
+            {% endfor %}
+          </div>
+        </section>
 
-        <aside class="sched-aside" aria-label="Campus events">
+        <aside class="sched-aside" aria-label="Month calendar and campus events">
+          {# Month mini calendar: only real, queryable occurrences —
+             weekly meetings expanded onto in-term dates, campus events,
+             and the add/drop deadline. Day cells with items are real
+             links (?day=…) whose detail renders in the card below;
+             month prev/next are real links. The enhancement swaps just
+             the #month-cal region. #}
+          <div id="month-cal" class="sched-cal">
+            {% if let Some(grid) = grid %}
+              <section class="card" aria-labelledby="month-h">
+                <div class="month-head">
+                  <h2 id="month-h">{{ grid.label }}</h2>
+                  <nav aria-label="Calendar months" class="pager">
+                    <a href="/ui/schedule?month={{ grid.prev }}" data-cal-nav>Previous</a>
+                    <a href="/ui/schedule?month={{ grid.next }}" data-cal-nav>Next</a>
+                  </nav>
+                </div>
+                <div class="table-wrap">
+                  <table class="month-table">
+                    <caption class="sr-only">{{ grid.label }} — days with classes, events, or deadlines link to their detail</caption>
+                    <thead>
+                      <tr>
+                        <th scope="col"><span aria-hidden="true">M</span><span class="sr-only">Monday</span></th>
+                        <th scope="col"><span aria-hidden="true">T</span><span class="sr-only">Tuesday</span></th>
+                        <th scope="col"><span aria-hidden="true">W</span><span class="sr-only">Wednesday</span></th>
+                        <th scope="col"><span aria-hidden="true">T</span><span class="sr-only">Thursday</span></th>
+                        <th scope="col"><span aria-hidden="true">F</span><span class="sr-only">Friday</span></th>
+                        <th scope="col"><span aria-hidden="true">S</span><span class="sr-only">Saturday</span></th>
+                        <th scope="col"><span aria-hidden="true">S</span><span class="sr-only">Sunday</span></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for week in grid.weeks %}
+                        <tr>
+                          {% for cell in week %}
+                            <td>
+                              {% if let Some(day) = cell %}
+                                {#- Only campus events (and the deadline) earn
+                                    the bar marker — classes are a given; the
+                                    timeline + hover highlight carry them. -#}
+                                {% if day.items.is_empty() %}
+                                  <span class="month-day{% if day.today %} is-today{% endif %}" data-date="{{ day.iso }}"{% if day.today %} aria-current="date"{% endif %}>{{ day.day }}</span>
+                                {% else %}
+                                  <a class="month-day has-items{% if day.has_event() %} has-event{% endif %}{% if day.today %} is-today{% endif %}{% if day.selected %} is-selected{% endif %}"
+                                     href="/ui/schedule?month={{ grid.month }}&amp;day={{ day.iso }}" data-cal-nav data-date="{{ day.iso }}"
+                                     {% if day.today %}aria-current="date"{% endif %}
+                                     aria-label="{{ day.day }} — {{ day.items.len() }} scheduled">
+                                    {{ day.day }}
+                                  </a>
+                                {% endif %}
+                              {% endif %}
+                            </td>
+                          {% endfor %}
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+
+              {% if let Some(selected) = selected %}
+                <section class="card" id="day-detail" aria-labelledby="day-h" tabindex="-1">
+                  <h2 id="day-h">{{ selected.label }}</h2>
+                  {% if !selected.items.is_empty() %}
+                    <p class="sub">{{ selected.items.len() }} scheduled</p>
+                  {% endif %}
+                  {% if selected.items.is_empty() %}
+                    <p class="day-empty">Nothing scheduled.</p>
+                  {% else %}
+                    <ul class="day-list">
+                      {% for item in selected.items %}
+                        <li>
+                          {% if let Some(time) = item.time %}<span class="day-time">{{ time }}</span>{% endif %}
+                          <span class="day-course">{{ item.label }}</span>
+                          <span class="kind kind-{{ item.kind }}">{{ item.kind }}</span>
+                        </li>
+                      {% endfor %}
+                    </ul>
+                  {% endif %}
+                </section>
+              {% endif %}
+            {% endif %}
+          </div>
+
           <section class="card">
             <h2>Campus events</h2>
             {% if events.is_empty() %}

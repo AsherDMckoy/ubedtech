@@ -402,18 +402,19 @@ main > .wrap {
    acting-color tint; the count number keeps it from being color-alone. */
 .sched-layout {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: minmax(0, 1fr) 340px;
   gap: var(--space-4);
   align-items: start;
   margin-top: var(--space-4);
 }
 
-.sched-main {
+.sched-aside,
+.sched-cal {
   display: grid;
   gap: var(--space-4);
 }
 
-@media (max-width: 960px) {
+@media (max-width: 1100px) {
   .sched-layout {
     grid-template-columns: 1fr;
   }
@@ -1347,30 +1348,256 @@ tr.just-changed {
   animation: flag var(--dur-base) var(--ease-enter);
 }
 
-/* ---------- weekly schedule: one semantic structure, two renderings.
-   Mobile-first: days stack (the list view). Desktop: days become grid
-   columns (the weekly-grid enhancement). Pure CSS — nothing duplicated,
-   nothing loads late, nothing animates in. */
+/* ---------- schedule timeline: days across, time down. One CSS grid —
+   column 1 is the time gutter, then a column per day; rows are
+   15-minute slots (13px) under a 28px day-header row, so an hour is
+   52px and the hour lines come from one repeating gradient. Placement
+   is class-based (.tl-cN/.tl-rN/.tl-sN, generated below) because the
+   CSP forbids inline styles. The DOM stays semantic: a section per day
+   with its meeting list, lifted onto the grid via display:contents. */
 
-.week {
+.tl {
+  display: grid;
+  grid-template-columns: 48px repeat(5, minmax(0, 1fr));
+  grid-template-rows: 28px;
+  grid-auto-rows: 13px;
+  column-gap: 6px;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    var(--border) 0 1px,
+    transparent 1px 52px
+  );
+  background-position: 0 28px;
+}
+
+.tl-7 {
+  grid-template-columns: 48px repeat(7, minmax(0, 1fr));
+}
+
+.tl-day,
+.tl-list {
+  display: contents;
+}
+
+.tl-day-h {
+  grid-row: 1;
+  align-self: center;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.tl-hour {
+  grid-column: 1;
+  grid-row-end: span 4;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: right;
+  padding-right: 8px;
+  transform: translateY(-6px);
+}
+
+.tl-item {
+  list-style: none;
+  min-width: 0;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: 1px;
+  background: var(--bg-accent);
+  border-left: 3px solid var(--brand);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  transition: background var(--dur-fast) var(--ease-enter);
 }
 
-.day {
-  background: var(--surface-2);
-  border: 0.5px solid var(--border);
-  border-radius: var(--radius-card);
-  padding: var(--space-3) var(--space-4);
+/* Cards that light the calendar get the matching gold cue. */
+.tl-item[data-dates]:hover,
+.tl-item[data-dates]:focus-visible {
+  background: var(--action-wash);
+  border-left-color: var(--action);
 }
 
-.day > h2 {
-  font-size: 13px;
+.tl-time {
+  font-family: var(--font-mono);
+  font-size: 10px;
   color: var(--text-secondary);
-  margin-bottom: var(--space-2);
 }
 
+.tl-course {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.tl-title,
+.tl-room {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tl-room {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+/* Same-day overlap: the pair shares the column. */
+.tl-half {
+  width: calc(50% - 2px);
+}
+
+.tl-right {
+  justify-self: end;
+}
+
+/* Generated timeline placement classes (CSP: no inline styles).
+   Columns 1-7 (day columns start after the gutter), row starts for a
+   24h window of 15-minute slots, spans up to 8 hours. */
+.tl-c1 { grid-column: 2; }
+.tl-c2 { grid-column: 3; }
+.tl-c3 { grid-column: 4; }
+.tl-c4 { grid-column: 5; }
+.tl-c5 { grid-column: 6; }
+.tl-c6 { grid-column: 7; }
+.tl-c7 { grid-column: 8; }
+.tl-r2 { grid-row-start: 2; }
+.tl-r3 { grid-row-start: 3; }
+.tl-r4 { grid-row-start: 4; }
+.tl-r5 { grid-row-start: 5; }
+.tl-r6 { grid-row-start: 6; }
+.tl-r7 { grid-row-start: 7; }
+.tl-r8 { grid-row-start: 8; }
+.tl-r9 { grid-row-start: 9; }
+.tl-r10 { grid-row-start: 10; }
+.tl-r11 { grid-row-start: 11; }
+.tl-r12 { grid-row-start: 12; }
+.tl-r13 { grid-row-start: 13; }
+.tl-r14 { grid-row-start: 14; }
+.tl-r15 { grid-row-start: 15; }
+.tl-r16 { grid-row-start: 16; }
+.tl-r17 { grid-row-start: 17; }
+.tl-r18 { grid-row-start: 18; }
+.tl-r19 { grid-row-start: 19; }
+.tl-r20 { grid-row-start: 20; }
+.tl-r21 { grid-row-start: 21; }
+.tl-r22 { grid-row-start: 22; }
+.tl-r23 { grid-row-start: 23; }
+.tl-r24 { grid-row-start: 24; }
+.tl-r25 { grid-row-start: 25; }
+.tl-r26 { grid-row-start: 26; }
+.tl-r27 { grid-row-start: 27; }
+.tl-r28 { grid-row-start: 28; }
+.tl-r29 { grid-row-start: 29; }
+.tl-r30 { grid-row-start: 30; }
+.tl-r31 { grid-row-start: 31; }
+.tl-r32 { grid-row-start: 32; }
+.tl-r33 { grid-row-start: 33; }
+.tl-r34 { grid-row-start: 34; }
+.tl-r35 { grid-row-start: 35; }
+.tl-r36 { grid-row-start: 36; }
+.tl-r37 { grid-row-start: 37; }
+.tl-r38 { grid-row-start: 38; }
+.tl-r39 { grid-row-start: 39; }
+.tl-r40 { grid-row-start: 40; }
+.tl-r41 { grid-row-start: 41; }
+.tl-r42 { grid-row-start: 42; }
+.tl-r43 { grid-row-start: 43; }
+.tl-r44 { grid-row-start: 44; }
+.tl-r45 { grid-row-start: 45; }
+.tl-r46 { grid-row-start: 46; }
+.tl-r47 { grid-row-start: 47; }
+.tl-r48 { grid-row-start: 48; }
+.tl-r49 { grid-row-start: 49; }
+.tl-r50 { grid-row-start: 50; }
+.tl-r51 { grid-row-start: 51; }
+.tl-r52 { grid-row-start: 52; }
+.tl-r53 { grid-row-start: 53; }
+.tl-r54 { grid-row-start: 54; }
+.tl-r55 { grid-row-start: 55; }
+.tl-r56 { grid-row-start: 56; }
+.tl-r57 { grid-row-start: 57; }
+.tl-r58 { grid-row-start: 58; }
+.tl-r59 { grid-row-start: 59; }
+.tl-r60 { grid-row-start: 60; }
+.tl-r61 { grid-row-start: 61; }
+.tl-r62 { grid-row-start: 62; }
+.tl-r63 { grid-row-start: 63; }
+.tl-r64 { grid-row-start: 64; }
+.tl-r65 { grid-row-start: 65; }
+.tl-r66 { grid-row-start: 66; }
+.tl-r67 { grid-row-start: 67; }
+.tl-r68 { grid-row-start: 68; }
+.tl-r69 { grid-row-start: 69; }
+.tl-r70 { grid-row-start: 70; }
+.tl-r71 { grid-row-start: 71; }
+.tl-r72 { grid-row-start: 72; }
+.tl-r73 { grid-row-start: 73; }
+.tl-r74 { grid-row-start: 74; }
+.tl-r75 { grid-row-start: 75; }
+.tl-r76 { grid-row-start: 76; }
+.tl-r77 { grid-row-start: 77; }
+.tl-r78 { grid-row-start: 78; }
+.tl-r79 { grid-row-start: 79; }
+.tl-r80 { grid-row-start: 80; }
+.tl-r81 { grid-row-start: 81; }
+.tl-r82 { grid-row-start: 82; }
+.tl-r83 { grid-row-start: 83; }
+.tl-r84 { grid-row-start: 84; }
+.tl-r85 { grid-row-start: 85; }
+.tl-r86 { grid-row-start: 86; }
+.tl-r87 { grid-row-start: 87; }
+.tl-r88 { grid-row-start: 88; }
+.tl-r89 { grid-row-start: 89; }
+.tl-r90 { grid-row-start: 90; }
+.tl-r91 { grid-row-start: 91; }
+.tl-r92 { grid-row-start: 92; }
+.tl-r93 { grid-row-start: 93; }
+.tl-r94 { grid-row-start: 94; }
+.tl-r95 { grid-row-start: 95; }
+.tl-r96 { grid-row-start: 96; }
+.tl-r97 { grid-row-start: 97; }
+.tl-r98 { grid-row-start: 98; }
+.tl-s1 { grid-row-end: span 1; }
+.tl-s2 { grid-row-end: span 2; }
+.tl-s3 { grid-row-end: span 3; }
+.tl-s4 { grid-row-end: span 4; }
+.tl-s5 { grid-row-end: span 5; }
+.tl-s6 { grid-row-end: span 6; }
+.tl-s7 { grid-row-end: span 7; }
+.tl-s8 { grid-row-end: span 8; }
+.tl-s9 { grid-row-end: span 9; }
+.tl-s10 { grid-row-end: span 10; }
+.tl-s11 { grid-row-end: span 11; }
+.tl-s12 { grid-row-end: span 12; }
+.tl-s13 { grid-row-end: span 13; }
+.tl-s14 { grid-row-end: span 14; }
+.tl-s15 { grid-row-end: span 15; }
+.tl-s16 { grid-row-end: span 16; }
+.tl-s17 { grid-row-end: span 17; }
+.tl-s18 { grid-row-end: span 18; }
+.tl-s19 { grid-row-end: span 19; }
+.tl-s20 { grid-row-end: span 20; }
+.tl-s21 { grid-row-end: span 21; }
+.tl-s22 { grid-row-end: span 22; }
+.tl-s23 { grid-row-end: span 23; }
+.tl-s24 { grid-row-end: span 24; }
+.tl-s25 { grid-row-end: span 25; }
+.tl-s26 { grid-row-end: span 26; }
+.tl-s27 { grid-row-end: span 27; }
+.tl-s28 { grid-row-end: span 28; }
+.tl-s29 { grid-row-end: span 29; }
+.tl-s30 { grid-row-end: span 30; }
+.tl-s31 { grid-row-end: span 31; }
+.tl-s32 { grid-row-end: span 32; }
+
+/* Day-detail rows (the clicked calendar day, in the aside). */
 .day-list {
   list-style: none;
   margin: 0;
@@ -1385,17 +1612,6 @@ tr.just-changed {
   padding: var(--space-2) 0;
   border-top: 0.5px solid var(--border);
   font-size: 14px;
-}
-
-/* Rows that light the calendar get a matching gold cue. */
-.day-list > li[data-dates] {
-  border-radius: var(--radius);
-  transition: background var(--dur-fast) var(--ease-enter);
-}
-
-.day-list > li[data-dates]:hover,
-.day-list > li[data-dates]:focus-visible {
-  background: var(--action-wash);
 }
 
 .day-list > li:first-child {
@@ -1413,38 +1629,10 @@ tr.just-changed {
   font-weight: 500;
 }
 
-.day-room,
 .day-empty {
   font-size: 12px;
   color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.day-empty {
   margin: 0;
-}
-
-@media (min-width: 861px) {
-  /* Cards stretch: the fullest day dictates every card's height. */
-  .week {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-  }
-
-  /* Weekend meetings exist → seven columns. */
-  .week-7 {
-    grid-template-columns: repeat(7, 1fr);
-  }
-
-  /* Inside a narrow grid column the row collapses to a stack. */
-  .day-list > li {
-    grid-template-columns: 1fr;
-    gap: 2px;
-  }
-
-  .day-room {
-    white-space: normal;
-  }
 }
 
 /* ---------- dashboard strip: a compact list of schedule rows / events
