@@ -88,7 +88,9 @@ pub(crate) fn nav_roles() -> HashSet<Role> {
 }
 
 /// `render-pages` runs without a request: render samples with every role
-/// so the axe harness sees the full union nav on every shell.
+/// so the axe harness sees the full union nav on every shell, and with a
+/// dummy CSRF token so the session-only chrome (theme toggle, rail
+/// toggle) renders into the fixtures the jsdom behavior tests drive.
 pub fn sample_nav_scope<R>(f: impl FnOnce() -> R) -> R {
     let all = HashSet::from([
         Role::Student,
@@ -99,7 +101,9 @@ pub fn sample_nav_scope<R>(f: impl FnOnce() -> R) -> R {
         Role::InstitutionAdmin,
         Role::PlatformLicensingAdmin,
     ]);
-    NAV_ROLES.sync_scope(all, f)
+    CSRF.sync_scope(Some("sample-fixture-token".into()), || {
+        NAV_ROLES.sync_scope(all, f)
+    })
 }
 
 /// ` data-theme=dark` / ` data-theme=light` for `<html>`, empty for

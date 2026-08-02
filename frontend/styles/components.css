@@ -199,39 +199,52 @@
   pointer-events: auto;
 }
 
-/* The collapse/expand toggle: a real form POSTing the preference (the
-   theme-toggle mechanism); the script flips the class instantly and
-   persists in the background. */
-.rail-toggle {
-  display: flex;
-  justify-content: flex-end;
+/* The rail brand row IS the collapse control: the UB mark (a real submit
+   button) toggles the rail; the [X] collapses it and exists only while
+   the rail is expanded. The form reuses .brand so the row keeps the
+   brand's layout and the mark stays centered in the collapsed rail. */
+form.rail-toggle {
+  margin: 0;
 }
 
-.rail-toggle button {
-  width: 32px;
-  height: 32px;
+button.brand-mark {
+  /* Beat the global button chrome: the mark is 26px, borderless. */
+  border: 0;
   padding: 0;
-  border: none;
+  cursor: pointer;
+  transition: filter var(--dur-fast) var(--ease-enter);
+}
+
+button.brand-mark:hover {
+  filter: brightness(1.2);
+}
+
+.rail-close {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
   background: none;
   color: var(--text-muted);
   border-radius: var(--radius);
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
-/* One caret glyph both ways: mirrored when the rail is collapsed. */
-.rail-toggle button[aria-expanded="false"] svg {
-  transform: scaleX(-1);
-}
-
-.rail-toggle button:hover {
+.rail-close:hover {
   background: var(--surface-2);
   color: var(--text-primary);
 }
 
-.rail-collapsed .rail .rail-toggle {
-  justify-content: center;
+/* Collapsed (including hover-expanded): the [X] is meaningless — the
+   persistent state is already collapsed — so it leaves the layout and
+   the tab order entirely. */
+.rail-collapsed .rail .rail-close {
+  display: none;
 }
 
 .rail .navlink,

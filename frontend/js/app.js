@@ -433,6 +433,10 @@ addEventListener(
     const choice = event.submitter?.value;
     if (!choice) return;
     event.preventDefault();
+    // Fire-and-forget: without this, the bubble-phase submit-once handler
+    // marks the form busy — buttons disable and the progress cursor
+    // latches on, since the background POST never restores the form.
+    event.stopImmediatePropagation();
     if (choice === "system") {
       document.documentElement.removeAttribute("data-theme");
     } else {
@@ -491,21 +495,24 @@ addEventListener("input", (event) => {
 });
 
 // Rail collapse/expand enhancement (ADR-16): flip the shell class
-// instantly, persist via the same POST the JS-off form would make.
+// instantly, persist via the same POST the JS-off form would make. The
+// UB logo toggles; the [X] (shown only while expanded) collapses.
 addEventListener(
   "submit",
   (event) => {
     const form = event.target.closest("[data-rail-form]");
     if (!form) return;
     event.preventDefault();
+    // Fire-and-forget — same busy-state suppression as the theme form.
+    event.stopImmediatePropagation();
     const collapsing = event.submitter?.value === "collapsed";
     document.querySelector(".shell")?.classList.toggle("rail-collapsed", collapsing);
-    const button = form.querySelector("button[name=rail]");
-    button.value = collapsing ? "expanded" : "collapsed";
+    const logo = form.querySelector("[data-rail-logo]");
+    logo.value = collapsing ? "expanded" : "collapsed";
     const label = collapsing ? "Expand navigation" : "Collapse navigation";
-    button.setAttribute("aria-label", label);
-    button.title = label;
-    button.setAttribute("aria-expanded", String(!collapsing));
+    logo.setAttribute("aria-label", label);
+    logo.title = label;
+    logo.setAttribute("aria-expanded", String(!collapsing));
     const body = new URLSearchParams(new FormData(form));
     body.set("rail", collapsing ? "collapsed" : "expanded");
     fetch(form.action, { method: "POST", body, credentials: "same-origin" }).catch(() => {});

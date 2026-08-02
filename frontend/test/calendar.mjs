@@ -77,6 +77,32 @@ console.log("ok   calendar jump (focus in/out, span highlight, restore)");
   console.log("ok   schedule class-date highlight (focus in/out, clear)");
 }
 
+// Theme and rail toggles are fire-and-forget background POSTs: the
+// submit-once busy state (disabled buttons + progress cursor) must never
+// latch onto them — that was the "spinner next to the mouse" bug.
+{
+  window.fetch = () => Promise.resolve({ ok: true });
+  const form = document.querySelector("[data-theme-form]");
+  assert(form, "dashboard renders the theme form");
+  const dark = form.querySelector("button[value=dark]");
+  form.dispatchEvent(new window.SubmitEvent("submit", { bubbles: true, cancelable: true, submitter: dark }));
+  assert(document.documentElement.getAttribute("data-theme") === "dark", "theme flips instantly");
+  assert(form.getAttribute("aria-busy") !== "true", "theme form never enters the busy state");
+  assert(!dark.disabled, "theme buttons stay enabled (no stuck progress cursor)");
+
+  const rail = document.querySelector("[data-rail-form]");
+  assert(rail, "the rail brand renders as the toggle form");
+  assert(!rail.querySelector("[data-rail-logo]").disabled, "logo starts enabled");
+  const logo = rail.querySelector("[data-rail-logo]");
+  rail.dispatchEvent(new window.SubmitEvent("submit", { bubbles: true, cancelable: true, submitter: logo }));
+  assert(document.querySelector(".shell").classList.contains("rail-collapsed"), "UB logo click collapses the rail");
+  assert(logo.value === "expanded" && logo.getAttribute("aria-expanded") === "false", "logo flips to the expand action");
+  assert(rail.getAttribute("aria-busy") !== "true" && !logo.disabled, "rail form never enters the busy state");
+  rail.dispatchEvent(new window.SubmitEvent("submit", { bubbles: true, cancelable: true, submitter: logo }));
+  assert(!document.querySelector(".shell").classList.contains("rail-collapsed"), "second logo click expands again");
+  console.log("ok   theme/rail toggles skip the busy state; UB logo toggles the rail");
+}
+
 // The bundles' always-on polling intervals keep the jsdom event loop
 // alive; every assertion above has already run.
 process.exit(0);
