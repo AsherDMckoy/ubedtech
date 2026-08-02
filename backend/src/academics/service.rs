@@ -168,6 +168,16 @@ pub struct CatalogSection {
     pub enrolled_enrollment_id: Option<Uuid>,
 }
 
+/// One course the student could still add this term (an open section
+/// exists, no enrollment yet) — the "remaining this semester" row.
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct RemainingCourse {
+    pub code: String,
+    pub title: String,
+    pub credit_hours: f64,
+    pub open_sections: i64,
+}
+
 impl AcademicsService {
     pub fn new(pool: PgPool, audit: AuditWriter) -> Self {
         Self { pool, audit }
@@ -907,6 +917,46 @@ impl AcademicsService {
         .fetch_all(&self.pool)
         .await?;
         Ok(sections)
+    }
+
+    /// Term courses this student is NOT registered in that still have an
+    /// open section — the "remaining this semester" list. The schema has
+    /// no degree-plan/program-requirements table, so "remaining" honestly
+    /// means "offered this term and not yet yours", not "required for
+    /// your program" (assumption recorded in docs/IMPLEMENTATION_PLAN.md).
+    pub async fn term_courses_not_enrolled(
+        &self,
+        actor: &Actor,
+        term_id: Uuid,
+        student_id: Uuid,
+    ) -> Result<Vec<RemainingCourse>, AppError> {
+        Ok(sqlx::query_as::<_, RemainingCourse>(
+            r#"
+            SELECT c.code, c.title, c.credit_hours::float8 AS credit_hours,
+                   COUNT(s.id) AS open_sections
+            FROM course c
+            JOIN section s ON s.course_id = c.id
+                          AND s.term_id = $2
+                          AND s.status = 'open'
+            WHERE c.institution_id = $1
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM enrollment e
+                  JOIN section es ON es.id = e.section_id
+                  WHERE e.student_id = $3
+                    AND e.status = 'enrolled'
+                    AND es.term_id = $2
+                    AND es.course_id = c.id
+              )
+            GROUP BY c.id, c.code, c.title, c.credit_hours
+            ORDER BY c.code
+            "#,
+        )
+        .bind(actor.institution_id)
+        .bind(term_id)
+        .bind(student_id)
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     /// One section's catalog row for this student — the true committed state

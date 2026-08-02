@@ -22,7 +22,7 @@ const fn item(href: &'static str, label: &'static str, key: &'static str) -> Nav
 const STUDENT: &[NavItem] = &[
     item("/ui/dashboard", "Dashboard", "dashboard"),
     item("/ui/catalog", "Catalog", "catalog"),
-    item("/ui/registration", "Registration", "registration"),
+    item("/ui/registration", "My courses", "registration"),
     item("/ui/schedule", "Schedule", "schedule"),
     item("/ui/grades", "Grades", "grades"),
     item("/ui/history", "History", "history"),

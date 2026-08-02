@@ -465,6 +465,7 @@ struct RegistrationPage<'a> {
     csrf_token: &'a str,
     term: Option<TermSummary>,
     enrollments: Vec<EnrolledSection>,
+    remaining: Vec<crate::academics::service::RemainingCourse>,
     notice: Option<&'a str>,
     error: Option<&'a str>,
 }
@@ -518,6 +519,12 @@ pub fn sample_registration_html() -> Result<String, askama::Error> {
                 faculty: Some("Faculty of Science & Technology".into()),
             },
         ],
+        remaining: vec![crate::academics::service::RemainingCourse {
+            code: "PHYS-2101".into(),
+            title: "Mechanics".into(),
+            credit_hours: 4.0,
+            open_sections: 2,
+        }],
         notice: Some("You are registered."),
         error: None,
     }
@@ -537,10 +544,19 @@ async fn render_registration(
         Some(term) => enrollment.list_own_active(actor, term.id).await?,
         None => Vec::new(),
     };
+    let remaining = match (&term, actor.student_id) {
+        (Some(term), Some(student_id)) => {
+            academics
+                .term_courses_not_enrolled(actor, term.id, student_id)
+                .await?
+        }
+        _ => Vec::new(),
+    };
     Ok(RegistrationPage {
         csrf_token: &current.csrf_token,
         term,
         enrollments,
+        remaining,
         notice,
         error,
     }

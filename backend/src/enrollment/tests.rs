@@ -1736,10 +1736,7 @@ mod ui {
         let expect_inline = |status: StatusCode, body: String, message: &str| {
             assert_eq!(status, StatusCode::CONFLICT, "{message}: {body}");
             assert!(body.contains(message), "inline feedback missing: {message}");
-            assert!(
-                body.contains("<h1>My registration</h1>"),
-                "full page rendered"
-            );
+            assert!(body.contains("<h1>My courses</h1>"), "full page rendered");
         };
 
         // Closed window.
