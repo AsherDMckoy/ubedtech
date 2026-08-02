@@ -88,8 +88,10 @@
   --radius-lg: 18px;
   --radius-pill: 999px;
 
-  /* layout: the centered comfortable measure every screen shell uses */
-  --measure: 1080px;
+  /* layout: the centered measure every screen shell uses — wide enough
+     that a desktop sees its cards, tables, and rails without scrolling
+     for information that could have fit (2026-08-02: 1080 → 1320). */
+  --measure: 1320px;
 
   /* spacing scale — every gap/padding/margin steps on this */
   --space-1: 4px;

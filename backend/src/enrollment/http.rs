@@ -97,7 +97,9 @@ fn cal_month(
                 .any(|e| e.starts_on <= date && date <= e.ends_on),
         }));
     }
-    while !cells.len().is_multiple_of(7) {
+    // Always six week rows (42 cells): every month the smart calendar
+    // can jump to renders the same height — no layout jump on hover.
+    while cells.len() < 42 {
         cells.push(None);
     }
     CalMonth {

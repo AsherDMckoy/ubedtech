@@ -583,7 +583,9 @@ fn month_grid(
             items: day_items(date, term, meetings, events),
         }));
     }
-    while !cells.len().is_multiple_of(7) {
+    // Always six week rows (42 cells): every month renders the same
+    // height, so month navigation never jumps the layout below it.
+    while cells.len() < 42 {
         cells.push(None);
     }
     MonthGrid {
@@ -1171,6 +1173,11 @@ mod month_grid_tests {
             .map(|day| day.day)
             .collect();
         assert_eq!(class_days, vec![14, 21], "only in-term Mondays");
+        assert_eq!(
+            grid.weeks.len(),
+            6,
+            "every month pads to six week rows so the calendar never changes height"
+        );
         let today_marked: Vec<u32> = grid
             .weeks
             .iter()
