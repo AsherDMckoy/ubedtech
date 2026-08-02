@@ -72,8 +72,13 @@
 
 /* The ramp values are allowed here: this is a brand-gradient surface, the
    same carve-out the logo mark uses (tokens.css header note). Identical in
-   both themes on purpose — the front door is the brand, not the theme. */
+   both themes on purpose — the front door is the brand, not the theme.
+   Photo rotation (ADR-18): fingerprinted same-origin jpgs crossfade under
+   the brand overlay; the gradient background stays as the base layer so
+   the column is finished before (or without) any photo byte arriving. */
 .auth-visual {
+  position: relative;
+  overflow: hidden;
   display: flex;
   align-items: flex-end;
   padding: var(--space-6);
@@ -81,6 +86,51 @@
     radial-gradient(120% 90% at 85% 8%, rgba(212, 160, 23, 0.16), transparent 55%),
     radial-gradient(140% 110% at 12% 92%, rgba(115, 75, 179, 0.55), transparent 60%),
     linear-gradient(150deg, var(--purple-800), var(--purple-900));
+}
+
+.auth-photo {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  opacity: 0;
+  animation: auth-cycle 36s linear infinite;
+}
+
+/* Reduced motion kills the animation (global rule); the first photo's
+   base opacity keeps the column a finished static composition. */
+.auth-photo-1 { opacity: 1; background-image: url("../images/auth-01.jpg"); }
+.auth-photo-2 { animation-delay: 6s;  background-image: url("../images/auth-02.jpg"); }
+.auth-photo-3 { animation-delay: 12s; background-image: url("../images/auth-03.jpg"); }
+.auth-photo-4 { animation-delay: 18s; background-image: url("../images/auth-04.jpg"); }
+.auth-photo-5 { animation-delay: 24s; background-image: url("../images/auth-05.jpg"); }
+.auth-photo-6 { animation-delay: 30s; background-image: url("../images/auth-06.jpg"); }
+
+/* Six slots × 6s: fade in over 1s, hold ~5s, fade out as the next slot
+   fades in (16.7% of 36s per slot; 2.8% ≈ 1s of crossfade). */
+@keyframes auth-cycle {
+  0% { opacity: 0; }
+  2.8% { opacity: 1; }
+  16.7% { opacity: 1; }
+  19.5% { opacity: 0; }
+  100% { opacity: 0; }
+}
+
+/* The brand overlay rides above the photos, below the tagline — the
+   same gradient recipe, translucent, keeping text AA-readable on any
+   photo. */
+.auth-visual::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 90% at 85% 8%, rgba(212, 160, 23, 0.14), transparent 55%),
+    linear-gradient(150deg, rgba(56, 35, 95, 0.55), rgba(42, 26, 74, 0.82));
+}
+
+.auth-tagline {
+  position: relative;
+  z-index: 1;
 }
 
 .auth-inst {

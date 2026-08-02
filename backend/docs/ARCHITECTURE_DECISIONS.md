@@ -357,3 +357,24 @@ repository, and CLAUDE.md §6 requires docs to be committed with code.
   budget test, `templates_carry_no_images_or_csp_violations` (raster art
   stays impossible). Implementation lands in a following session; this ADR
   amends the constitution first so screens follow the doc, not the reverse.
+
+## ADR-18: sign-in photo rotation — ambient imagery on the front door only
+
+- **Original:** the sign-in visual column is a pure-CSS brand gradient;
+  FRONTEND.md rejects raster imagery on workflow pages, and the ADR-17
+  motion vocabulary has no ambient class.
+- **Replacement (2026-08-02):** the visual column crossfades six
+  self-hosted, fingerprinted, ~150 KB jpgs (36 s CSS-only cycle) under a
+  translucent brand-gradient overlay that keeps the tagline readable.
+  Current photos are placeholders awaiting consented campus photography —
+  swap the files in `frontend/images/`, rebuild, done.
+- **Scope guard:** the sign-in visual column is the ONLY sanctioned home
+  for ambient motion and raster imagery — it is a brand surface, not a
+  workflow page; the form column renders complete before any photo byte
+  arrives (gradient base layer, no layout shift). Reduced motion shows
+  the first photo at rest. Workflow pages remain raster-free
+  (`templates_carry_no_images_or_csp_violations` still enforces `<img>`
+  absence everywhere).
+- **Proof:** axe over the rendered login page; the CSP/no-images sweep;
+  asset budgets unaffected (photos are separate fingerprinted files, not
+  CSS/JS bytes).

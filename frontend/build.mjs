@@ -14,7 +14,7 @@ await build({
   outdir: "dist",
   entryNames: "[name]-[hash]",
   assetNames: "[name]-[hash]",
-  loader: { ".woff2": "file" },
+  loader: { ".woff2": "file", ".jpg": "file" },
   logLevel: "info",
 });
 
