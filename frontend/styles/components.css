@@ -73,9 +73,8 @@
 /* The ramp values are allowed here: this is a brand-gradient surface, the
    same carve-out the logo mark uses (tokens.css header note). Identical in
    both themes on purpose — the front door is the brand, not the theme.
-   Photo rotation (ADR-18): fingerprinted same-origin jpgs crossfade under
-   the brand overlay; the gradient background stays as the base layer so
-   the column is finished before (or without) any photo byte arriving. */
+   Pure CSS: no image request, no layout shift (photo rotation retired,
+   ADR-18). */
 .auth-visual {
   position: relative;
   overflow: hidden;
@@ -86,64 +85,6 @@
     radial-gradient(120% 90% at 85% 8%, rgba(212, 160, 23, 0.16), transparent 55%),
     radial-gradient(140% 110% at 12% 92%, rgba(115, 75, 179, 0.55), transparent 60%),
     linear-gradient(150deg, var(--purple-800), var(--purple-900));
-}
-
-.auth-photo {
-  position: absolute;
-  inset: 0;
-  background-size: cover;
-  background-position: center;
-  opacity: 0;
-  transition: opacity var(--dur-base) var(--ease-enter);
-}
-
-.auth-photo.show {
-  opacity: 1;
-}
-
-/* JS-off/static fallback: the first photo is baked into CSS; the arrow
-   enhancement pages the full generated set (photos.gen.js) through the
-   two layers. */
-.auth-photo-1 {
-  background-image: url("../images/auth-01.jpg");
-}
-
-/* Photo pager arrows — unhidden by the enhancement, above the overlay. */
-.auth-nav {
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  z-index: 1;
-  width: 40px;
-  height: 40px;
-  border: 0;
-  border-radius: var(--radius-pill);
-  background: rgba(42, 26, 74, 0.55);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-enter);
-}
-
-.auth-nav:hover {
-  background: rgba(42, 26, 74, 0.85);
-}
-
-.auth-nav-prev { left: var(--space-4); }
-.auth-nav-next { right: var(--space-4); }
-
-/* The brand overlay rides above the photos, below the tagline — the
-   same gradient recipe, translucent, keeping text AA-readable on any
-   photo. */
-.auth-visual::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(120% 90% at 85% 8%, rgba(212, 160, 23, 0.14), transparent 55%),
-    linear-gradient(150deg, rgba(56, 35, 95, 0.55), rgba(42, 26, 74, 0.82));
 }
 
 .auth-tagline {

@@ -3,21 +3,9 @@
 // output names, write to dist/. dist/ is committed so the backend build and
 // tests never invoke Node (ADR-12).
 import { build } from "esbuild";
-import { readdirSync, rmSync, writeFileSync } from "node:fs";
+import { readdirSync, rmSync } from "node:fs";
 
 rmSync("dist", { recursive: true, force: true });
-
-// Generated manifest of the sign-in photos (ADR-18): every jpg in
-// images/, as fingerprinted URLs the login arrows page through. A photo
-// is only fetched when shown. Regenerated on every build — gitignored.
-const jpgs = readdirSync("images")
-  .filter((name) => name.endsWith(".jpg"))
-  .sort();
-writeFileSync(
-  "js/photos.gen.js",
-  jpgs.map((name, i) => `import p${i} from "../images/${name}";`).join("\n") +
-    `\nexport default [${jpgs.map((_, i) => `p${i}`).join(",")}];\n`,
-);
 
 await build({
   entryPoints: ["js/app.js", "styles/app.css"],
@@ -26,10 +14,9 @@ await build({
   outdir: "dist",
   entryNames: "[name]-[hash]",
   assetNames: "[name]-[hash]",
-  loader: { ".woff2": "file", ".jpg": "file" },
-  // Emitted asset URLs must be absolute: the JS photo manifest is used
-  // from /ui/login, where a relative "./auth-….jpg" resolves against the
-  // page URL and 404s. The backend serves all of dist under /assets/.
+  loader: { ".woff2": "file" },
+  // Emitted asset URLs are absolute — the backend serves all of dist
+  // under /assets/ regardless of the page URL they're referenced from.
   publicPath: "/assets",
   logLevel: "info",
 });

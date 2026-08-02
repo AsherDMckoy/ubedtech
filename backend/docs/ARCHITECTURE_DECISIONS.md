@@ -378,3 +378,9 @@ repository, and CLAUDE.md §6 requires docs to be committed with code.
 - **Proof:** axe over the rendered login page; the CSP/no-images sweep;
   asset budgets unaffected (photos are separate fingerprinted files, not
   CSS/JS bytes).
+- **Retired (2026-08-02, same day):** the placeholder set was removed at
+  the owner's request after review; the visual column reverted to the
+  original pure-CSS gradient. The scope guard stands: if consented campus
+  photography ever lands, THIS surface (and only this surface) is where
+  it goes — restore the two-layer crossfade + build-time manifest from
+  git history (commit `0d11130` and earlier).

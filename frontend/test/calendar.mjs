@@ -77,30 +77,6 @@ console.log("ok   calendar jump (focus in/out, span highlight, restore)");
   console.log("ok   schedule class-date highlight (focus in/out, clear)");
 }
 
-// Sign-in photo pager: arrows unhide with JS and page the set through
-// the two layers.
-{
-  const signinHtml = readFileSync("test/pages/signin.html", "utf8");
-  const signin = new JSDOM(signinHtml, { runScripts: "outside-only", url: "http://localhost/ui/login" });
-  signin.window.eval(script);
-  const doc = signin.window.document;
-  const next = doc.querySelector("[data-photo-next]");
-  const prev = doc.querySelector("[data-photo-prev]");
-  assert(next && prev, "signin renders both pager arrows");
-  assert(!next.hidden && !prev.hidden, "enhancement unhides the arrows");
-  const layers = [...doc.querySelectorAll(".auth-photo")];
-  assert(layers.length === 2, "two crossfade layers");
-  next.dispatchEvent(new signin.window.MouseEvent("click", { bubbles: true }));
-  assert(
-    layers[1].style.backgroundImage.includes("/assets/auth-02"),
-    `next must use an absolute /assets/ URL (relative resolves against /ui/login and 404s), got: ${layers[1].style.backgroundImage}`,
-  );
-  assert(layers[1].classList.contains("show") && !layers[0].classList.contains("show"), "layers swapped roles");
-  prev.dispatchEvent(new signin.window.MouseEvent("click", { bubbles: true }));
-  assert(layers[0].style.backgroundImage.includes("auth-01"), "prev returns to the first photo");
-  console.log("ok   sign-in photo pager (arrows unhide, next/prev, layer swap)");
-}
-
 // The bundles' always-on polling intervals keep the jsdom event loop
 // alive; every assertion above has already run.
 process.exit(0);

@@ -5,11 +5,9 @@
 {% block rail %}{% endblock %}
 {% block content %}
   {# Split front door: the form column is the page — it renders and works
-     with nothing else loaded. The visual column layers a photo rotation
-     (self-hosted, fingerprinted — placeholder shots until consented
-     campus photography lands) under the brand-gradient overlay that
-     keeps the tagline readable. CSS-only crossfade; reduced motion shows
-     the first photo at rest. #}
+     with nothing else loaded. The visual column is a pure CSS brand
+     gradient (no image request, no layout shift): photo rotation was
+     retired with ADR-18 until consented campus photography lands. #}
   <div class="auth-split">
     <section class="auth-form" aria-label="Sign in">
       <div class="wrap-auth">
@@ -32,19 +30,7 @@
         </form>
       </div>
     </section>
-    <aside class="auth-visual" data-photo-nav>
-      {#- Two ping-pong layers: the first carries a CSS background as the
-          JS-off/static fallback; the enhancement pages the full photo
-          set through them (arrows unhide with JS). Photos fetch only
-          when shown. -#}
-      <div class="auth-photo auth-photo-1 show" aria-hidden="true"></div>
-      <div class="auth-photo" aria-hidden="true"></div>
-      <button type="button" class="auth-nav auth-nav-prev" data-photo-prev aria-label="Previous photo" hidden>
-        <svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M165.66,202.34a8,8,0,0,1-11.32,11.32l-80-80a8,8,0,0,1,0-11.32l80-80a8,8,0,0,1,11.32,11.32L91.31,128Z"/></svg>
-      </button>
-      <button type="button" class="auth-nav auth-nav-next" data-photo-next aria-label="Next photo" hidden>
-        <svg width="18" height="18" viewBox="0 0 256 256" fill="currentColor" aria-hidden="true"><path d="M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z"/></svg>
-      </button>
+    <aside class="auth-visual">
       <div class="auth-tagline">
         <p class="auth-inst">University of Belize</p>
         <p class="auth-line">Registration, records, and results — in one place.</p>
