@@ -25,7 +25,11 @@
   grid-template-columns: var(--rail-w) 1fr;
 }
 
-.shell-bare {
+/* Doubled selector: a bare shell (sign-in, locked) has no rail, so the
+   ub_rail=collapsed cookie's .shell.rail-collapsed rule above must never
+   shrink its only column — that squeezed the whole sign-in page into a
+   48px strip for anyone who had collapsed the rail before signing out. */
+.shell.shell-bare {
   grid-template-columns: 1fr;
 }
 
