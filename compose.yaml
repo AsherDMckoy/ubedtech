@@ -1,0 +1,42 @@
+# One-command demo stack (podman or docker):
+#   ./demo.sh          — build, launch, wait, smoke-check, print credentials
+#   podman compose up --build -d      (equivalent, without the smoke check)
+#
+# Two services: PostgreSQL and the app. The app entrypoint migrates and
+# seeds the full demo dataset on first start (idempotent afterwards).
+# `podman compose down -v` wipes the database for a fresh stage.
+name: ubedtech-demo
+
+services:
+  db:
+    image: docker.io/library/postgres:16-alpine
+    environment:
+      POSTGRES_USER: ub
+      # Local single-machine demo stack; the port is not published.
+      POSTGRES_PASSWORD: ub-demo
+      POSTGRES_DB: ubedtech
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ub -d ubedtech"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  app:
+    build:
+      context: .
+      dockerfile: backend/Containerfile
+    environment:
+      DATABASE_URL: postgresql://ub:ub-demo@db:5432/ubedtech
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    # Belt and braces alongside the entrypoint's own retry loop: if the
+    # app still loses the startup race, compose relaunches it.
+    restart: on-failure
+
+volumes:
+  pgdata:

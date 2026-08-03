@@ -41,6 +41,25 @@ overrides real environment variables. See `.env.example` for the full list.
    `institution_license` row exists (fail closed).
 5. Spawn document worker and readiness prober; serve HTTP.
 
+## Containers (demo stack)
+
+`./demo.sh` (repo root) builds and launches the app + PostgreSQL with
+podman or docker via `compose.yaml` + `backend/Containerfile`, waits,
+smoke-checks a real sign-in, and prints the demo credentials.
+`./demo.sh fresh` wipes the volume for a known-good stage;
+`./demo.sh down` stops the stack.
+
+- The image carries the release binary, the committed `frontend/dist`
+  (`APP_FRONTEND_DIST=/app/dist`), and a writable `/app/var/documents`;
+  it runs as a non-root user.
+- The entrypoint runs `backend seed-demo` BEFORE serving — order is
+  load-bearing: startup fails closed without an `institution_license`
+  row, and seed-demo (which self-applies `seed.sql` on an empty
+  database) is what creates it. The seed is idempotent, so restarts are
+  a fast no-op.
+- `seed-demo` refuses `APP_ENV=production`; this stack is for demos and
+  development, not deployment.
+
 ## First platform administrator (bootstrap)
 
 The `platform_licensing_admin` role cannot be granted through the HTTP API

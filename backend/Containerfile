@@ -1,0 +1,27 @@
+# Demo/deploy image (podman or docker; build context = repo root):
+#   podman build -f backend/Containerfile -t ubedtech .
+# Two stages: a Rust builder, and a slim runtime with just the binary,
+# the committed frontend dist, and a writable document-storage dir.
+# dist/ is committed (ADR-12), so the image build never needs Node.
+
+FROM docker.io/library/rust:1-bookworm AS build
+WORKDIR /src
+COPY backend backend
+COPY frontend/dist frontend/dist
+WORKDIR /src/backend
+RUN cargo build --release --locked
+
+FROM docker.io/library/debian:bookworm-slim
+RUN useradd --system --home /app --shell /usr/sbin/nologin ubedtech \
+    && mkdir -p /app/var/documents \
+    && chown -R ubedtech:ubedtech /app
+WORKDIR /app
+COPY --from=build /src/backend/target/release/backend /app/backend
+COPY --from=build /src/frontend/dist /app/dist
+COPY backend/entrypoint.sh /app/entrypoint.sh
+# The binary reads dist at startup; document storage defaults to
+# ./var/documents which resolves under WORKDIR /app.
+ENV APP_FRONTEND_DIST=/app/dist
+USER ubedtech
+EXPOSE 8080
+ENTRYPOINT ["/app/entrypoint.sh"]

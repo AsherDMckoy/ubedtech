@@ -6,20 +6,34 @@ cast, and recovery notes. Written to be read at the podium.
 
 ---
 
-## 1. Before the demo (10 minutes, once)
+## 1. Before the demo (one command)
+
+Containers (podman or docker — the demo-ready path):
 
 ```sh
-cd backend
-cargo build --release
+./demo.sh            # build + launch app and PostgreSQL, wait, smoke-check,
+                     # print credentials — ready at http://127.0.0.1:8080
+```
+
+`./demo.sh fresh` wipes the database and relaunches (known-good stage in
+about a minute — the first build takes longer). `./demo.sh down` stops
+everything. Stack definition: `compose.yaml` + `backend/Containerfile`;
+the app container migrates and seeds the full demo dataset by itself on
+first start.
+
+Bare metal (local PostgreSQL, no containers):
+
+```sh
+cd backend && cargo build --release
 DATABASE_URL=postgresql://<user>@localhost:5432/ubedtechdb \
-    ./target/release/backend seed-demo        # idempotent demo dataset
+    ./target/release/backend seed-demo        # migrates + seeds, idempotent
 DATABASE_URL=postgresql://<user>@localhost:5432/ubedtechdb \
     ./target/release/backend                  # serves http://127.0.0.1:8080
 ```
 
 Checklist:
 
-- [ ] `http://127.0.0.1:8080/ui/login` renders the split front door.
+- [ ] `./demo.sh` printed READY (it already smoke-checked a real sign-in).
 - [ ] Sign in as `demo.student` — dashboard shows classes + deadline.
 - [ ] Sign out. Zoom the browser so the last row is comfortable (90–100%).
 - [ ] Close other tabs; the nav swap keeps the demo fast, but a clean
@@ -28,9 +42,9 @@ Checklist:
 **Resetting between runs:** the dataset is idempotent — anything you
 change during a run (a registration, a drop, a draft grade, a released
 hold) persists. Either demo the changes forward (register a *different*
-open section next run) or re-run `seed-demo` and re-check the two boxes
-above. Grades you publish stay published; pick a different not-entered
-student each run.
+open section next run) or `./demo.sh fresh` (bare metal: drop the
+database and re-run `seed-demo`). Grades you publish stay published;
+pick a different not-entered student each run.
 
 ## 2. Credentials
 
@@ -164,7 +178,8 @@ publishing, documents — every action audited.*
   run took the seat — use any other open section, or re-run `seed-demo`.
 - **Login page looks wrong:** it can't be the rail cookie anymore (fixed
   and pinned); check the server is actually running: `ss -tlnp | grep 8080`.
-- **Server died:** restart the command from §1; sessions survive in the
-  database, the browser stays signed in.
-- **Everything on fire:** `seed-demo` + restart = known-good stage in
-  under a minute.
+- **Server died:** containers restart themselves (`restart: on-failure`);
+  bare metal, rerun the serve command from §1. Sessions survive in the
+  database — the browser stays signed in either way.
+- **Everything on fire:** `./demo.sh fresh` = known-good stage in about
+  a minute.

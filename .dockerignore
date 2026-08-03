@@ -1,0 +1,8 @@
+# Build context = repo root; keep it tiny. Read by both podman and
+# docker. backend/target alone is >10 GB — never ship it to the daemon.
+backend/target
+backend/var
+frontend/node_modules
+frontend/test
+.git
+*.png

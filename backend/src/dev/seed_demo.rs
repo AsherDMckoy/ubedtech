@@ -535,11 +535,12 @@ pub async fn seed(
             .fetch_optional(pool)
             .await?;
     if demo_core.is_none() {
-        return Err(AppError::Validation(
-            "seed.sql has not been applied (demo.student missing); \
-             run `psql -f src/dev/seed.sql` first"
-                .into(),
-        ));
+        // Self-contained bring-up: apply the core bootstrap ourselves
+        // (containers have no psql). seed.sql is idempotent, so racing a
+        // manual apply is harmless.
+        sqlx::raw_sql(include_str!("seed.sql"))
+            .execute(pool)
+            .await?;
     }
 
     let mut rng = StdRng::seed_from_u64(2026);
@@ -1889,10 +1890,9 @@ mod tests {
             .connect_with(connect_opts)
             .await
             .expect("seed test pool connects");
-        sqlx::raw_sql(include_str!("seed.sql"))
-            .execute(&pool)
-            .await
-            .expect("seed.sql applies");
+        // Deliberately NOT applying seed.sql here: a bare migrated
+        // database is the container bring-up path — seed() must apply
+        // the core bootstrap itself.
 
         let mut config = crate::config::AppConfig::from_env().expect("test env config");
         config.document_storage_path = std::env::temp_dir().join("seed-demo-test-docs");
