@@ -40,7 +40,8 @@ seeded FALL-2026 term with add/drop open.
    a class card and its remaining meeting dates light gold on the month
    calendar aside; click a marked day for its detail; month prev/next
    swap in place.
-7. **Grades / History.** Published grades only; term-by-term history.
+7. **Grades.** One page: this term's published grades on top, the full
+   term-by-term academic history and transcript snapshots beneath.
 8. **Documents.** Request an official transcript; the row polls honestly
    (pending → processing → ready) — the seeded request from Dana is
    already in the officer's queue. Print-ready unofficial transcript and

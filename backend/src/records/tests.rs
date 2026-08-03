@@ -1308,12 +1308,13 @@ mod ui {
 
         // Student now sees the published grade, and the history page shows
         // the record with no snapshots yet.
-        let (_, body) = get(&app, &student, "/ui/grades").await;
-        assert!(body.contains("B+"));
-        let (status, history) = get(&app, &student, "/ui/history").await;
+        let (status, body) = get(&app, &student, "/ui/grades").await;
         assert_eq!(status, StatusCode::OK);
-        assert!(history.contains("B+") && history.contains("published"));
-        assert!(history.contains("No transcript snapshots"));
+        assert!(body.contains("B+"));
+        // History is merged into the grades page: the published record
+        // and the snapshots section render beneath this term's grades.
+        assert!(body.contains("published"));
+        assert!(body.contains("No transcript snapshots"));
 
         // Schedule: the enrolled section's meeting lands on its weekday.
         sqlx::query(

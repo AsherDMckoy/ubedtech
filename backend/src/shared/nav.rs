@@ -25,7 +25,6 @@ const STUDENT: &[NavItem] = &[
     item("/ui/registration", "My courses", "registration"),
     item("/ui/schedule", "Schedule", "schedule"),
     item("/ui/grades", "Grades", "grades"),
-    item("/ui/history", "History", "history"),
     item("/ui/documents", "Documents", "documents"),
 ];
 

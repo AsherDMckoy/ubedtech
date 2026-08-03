@@ -9,7 +9,7 @@
     {% if let Some(term) = term %}
       <p class="sub">{{ term.name }} · grades appear here as your lecturers publish them — a mid-term entry is your current standing, not a final result</p>
       {% if grades.is_empty() %}
-        {% call ui::empty_state("No published grades yet this term.", "/ui/history", "See your academic history") %}{% endcall %}
+        {% call ui::empty_state("No published grades yet this term.", "", "") %}{% endcall %}
       {% else %}
         <div class="card card-flush table-wrap">
           <table>
@@ -37,6 +37,52 @@
       {% call ui::alert("accent", "There is no active term right now.") %}{% endcall %}
     {% endif %}
 
-    <p><a href="/ui/history">Full academic history</a></p>
+    {# The full published record (formerly its own History page). #}
+    <h2 class="section-h">Academic history</h2>
+    {% if courses.is_empty() %}
+      <p class="day-empty">No published grades on record yet.</p>
+    {% else %}
+      <div class="card card-flush table-wrap">
+        <table>
+          <caption>Published record (amended grades show their corrected value)</caption>
+          <thead>
+            <tr>
+              <th scope="col">Term</th>
+              <th scope="col">Course</th>
+              <th scope="col" class="num">Credits</th>
+              <th scope="col" class="num">Grade</th>
+              <th scope="col">State</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in courses %}
+              <tr>
+                <td>{{ row.term_name }} ({{ row.term_code }})</td>
+                <td>{{ row.course_code }} · {{ row.course_title }}</td>
+                <td class="num">{{ row.credit_hours }}</td>
+                <td class="num">{{ row.grade_code }}</td>
+                <td>{% call ui::badge(row.state.as_str()) %}{% endcall %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endif %}
+
+    <h2 class="section-h">Transcript snapshots</h2>
+    {% if snapshots.is_empty() %}
+      <p class="day-empty">No transcript snapshots have been taken.</p>
+    {% else %}
+      <ul>
+        {% for snapshot in snapshots %}
+          <li>Version {{ snapshot.snapshot_version }} — {{ snapshot.created_at.format("%b %-d, %Y") }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    <p class="card-foot">
+      <a href="/ui/transcript">Unofficial transcript</a> ·
+      <a href="/ui/proof-of-enrollment">Proof of enrollment</a>
+    </p>
   </div>
 {% endblock %}

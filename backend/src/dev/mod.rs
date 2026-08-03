@@ -59,10 +59,6 @@ pub fn render_pages(out_dir: &str) -> std::io::Result<()> {
                 render("grades", crate::records::http::sample_grades_html()),
             ),
             (
-                "history.html",
-                render("history", crate::records::http::sample_history_html()),
-            ),
-            (
                 "transcript.html",
                 render("transcript", crate::records::http::sample_transcript_html()),
             ),

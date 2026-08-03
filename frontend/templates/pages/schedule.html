@@ -34,7 +34,7 @@
                     {% for m in day.meetings %}
                       {#- Hover/focus lights this class's remaining meeting
                           dates gold on the month calendar aside. -#}
-                      <li class="tl-item tl-c{{ day.col }} tl-r{{ m.row }} tl-s{{ m.span }}{% if m.half %} tl-half{% endif %}{% if m.right %} tl-right{% endif %}"{% if !day.dates.is_empty() %} tabindex="0" data-dates="{{ day.dates }}"{% endif %}>
+                      <li class="tl-item tl-c{{ day.col }} tl-r{{ m.row }} tl-s{{ m.span }}"{% if !day.dates.is_empty() %} tabindex="0" data-dates="{{ day.dates }}"{% endif %}>
                         <span class="tl-time">{{ m.time }}</span>
                         <span class="tl-course">{{ m.course_code }}</span>
                         <span class="tl-title">{{ m.course_title }}</span>

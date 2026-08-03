@@ -612,8 +612,9 @@ struct DayColumn {
 }
 
 /// A meeting as a positioned timeline card: `row`/`span` are 15-minute
-/// slots below the day-header row (row 2 = the window's first slot);
-/// overlapping same-day meetings split the column in half.
+/// slots below the day-header row (row 2 = the window's first slot).
+/// Cards are always full column width; a later overlapping meeting
+/// paints on top (DOM order), like any calendar app.
 struct TlMeeting {
     time: String,
     course_code: String,
@@ -621,8 +622,6 @@ struct TlMeeting {
     detail: String,
     row: usize,
     span: usize,
-    half: bool,
-    right: bool,
 }
 
 /// An hour label in the timeline's time gutter (spans 4 slot rows).
@@ -696,7 +695,6 @@ fn day_columns(
             dates: remaining(index as u32 + 1),
         })
         .collect();
-    let mut prev_end: Vec<Option<usize>> = vec![None; days.len()];
     for meeting in meetings {
         // ISO day 1-7; an out-of-range row is broken data — clamp rather
         // than panic on a student's schedule.
@@ -705,14 +703,6 @@ fn day_columns(
             continue;
         };
         let (from, to) = (minutes(meeting.starts_at), minutes(meeting.ends_at));
-        // ponytail: overlaps split the column in half — good for a pair,
-        // a triple-booked slot stacks; render columns per cluster if a
-        // real roster ever needs it.
-        let overlaps = prev_end[index].is_some_and(|end| from < end);
-        if overlaps && let Some(prev) = day.meetings.last_mut() {
-            prev.half = true;
-        }
-        prev_end[index] = Some(to.max(prev_end[index].unwrap_or(0)));
         let mut detail = format!("Sec {}", meeting.section_code);
         if let Some(room) = &meeting.room_code {
             detail.push_str(&format!(" · Rm {room}"));
@@ -728,8 +718,6 @@ fn day_columns(
             detail,
             row: row_of(from),
             span: to.saturating_sub(from).div_ceil(15).clamp(1, 32),
-            half: overlaps,
-            right: overlaps,
         });
     }
     let hours = (start_hour..end_hour)
@@ -887,11 +875,16 @@ pub fn sample_schedule_html() -> Result<String, askama::Error> {
     .render()
 }
 
+/// Grades and academic history are ONE page: this term's published
+/// grades on top, the full published record beneath (the History nav
+/// item merged in here, 2026-08-02).
 #[derive(Template)]
 #[template(path = "pages/grades.html")]
 struct StudentGradesPage {
     term: Option<TermSummary>,
     grades: Vec<StudentGradeRow>,
+    courses: Vec<HistoryRow>,
+    snapshots: Vec<SnapshotSummary>,
 }
 
 /// Sample term used by the no-database axe renders below.
@@ -922,14 +915,6 @@ pub fn sample_grades_html() -> Result<String, askama::Error> {
             grade_code: "B+".into(),
             published_at: Some(chrono::Utc::now()),
         }],
-    }
-    .render()
-}
-
-/// Renders the history page with representative data and no database, for
-/// the frontend axe harness (`render-pages`).
-pub fn sample_history_html() -> Result<String, askama::Error> {
-    HistoryPage {
         courses: vec![HistoryRow {
             term_code: "FA26".into(),
             term_name: "Fall 2026".into(),
@@ -952,31 +937,17 @@ pub async fn student_grades_page(
     actor: Actor,
     grades: web::Data<GradeService>,
     academics: web::Data<AcademicsService>,
+    snapshots: web::Data<TranscriptSnapshotService>,
+    pool: web::Data<PgPool>,
 ) -> Result<HttpResponse, AppError> {
     let term = academics.current_term(&actor).await?;
     let rows = match &term {
         Some(term) => grades.student_grades(&actor, term.id).await?,
         None => Vec::new(),
     };
-    let page = StudentGradesPage { term, grades: rows };
-    Ok(html(StatusCode::OK, page.render()?))
-}
-
-#[derive(Template)]
-#[template(path = "pages/history.html")]
-struct HistoryPage {
-    courses: Vec<HistoryRow>,
-    snapshots: Vec<SnapshotSummary>,
-}
-
-#[get("/ui/history")]
-pub async fn history_page(
-    actor: Actor,
-    grades: web::Data<GradeService>,
-    snapshots: web::Data<TranscriptSnapshotService>,
-    pool: web::Data<PgPool>,
-) -> Result<HttpResponse, AppError> {
-    let page = HistoryPage {
+    let page = StudentGradesPage {
+        term,
+        grades: rows,
         courses: grades.academic_history(&actor).await?,
         snapshots: snapshots.own_snapshots(&pool, &actor).await?,
     };
@@ -1190,7 +1161,6 @@ pub fn routes(cfg: &mut web::ServiceConfig) {
         .service(grade_history_page)
         .service(schedule_page)
         .service(student_grades_page)
-        .service(history_page)
         .service(transcript_page)
         .service(proof_of_enrollment_page);
 }

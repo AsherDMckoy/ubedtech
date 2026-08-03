@@ -2402,7 +2402,7 @@ mod ui {
         let app = ui_app!(&pool, fixture.registrar.institution_id);
         let cookie = login(&app, &username, PASSWORD).await;
 
-        for path in ["/ui/grades", "/ui/history", "/ui/schedule", "/ui/dashboard"] {
+        for path in ["/ui/grades", "/ui/schedule", "/ui/dashboard"] {
             let response = actix_test::call_service(
                 &app,
                 actix_test::TestRequest::get()
@@ -2446,7 +2446,6 @@ mod ui {
             "/ui/registration",
             "/ui/schedule",
             "/ui/grades",
-            "/ui/history",
             "/ui/documents",
         ];
         let instructor: &[&str] = &["/ui/instructor"];

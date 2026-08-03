@@ -334,6 +334,16 @@ Table headers over right-aligned columns carry the cell's alignment
 class (`th.num` / `th.c-seats`). Fire-and-forget chrome forms (theme,
 rail) suppress the submit-once busy state — jsdom-pinned.
 
+**Demo-readiness pass (2026-08-02):** `.shell.shell-bare` doubled so the
+ub_rail=collapsed cookie can never crush the sign-in/locked shells (the
+"Firefox login bug"). Timeline cards are always full column width
+(overlaps paint on top in DOM order) and the timeline card stretches
+flush with the calendar/events aside. The theme switcher moved out of
+the account menu to sit beside the avatar (`.page-actions`). `.searchbox`
+is capped at 400px. The History page merged into Grades (one page:
+current term + published record + snapshots); the History nav item and
+`/ui/history` route are gone (`/api/v1/me/history` stays).
+
 ## JavaScript policy
 
 `frontend/js/app.js` bundles Alpine's CSP build (CSP stays

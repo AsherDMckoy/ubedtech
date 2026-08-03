@@ -404,12 +404,23 @@ main > .wrap {
 /* ---------- schedule month calendar (slice F): same visual language as
    the dashboard mini-calendar — today = brand fill, occupied day = the
    acting-color tint; the count number keeps it from being color-alone. */
+/* Columns stretch (no align-items: start): the timeline card runs the
+   full height of the aside, flush with the calendar + events column. */
 .sched-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
   gap: var(--space-4);
-  align-items: start;
   margin-top: var(--space-4);
+}
+
+/* The timeline fills its card so the hour gridlines run to the bottom. */
+.tl-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.tl-card .tl {
+  flex: 1;
 }
 
 .sched-aside,
@@ -651,8 +662,16 @@ textarea {
   border-color: var(--border-danger);
 }
 
+/* Section heading between stacked page sections (grades → history). */
+.section-h {
+  margin-top: var(--space-5);
+}
+
+/* A search field is a control, not a banner: a fixed comfortable width
+   keeps the result counts and hints beneath it on a readable measure. */
 .searchbox {
   position: relative;
+  max-width: 400px;
 }
 
 .searchbox .searchbox-icon {
@@ -914,11 +933,19 @@ details.menu[open] > .menu-panel {
    Reuses animated surface #1. Selectors carry the details prefix to win
    the tie against the generic details.menu rules above. */
 
-details.user-menu {
+.page-actions {
   position: absolute;
   top: var(--space-4);
   right: var(--space-5);
   z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+/* The theme control sits beside the avatar; kill its rail-era margin. */
+.page-actions .theme {
+  margin: 0;
 }
 
 details.user-menu > summary {
@@ -996,19 +1023,6 @@ details.user-menu > .menu-panel {
   text-align: right;
 }
 
-/* The theme segmented control keeps its own compact geometry inside the
-   panel (the panel's generic button rules would stretch it). */
-.user-menu .theme {
-  margin: 0;
-  align-self: start;
-}
-
-.user-menu .theme button {
-  width: 30px;
-  height: 26px;
-  padding: 0;
-  justify-content: center;
-}
 
 /* ---------- status badge (colors come from shared::assets::badge_class —
    one status → one color everywhere). */
@@ -1452,13 +1466,11 @@ tr.just-changed {
   font-size: 10px;
 }
 
-/* Same-day overlap: the pair shares the column. */
-.tl-half {
-  width: calc(50% - 2px);
-}
-
-.tl-right {
-  justify-self: end;
+/* Cards are always full column width (time is the Y axis — width never
+   varies); the shadow separates a later overlapping card painting on
+   top of an earlier one's tail. */
+.tl-item {
+  box-shadow: var(--shadow-sm);
 }
 
 /* Generated timeline placement classes (CSP: no inline styles).
@@ -2115,7 +2127,7 @@ details.drawer[open] > .drawer-panel {
   .rail,
   .topbar,
   .skip-link,
-  .user-menu,
+  .page-actions,
   .no-print {
     display: none !important;
   }
